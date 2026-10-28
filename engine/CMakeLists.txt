@@ -26,7 +26,6 @@ else()
     set(CMAKE_CXX_STANDARD 26)
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # (build.nosync/compile_commands.json: for clang-tidy, engine/tests/tidy.sh)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Windows: the C++ runtime goes inside the .exe (and SDL's libraries), so players don't need to
@@ -281,30 +280,26 @@ if(APPLE)
     target_sources(vnext PRIVATE ${vn_icns} ${vn_icon})
     set_source_files_properties(${vn_icns} ${vn_icon} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 
-    # Sign the whole app (ad hoc), not just the program in it. codesign refuses files carrying
-    # Finder metadata, so strip extended attributes first (and once more if iCloud Drive put some
-    # back on the bundle in between).
+    # Sign the whole app (ad hoc), not just the program in it.
     find_program(VN_CODESIGN codesign)
-    find_program(VN_XATTR xattr)
-    if(VN_CODESIGN AND VN_XATTR)
-        set(vn_sign "${VN_XATTR} -cr \"$1\" && ${VN_CODESIGN} --force --sign - \"$1\"")
+    if(VN_CODESIGN)
         # (a step of its own after the whole target, so it comes after the icon and the rest copied into the app)
         add_custom_target(vnext_signed ALL
-            COMMAND sh -c "{ ${vn_sign}; } 2>/dev/null || { ${vn_sign}; }" sign $<TARGET_BUNDLE_DIR:vnext>
+            COMMAND ${VN_CODESIGN} --force --sign - $<TARGET_BUNDLE_DIR:vnext>
             COMMENT "Signing the app bundle (ad hoc)" VERBATIM)
         add_dependencies(vnext_signed vnext)
     endif()
 else()
     # Elsewhere the window's icon is icon.png next to the program (copied there, and installed with it);
     # on Windows the .exe has it too, for Explorer and the taskbar: icon.ico in the build folder, made
-    # from icon.png on a Mac by tools/make_icon.py.
+    # from icon.png.
     add_custom_command(TARGET vnext POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${vn_icon} $<TARGET_FILE_DIR:vnext>/icon.png VERBATIM)
     install(FILES ${vn_icon} DESTINATION . COMPONENT player)
     if(WIN32)
         set(vn_ico ${CMAKE_CURRENT_BINARY_DIR}/icon.ico)
         if(NOT EXISTS ${vn_ico})
-            message(FATAL_ERROR "The Windows icon is missing: make ${vn_ico} from icon.png with tools/make_icon.py (on a Mac).")
+            message(FATAL_ERROR "The Windows icon is missing: put it (an .ico made from icon.png) at ${vn_ico}.")
         endif()
         enable_language(RC)
         file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/icon.rc CONTENT "1 ICON \"${vn_ico}\"\n")
@@ -312,15 +307,9 @@ else()
     endif()
 endif()
 
-# "cmake --install build.nosync --prefix DIR" puts the player in DIR: with --prefix .. (from
+# "cmake --install build --prefix DIR" puts the player in DIR: with --prefix .. (from
 # this folder) next to the game folder, where it plays the game being made.
 install(TARGETS vnext BUNDLE DESTINATION . COMPONENT player RUNTIME DESTINATION . COMPONENT player)
-if(APPLE)
-    # Keep iCloud Drive from syncing the installed app (it makes "VNext 2.app" copies when the app
-    # is replaced while syncing). Harmless where iCloud isn't used.
-    install(CODE "execute_process(COMMAND xattr -w \"com.apple.fileprovider.ignore#P\" 1 \"\${CMAKE_INSTALL_PREFIX}/VNext.app\" ERROR_QUIET)"
-            COMPONENT player)
-endif()
 
 # The web: the page plays the game folder next to this engine/ folder, if there is one.
 if(EMSCRIPTEN)

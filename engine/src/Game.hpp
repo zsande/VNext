@@ -188,7 +188,7 @@ private:
     cmd::Weather weather_, fading_;       // the weather, and the one fading out
     std::vector<Particle> particles_, fadingParticles_;
     float weatherAlpha_ = 0.0f, fadingAlpha_ = 0.0f, weatherFade_ = 1.0f;
-    std::mt19937 rng_{12345}; // NOLINT(bugprone-random-generator-seed): weather looks the same each time (the checks compare it)
+    std::mt19937 rng_{12345}; // (always the same seed: the weather looks the same each time)
     void spawn(const cmd::Weather& w, std::vector<Particle>& out);
 
     Camera camera_, cameraFrom_, cameraTo_;

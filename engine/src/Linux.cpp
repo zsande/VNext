@@ -3,7 +3,6 @@
 // MPEG-1 (GStreamer: MP4, MOV and M4V, with the plugins for them). Each library is looked for once by
 // its name; without it the player does as on any system without one (System.hpp says what each does;
 // Apple.mm and Windows.cpp are the Mac's and Windows' own). Nothing here needs those libraries' headers.
-#if defined(__linux__) || defined(VN_CHECK_LINUX) // (VN_CHECK_LINUX: compiled elsewhere, to check it)
 #include "System.hpp"
 
 #include <dlfcn.h>
@@ -481,4 +480,3 @@ std::unique_ptr<SystemVideo> SystemVideo::open(const std::string& path, const st
 }
 
 } // namespace vn
-#endif

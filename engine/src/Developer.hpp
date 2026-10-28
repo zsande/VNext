@@ -152,9 +152,6 @@ public:
         bool wide = false;     // its names can be long (a file's, a picture's): never half a row
     };
     [[nodiscard]] static const BoxKind& kindOf(Box box);
-    // The rows of the editor's tables whose box has no kind (and no buttons of its own): none, so the
-    // same box is the same everywhere (the harness checks).
-    [[nodiscard]] static std::vector<std::string> boxesWithoutKind();
     struct Field {
         std::string name;
         std::string value;
@@ -952,7 +949,6 @@ private:
     std::optional<std::string> drawFormatBar(DeveloperUi& ui, const std::string& id, float x, float w, float& y);
     [[nodiscard]] std::vector<ScriptError> missingFiles(const Script& script) const; // lines using pictures, sounds or videos the game lacks
 
-    friend struct ::Harness;
     Engine& engine;       // the player they're the tools of
     DeveloperTools tools; // their state
 };

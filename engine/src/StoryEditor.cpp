@@ -3423,32 +3423,6 @@ const std::string& languageList() {
 
 } // namespace
 
-// The rows of every table whose box has no kind (buttons of its own or not): none, so a padding, a
-// title or a fade is the same box in every form (the harness checks).
-std::vector<std::string> StoryEditor::boxesWithoutKind() {
-    std::vector<std::string> out;
-    auto slots = [&](std::string_view table, std::span<const Slot> rows) {
-        for (const Slot& s : rows)
-            if (s.box == Box::None && !s.rich) out.push_back(std::format("{}: {}", table, s.name));
-    };
-    for (const CommandForm& f : kForms) slots(f.verbs, f.slots);
-    slots("character", kCharacterSlots);
-    for (const DefinitionKind& k : kDefinitionKinds) slots(k.kind, k.slots);
-    auto options = [&](std::string_view table, std::span<const PartOption> rows) {
-        for (const PartOption& o : rows)
-            if (o.box == Box::None && !o.is) out.push_back(std::format("{}: {}", table, o.key));
-    };
-    options("screen", kScreenOptions);
-    options("part", kPartOptions);
-    for (const Setting& s : kSettings)
-        if (!s.name.empty() && s.box == Box::None) out.push_back(std::format("setting: {}", s.name));
-    for (const ActionKind& a : actionKinds())
-        if (!a.detail.empty() && a.box == Box::None) out.push_back(std::format("action: {}", a.verb));
-    for (const StepKind& s : kStepKinds)
-        if (s.box == Box::None) out.push_back(std::format("step: {}", s.key));
-    return out;
-}
-
 // The helpers the other developer files use too (DeveloperShared.hpp declares them, with what they do).
 namespace dev {
 

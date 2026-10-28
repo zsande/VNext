@@ -196,7 +196,6 @@ public:
     [[nodiscard]] const GameFiles& files() const { return files_; }
     ~Audio();
     Audio(const Audio&) = delete;
-    friend struct ::Harness;
     Audio& operator=(const Audio&) = delete;
     Audio(Audio&&) = delete;
     Audio& operator=(Audio&&) = delete;

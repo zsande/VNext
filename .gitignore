@@ -1,9 +1,7 @@
-# Build output (".nosync" keeps iCloud Drive from uploading it), but the player's icons (icon.png, and
-# icon.ico for Windows: tools/make_icon.py), which live there
-engine/build.nosync/*
-!engine/build.nosync/icon.png
-!engine/build.nosync/icon.ico
-build/
+# Build output, but the player's icons (icon.png, and icon.ico for Windows), which live there
+engine/build/*
+!engine/build/icon.png
+!engine/build/icon.ico
 dist/
 # The game being made: it stays on this computer (the repository is the engine)
 /game/

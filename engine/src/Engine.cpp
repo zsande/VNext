@@ -1306,7 +1306,7 @@ void Engine::changeSetting(Settings& s, std::string_view what) {
         const auto gap = rest.find(' ');
         int w = 0, h = 0;
         if (gap != std::string_view::npos) {
-            std::from_chars(rest.data(), rest.data() + gap, w); // NOLINT(bugprone-suspicious-stringview-data-usage): its end is given
+            std::from_chars(rest.data(), rest.data() + gap, w);
             std::from_chars(rest.data() + gap + 1, rest.data() + rest.size(), h);
         }
         if (w > 0 && h > 0) {

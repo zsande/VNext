@@ -511,7 +511,7 @@ IOStreamPtr GameFiles::open(const std::string& path) const {
     if (!data) return nullptr;
     SdlOwned<> memory{SDL_malloc(std::max<std::size_t>(data->size(), 1))};
     if (!memory) return nullptr;
-    std::memcpy(memory.get(), data->data(), data->size()); // NOLINT(bugprone-not-null-terminated-result): bytes, not a string
+    std::memcpy(memory.get(), data->data(), data->size());
     IOStreamPtr io{SDL_IOFromConstMem(memory.get(), data->size())};
     if (!io || !SDL_SetPointerProperty(SDL_GetIOProperties(io.get()), SDL_PROP_IOSTREAM_MEMORY_FREE_FUNC_POINTER, reinterpret_cast<void*>(&SDL_free)))
         return nullptr; // (the stream closed, then `memory` frees the bytes)
@@ -773,7 +773,7 @@ SaveInfo SaveStore::info(std::string_view slot) const {
     return info;
 }
 
-bool SaveStore::write(std::string_view slot, std::string_view state, std::string_view summary, SDL_Surface* thumbnail) { // NOLINT(readability-make-member-function-const): it changes the saves
+bool SaveStore::write(std::string_view slot, std::string_view state, std::string_view summary, SDL_Surface* thumbnail) {
     SDL_Time now = 0;
     SDL_GetCurrentTime(&now);
     std::string flat(summary);
@@ -789,7 +789,7 @@ bool SaveStore::write(std::string_view slot, std::string_view state, std::string
     return true;
 }
 
-void SaveStore::remove(std::string_view slot) { // NOLINT(readability-make-member-function-const): it changes the saves
+void SaveStore::remove(std::string_view slot) {
     SDL_RemovePath(path(slot).c_str());
 }
 
@@ -1115,7 +1115,7 @@ std::string playerPath() {
     if (_NSGetExecutablePath(path.data(), &size) != 0) return {};
     path.resize(std::strlen(path.c_str()));
     struct Free { // (what realpath made)
-        void operator()(char* p) const noexcept { std::free(p); } // NOLINT(cppcoreguidelines-no-malloc): the owner's own free
+        void operator()(char* p) const noexcept { std::free(p); }
     };
     if (const std::unique_ptr<char, Free> real{realpath(path.c_str(), nullptr)}) path = real.get();
     if (const auto at = path.rfind(".app/Contents/MacOS/"); at != std::string::npos) return path.substr(0, at + 4); // (the .app)

@@ -400,7 +400,7 @@ void Developer::fillTranslation(const std::string& id) {
 
 // A translation's file named after its language (japanese.vnscript), and its own pictures, sounds and
 // movies (images/japanese/...) with it.
-void Developer::renameTranslation(const std::string from, const std::string& to) { // NOLINT(performance-unnecessary-value-param): copied, as it's t.id, renamed below
+void Developer::renameTranslation(const std::string from, const std::string& to) { // (from is a copy: it can be t.id, which changes below)
     DeveloperTools& d = tools;
     auto& t = d.translation;
     if (!SDL_RenamePath(translationPath(from).c_str(), translationPath(to).c_str())) return;

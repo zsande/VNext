@@ -222,7 +222,6 @@ class ScreenView {
 public:
     // `tools`: shown in the developer tools (its animations go on while the game stands still under them).
     ScreenView(const ScreenDef& def, Engine& engine, bool tools = false);
-    friend struct ::Harness;
     ScreenView(const ScreenView&) VN_DELETED("its lookups point at it");
     ScreenView& operator=(const ScreenView&) VN_DELETED("its lookups point at it");
     ScreenView(ScreenView&&) VN_DELETED("its lookups point at it");

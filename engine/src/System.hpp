@@ -20,9 +20,6 @@
 #include <utility>
 #include <vector>
 
-// The engine's checks (engine/tests): the classes they look inside name them a friend.
-struct Harness;
-
 // A deleted function with its reason, which the compiler says where it's used: C++26's = delete("...")
 // (a plain = delete where the compiler doesn't have it yet).
 #if defined(__cpp_deleted_function) && __cpp_deleted_function >= 202403L
@@ -48,7 +45,7 @@ struct Canvas {
 template <auto Fn>
 struct SdlDeleter {
     template <class T>
-    void operator()(T* p) const noexcept { if (p) Fn(p); } // NOLINT(cppcoreguidelines-no-malloc): the owner's own free
+    void operator()(T* p) const noexcept { if (p) Fn(p); }
 };
 
 using WindowPtr = std::unique_ptr<SDL_Window, SdlDeleter<SDL_DestroyWindow>>;
@@ -64,7 +61,7 @@ using Owned = std::unique_ptr<std::remove_pointer_t<Ref>, SdlDeleter<Fn>>;
 // What SDL hands back for the caller to SDL_free: bytes (SdlOwned<>), a string (SdlOwned<char>), a list (SdlOwned<char*>).
 struct SdlFree {
     template <class T>
-    void operator()(T* p) const noexcept { SDL_free(static_cast<void*>(p)); } // NOLINT(cppcoreguidelines-no-malloc): the owner's own free
+    void operator()(T* p) const noexcept { SDL_free(static_cast<void*>(p)); }
 };
 template <class T = void>
 using SdlOwned = std::unique_ptr<T, SdlFree>;
@@ -159,7 +156,7 @@ template <class F>
 void withoutThrowing(F&& body) noexcept {
     try {
         std::forward<F>(body)();
-    } catch (...) { // NOLINT(bugprone-empty-catch): what it was doing is dropped (a log line, files picked, a video's sound)
+    } catch (...) { // (what it was doing is dropped: a log line, files picked, a video's sound)
     }
 }
 

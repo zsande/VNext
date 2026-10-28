@@ -16,7 +16,7 @@ Games made with it can have voices and made-up "speech" sounds, videos, timed an
 
 ## How it's made
 
-The idea, the design and the direction of VNext are mine, and every line of its code is written by Claude, an AI made by Anthropic. I decide what VNext should be, test what comes out and say what to change; Claude writes the code and its tests.
+The idea, the design and the direction of VNext are mine, and every line of its code is written by Claude, an AI made by Anthropic. I decide what VNext should be, test what comes out and say what to change; Claude writes the code and tests it.
 
 ## Status
 

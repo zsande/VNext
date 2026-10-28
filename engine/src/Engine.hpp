@@ -36,7 +36,6 @@ class DeveloperUi;
 // engine shows them and carries out what their buttons do.
 class Engine final {
     friend class Developer; // (the developer tools: they change the player's insides; what they only read, they read below)
-    friend struct ::Harness;
 
 public:
     Engine() = default;
@@ -246,7 +245,6 @@ private:
     void ui(const cmd::Ui& c);
     void ask(std::string question, std::function<void()> yes);
     void loadPersistent();
-    [[nodiscard]] const std::set<std::string>& reachedLines() const { return reached_; }
     void savePersistent();
     void quickSave();
     void quickLoad();
