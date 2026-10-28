@@ -18,7 +18,13 @@ if(APPLE)
     enable_language(OBJCXX) # (src/Apple.mm)
 endif()
 
-set(CMAKE_CXX_STANDARD 26)
+# C++26; Visual C++ has no switch by that name yet: CMake gives it /std:c++latest for 23 (all of C++23 and
+# what it has of C++26; what's C++26-only is used where a compiler has it, see VN_DELETED in System.hpp).
+if(MSVC)
+    set(CMAKE_CXX_STANDARD 23)
+else()
+    set(CMAKE_CXX_STANDARD 26)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # (build.nosync/compile_commands.json: for clang-tidy, engine/tests/tidy.sh)
 set(CMAKE_CXX_EXTENSIONS OFF)
