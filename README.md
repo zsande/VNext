@@ -26,6 +26,10 @@ VNext runs on macOS today; Windows and Linux versions are on the way. It is in a
 
 In `engine/`, run `cmake --preset release`, then `cmake --build --preset release`. You need CMake 3.28 or newer and a recent C++ compiler (the automatic builds use Apple Clang, GCC 14 and Visual C++ 2022); SDL3 and the other libraries VNext uses are downloaded the first time. On Linux, first install the development packages listed in [the build workflow](.github/workflows/build.yml), which builds VNext for Windows, Linux and macOS.
 
+## License
+
+VNext is free to use under the [zlib license](LICENSE.txt): you may use it, change it and share it, also in games you sell, as long as you don't claim you wrote it.
+
 ## Supporting VNext
 
 If you'd like to support the project, you can become a member on [Patreon](https://www.patreon.com/vnext). It's entirely optional: following along is free, and nobody is expected to pay.
