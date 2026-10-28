@@ -133,17 +133,17 @@ DeveloperUi::ListEvent DeveloperUi::editList(const std::string& id, const SDL_FR
     scroll = std::clamp(scroll - wheelOver(box) * itemH * 2, 0.0f, std::max(0.0f, static_cast<float>(items.count) * itemH - box.h));
     const bool dragging = d.listDrag && d.listDrag->list == id;
     if (dragging && !d.listDrag->moving && std::abs(d.mouseY - d.listDrag->y) > 6 * k) d.listDrag->moving = true;
-    std::optional<std::size_t> slot; // where it would go (and how far in)
-    std::optional<int> depth;
-    if (dragging && d.listDrag->moving && over(box)) {
-        slot = static_cast<std::size_t>(std::clamp(std::round((d.mouseY - box.y + scroll) / itemH), 0.0f, static_cast<float>(items.count)));
+    std::optional<int> depth; // (how far in it would go)
+    const std::optional<std::size_t> slot = [&]() -> std::optional<std::size_t> { // where it would go
+        if (!dragging || !d.listDrag->moving || !over(box)) return std::nullopt;
+        const auto at = static_cast<std::size_t>(std::clamp(std::round((d.mouseY - box.y + scroll) / itemH), 0.0f, static_cast<float>(items.count)));
         if (items.place) {
-            depth = items.place(d.listDrag->item, *slot, d.mouseX - d.listDrag->x);
-            if (!depth) slot.reset();
-        } else if (*slot == d.listDrag->item || *slot == d.listDrag->item + 1 || (items.drops && !items.drops(d.listDrag->item, *slot))) {
-            slot.reset();
+            depth = items.place(d.listDrag->item, at, d.mouseX - d.listDrag->x);
+            return depth ? std::optional(at) : std::nullopt;
         }
-    }
+        if (at == d.listDrag->item || at == d.listDrag->item + 1 || (items.drops && !items.drops(d.listDrag->item, at))) return std::nullopt;
+        return at;
+    }();
     const Clip clipped(*this, box);
     for (std::size_t i = 0; i < items.count; ++i) {
         const float in = items.indent ? items.indent(i) : 0.0f;

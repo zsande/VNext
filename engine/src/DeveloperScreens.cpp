@@ -1083,10 +1083,13 @@ void Developer::chooseOnScreen(ScreensFrame& f) {
             d.lastList = "parts";
         } else {
             const bool resize = selectedElement && ui.over(handle);
-            std::optional<std::size_t> element = selectedElement ? std::nullopt : hovered;
-            if (selectedElement && (resize || inside(*selectedElement))) element = selectedElement;
-            for (const std::size_t line : chosenLines) // (or another chosen one: they all move)
-                if (const auto el = f.elementOf(line); !element && el && inside(*el)) element = selectedElement;
+            const std::optional<std::size_t> element = [&]() -> std::optional<std::size_t> { // (what the press takes hold of)
+                if (!selectedElement) return hovered;
+                if (resize || inside(*selectedElement)) return selectedElement;
+                for (const std::size_t line : chosenLines) // (or another chosen one: they all move)
+                    if (const auto el = f.elementOf(line); el && inside(*el)) return selectedElement;
+                return std::nullopt;
+            }();
             if (element) {
                 const Element& el = def->elements[*element];
                 const Part p = editor.part(*screen, static_cast<std::size_t>(el.line - 1));

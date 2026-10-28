@@ -34,9 +34,9 @@ bool onCurve(const std::vector<SDL_FPoint>& curve, float x, float y, float k) {
 // An arrow along a curve, with its head at the end: dashed (a call), or thick (chosen, pointed at).
 void drawCurve(SDL_Renderer* r, const std::vector<SDL_FPoint>& curve, SDL_Color c, bool dashed, bool thick, float k) {
     SDL_SetRenderDrawColor(r, c.r, c.g, c.b, c.a);
-    for (const float shift : thick ? std::initializer_list<float>{0.0f, 1.0f} : std::initializer_list<float>{0.0f}) {
+    for (int pass = 0; pass < (thick ? 2 : 1); ++pass) { // (thick: once more, a pixel lower)
         std::vector<SDL_FPoint> line = curve;
-        for (SDL_FPoint& p : line) p.y += shift;
+        for (SDL_FPoint& p : line) p.y += static_cast<float>(pass);
         if (!dashed) SDL_RenderLines(r, line.data(), static_cast<int>(line.size()));
         else
             for (std::size_t s = 0; s + 1 < line.size(); s += 2) SDL_RenderLine(r, line[s].x, line[s].y, line[s + 1].x, line[s + 1].y);

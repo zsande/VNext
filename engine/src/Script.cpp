@@ -470,7 +470,8 @@ private:
             if (lower(value) == choices[i].first) return choices[i].second;
             list += std::format("{}{}", i == 0 ? "" : i + 1 == choices.size() ? " or " : ", ", choices[i].first);
         }
-        return fail(line, std::format("{} can be {}, not '{}'.", what, list, value));
+        error(line, std::format("{} can be {}, not '{}'.", what, list, value));
+        return std::nullopt; // (not fail(): GCC 16 takes its nullopt, copied in, for something unset)
     }
 
     // When a mouth moves (talk= and face_talk=, config talk): yes, voice or no.

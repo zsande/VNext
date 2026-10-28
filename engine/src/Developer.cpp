@@ -313,7 +313,7 @@ void Developer::updateDeveloper() {
 void Developer::listenButton(DeveloperUi& ui, const SDL_FRect& at, const std::string& path, bool small) {
     const bool playing = engine.audio().listening() == path;
     tools.listenShown = tools.listenShown || playing;
-    if (ui.button(at, small ? "" : playing ? "Stop" : "Play", playing, true, small ? 13 : 14)) {
+    if (ui.button(at, small ? "" : playing ? "Stop" : "Play", playing, true, small ? 13.0f : 14.0f)) {
         if (playing) {
             engine.audio().stopListening();
         } else {
