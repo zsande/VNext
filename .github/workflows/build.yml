@@ -3,9 +3,12 @@
 # Download the results from the run's "Artifacts" section.
 name: build
 
+# (not for a change to the README, its pictures or the Sponsor button alone: there's nothing to build)
 on:
   push:
+    paths-ignore: ['README.md', '.github/*.png', '.github/FUNDING.yml']
   pull_request:
+    paths-ignore: ['README.md', '.github/*.png', '.github/FUNDING.yml']
   workflow_dispatch:
 
 jobs:
