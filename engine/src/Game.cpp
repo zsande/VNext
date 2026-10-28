@@ -65,12 +65,10 @@ void Chart::clear() {
 }
 
 // chart.txt:  node ID KIND ORDER [OPTION:OPEN ...]   state ID SAVE   edge FROM TO OPTION
-bool Chart::load(const std::string& path) {
+bool Chart::read(std::string_view saved) {
     nodes_.clear();
     edges_.clear();
-    const auto text = readTextFile(path);
-    if (!text) return false;
-    std::istringstream in(*text);
+    std::istringstream in{std::string(saved)};
     std::string line;
     if (!std::getline(in, line) || line != kMagic) return false;
     while (std::getline(in, line)) {
@@ -100,7 +98,7 @@ bool Chart::load(const std::string& path) {
     return true;
 }
 
-bool Chart::save(const std::string& path) const {
+std::string Chart::text() const {
     std::string out = std::format("{}\n", kMagic);
     for (const Node& n : nodes_) {
         out += std::format("node {} {} {}", n.id, static_cast<int>(n.kind), n.order);
@@ -108,7 +106,7 @@ bool Chart::save(const std::string& path) const {
         out += std::format("\nstate {} {}\n", n.id, flatten(n.state));
     }
     for (const Edge& e : edges_) out += std::format("edge {} {} {}\n", e.from, e.to, e.option);
-    return SDL_SaveFile(path.c_str(), out.data(), out.size());
+    return out;
 }
 
 // ---------------------------------------------------------------------------

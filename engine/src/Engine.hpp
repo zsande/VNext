@@ -246,6 +246,11 @@ private:
     void ask(std::string question, std::function<void()> yes);
     void loadPersistent();
     void savePersistent();
+    // The player's progress (persistent.txt, read.txt, chart.txt): in game.vnext with the saves when the
+    // game is a pack that keeps them (inPack_), else in the player's own folder. Without one, a write
+    // keeps nothing, and that's no failure.
+    [[nodiscard]] std::optional<std::string> readProgress(std::string_view file) const;
+    bool writeProgress(std::string_view file, std::string_view text);
     void quickSave();
     void quickLoad();
     void autosave();
@@ -334,6 +339,7 @@ private:
     std::string contact_;                                 // conversation on the phone
     bool dataFolder_ = false;                             // --data: everything, saves too, goes there
     bool packed_ = false;                                 // the game is a pack (game.vnext): finished
+    bool inPack_ = false;                                 // ...that keeps its players' saves and progress itself
     bool noGame_ = false;                                 // there's no game: just developer mode
     bool storyStarted_ = false;                           // without a title screen, the story's end closes the player
     bool waiting_ = false;                                // developer mode: no game is going on, the developer tools wait for Play

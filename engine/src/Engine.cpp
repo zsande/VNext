@@ -300,15 +300,17 @@ std::string Engine::openGame() {
     return problem;
 }
 
-// The player's own folder for the game (VNext/<save_id>, or --data): settings, things remembered
-// and the log. Without a game: VNext/Developer.
+// The player's own folder for the game (VNext/<save_id>, or --data): settings, the log, and saves and
+// progress, unless the game is a pack that keeps those itself: game.vnext does, unless --data was given
+// or it can't (its file can't be written to, or it's inside an app). Without a game: VNext/Developer.
 void Engine::loadPlayerData() {
     if (!dataFolder_)
         if (const SdlOwned<char> pref{SDL_GetPrefPath("VNext", noGame_ ? "Developer" : config().saveId.c_str())}) prefPath_ = pref.get();
+    inPack_ = packed_ && !dataFolder_ && gameRoot_.find(".app/Contents/Resources/") == std::string::npos && files_.writable();
     settings_ = Settings::load(prefPath_ + "settings.txt", defaultSettings(config()));
-    readLog_ = loadReadLog(prefPath_ + "read.txt");
+    readLog_ = readLogOf(readProgress("read.txt").value_or(""));
     loadPersistent();
-    chart_.load(prefPath_ + "chart.txt");
+    chart_.read(readProgress("chart.txt").value_or(""));
     developer_.loadReached();
 }
 
@@ -387,7 +389,7 @@ Engine::~Engine() {
         if (mode_ == Mode::Game && !splash_ && !opening_) autosave(); // quitting mid-game
         saveSettings();
         savePersistent();
-        saveReadLog(readLog_, prefPath_ + "read.txt");
+        writeProgress("read.txt", readLogText(readLog_));
     } catch (const std::exception& e) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Can't save everything on quitting: %s", e.what());
     }
@@ -590,7 +592,7 @@ std::expected<std::string, std::string> Engine::pack(const std::string& file) co
 }
 
 // Pack the game: next to the game folder, a folder named after the game with game.vnext (the game in
-// one file, which keeps its players' saves in it too) and licenses.txt. To play it, the player goes
+// one file, which keeps its players' saves and progress in it too) and licenses.txt. To play it, the player goes
 // next to game.vnext: VNext.app, VNext.exe or VNext, from VNext's releases on GitHub. One made before
 // goes to the Trash first.
 std::expected<std::string, std::string> Engine::finishGame() const {
@@ -626,17 +628,14 @@ void Engine::configure() {
     SurfacePtr icon{noGame_ || cfg.icon.empty() ? nullptr : IMG_Load_IO(files_.open(gameRoot_ + cfg.icon).release(), true)}; // (a missing file is fine)
     if (!icon) icon.reset(IMG_Load_IO(SDL_IOFromConstMem(kIconPng, sizeof kIconPng), true));
     if (icon) SDL_SetWindowIcon(window_.get(), icon.get());
-    // Saves go in game/saves, or into game.vnext itself for a pack (a finished game keeps its players'
-    // saves in it), unless --data was given or that can't take them (a pack that can't be written to, a
-    // game inside an app): then in the player's own folder.
+    // Saves go into game.vnext for a pack that keeps them (inPack_), in game/saves for a game folder
+    // (unless --data was given, or it's inside an app, or the folder can't take them), else in the
+    // player's own folder.
     std::string saves = prefPath_ + "saves/";
-    GameFiles* pack = nullptr;
-    if (!dataFolder_ && !noGame_ && gameRoot_.find(".app/Contents/Resources/") == std::string::npos &&
-        (packed_ ? files_.writable() : SDL_CreateDirectory((gameRoot_ + "saves").c_str()))) {
+    if (inPack_ || (!dataFolder_ && !packed_ && !noGame_ && gameRoot_.find(".app/Contents/Resources/") == std::string::npos &&
+                    SDL_CreateDirectory((gameRoot_ + "saves").c_str())))
         saves = gameRoot_ + "saves/";
-        if (packed_) pack = &files_;
-    }
-    saves_.setFolder(saves, pack);
+    saves_.setFolder(saves, inPack_ ? &files_ : nullptr);
     assets_->setPixelArt(cfg.pixelArt);
     // The mouse pointer: a picture from images/ (config cursor), or the system's.
     cursor_.reset();
@@ -655,7 +654,8 @@ void Engine::configure() {
     assets_->setMemoryLimit(static_cast<std::size_t>(cfg.imageMemory) * 1024 * 1024);
     saves_.configure(cfg.savePages, cfg.saveSlots);
     hasSave_ = saves_.newest().has_value();
-    if (!noGame_) logInfo("Saves go in '{}'.", pack ? gameRoot_.substr(0, gameRoot_.size() - 1) : saves);
+    if (inPack_) logInfo("Saves and progress go in '{}'.", gameRoot_.substr(0, gameRoot_.size() - 1));
+    else if (!noGame_) logInfo("Saves go in '{}'.", saves);
     applySettings();
 
     overlays_.clear();
@@ -808,7 +808,7 @@ void Engine::leaveStory(bool keepSound) {
     splash_ = opening_ = false;
     if (!keepSound) audio_.stopAll(1.0f);
     game_ = makeGame(); // idle: title buttons can still set variables and play music
-    if (!prefPath_.empty()) saveReadLog(readLog_, prefPath_ + "read.txt");
+    writeProgress("read.txt", readLogText(readLog_));
     closeAll();
     syncShownScreens();
     mode_ = Mode::Title;
@@ -1174,7 +1174,7 @@ void Engine::ui(const cmd::Ui& c) {
         readLog_.clear();
         chart_.clear();
         savePersistent();
-        if (!prefPath_.empty()) saveReadLog(readLog_, prefPath_ + "read.txt");
+        writeProgress("read.txt", readLogText(readLog_));
     }
 }
 
@@ -1232,7 +1232,7 @@ void Engine::changeSetting(Settings& s, std::string_view what) {
 
 void Engine::loadPersistent() {
     persistent_.clear();
-    const auto text = readTextFile(prefPath_ + "persistent.txt");
+    const auto text = readProgress("persistent.txt");
     if (!text) return;
     for (auto&& part : std::views::split(std::string_view(*text), '\n')) {
         const std::string_view line(part.begin(), part.end());
@@ -1242,11 +1242,19 @@ void Engine::loadPersistent() {
 }
 
 void Engine::savePersistent() {
-    if (prefPath_.empty()) return;
     std::string out;
     for (const auto& [name, value] : persistent_) out += std::format("{} {}\n", name, encodeValue(value));
-    if (!SDL_SaveFile((prefPath_ + "persistent.txt").c_str(), out.data(), out.size()))
-        logWarn("Can't save what's kept between games: {}.", SDL_GetError());
+    if (!writeProgress("persistent.txt", out)) logWarn("Can't save what's kept between games: {}.", SDL_GetError());
+}
+
+std::optional<std::string> Engine::readProgress(std::string_view file) const {
+    if (inPack_) return files_.readText(gameRoot_ + "saves/" + std::string(file));
+    return prefPath_.empty() ? std::nullopt : readTextFile(prefPath_ + std::string(file));
+}
+
+bool Engine::writeProgress(std::string_view file, std::string_view text) {
+    if (inPack_) return files_.write(gameRoot_ + "saves/" + std::string(file), text);
+    return prefPath_.empty() || SDL_SaveFile((prefPath_ + std::string(file)).c_str(), text.data(), text.size());
 }
 
 bool Engine::has(RecordKind kind, std::size_t index) const {
@@ -2096,8 +2104,7 @@ SDL_AppResult Engine::iterate() {
         }
     }
     if (game_->takePersistentChanged()) savePersistent();
-    if (chart_.takeChanged() && !prefPath_.empty() && !chart_.save(prefPath_ + "chart.txt"))
-        logWarn("Can't save the flowchart: {}.", SDL_GetError());
+    if (chart_.takeChanged() && !writeProgress("chart.txt", chart_.text())) logWarn("Can't save the flowchart: {}.", SDL_GetError());
     // Screens whose hide_animation= is over: closed now (and the story goes on, if it waited).
     for (std::size_t i = 0; i < leaving_.size();) {
         const ScreenView* v = view(leaving_[i].name);

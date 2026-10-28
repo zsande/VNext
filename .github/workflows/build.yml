@@ -147,7 +147,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > notes.md <<'EOF'
-          Download the zip for your computer, unzip it and open VNext. With no game next to it, it opens in developer mode, where you make one. To play a finished game, put its game.vnext next to VNext: the game keeps its players' saves in that file.
+          Download the zip for your computer, unzip it and open VNext. With no game next to it, it opens in developer mode, where you make one. To play a finished game, put its game.vnext next to VNext: the game keeps its players' saves and progress in that file.
 
           - **Windows** (10 or newer): `VNext-Windows.zip`. The first time, Windows may say it protected your PC: click **More info**, then **Run anyway**.
           - **macOS** (13.3 or newer, Apple silicon and Intel): `VNext-macOS.zip`. The first time, macOS won't open it because Apple hasn't checked it: open **System Settings → Privacy & Security** and click **Open Anyway**.

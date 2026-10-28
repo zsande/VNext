@@ -287,12 +287,12 @@ namespace {
 // the end: for each file its path (2 bytes saying how long, then the letters), where it starts,
 // how long it is in the pack and how long it really is (8 bytes each), how it's packed (1 byte:
 // 0 as it is, 1 compressed) and its check (4 bytes). Numbers are little-endian; the list and the
-// files are scrambled. Files added later (the players' saves, in saves/) go after the list, then a new
-// list, and only then does the header name that one: what's after the list it names is left over.
+// files are scrambled. Files added later (the players' saves and progress, in saves/) go after the list,
+// then a new list, and only then does the header name that one: what's after the list it names is left over.
 constexpr std::string_view kMagic = "VNXPACK1";
 constexpr std::uint64_t kHeaderSize = 32;
 constexpr std::uint64_t kListSeed = 0x564e657874ull; // scrambles the list (a file: where it starts)
-constexpr std::string_view kSavesIn = "saves/";      // where in a pack its players' saves are
+constexpr std::string_view kSavesIn = "saves/";      // where in a pack its players' saves and progress are
 constexpr std::uint64_t kLeftOver = 4ull << 20;      // left over from replaced saves before they're tidied
 
 struct Entry {
@@ -1077,24 +1077,21 @@ bool Settings::save(const std::string& path) const {
     return SDL_SaveFile(path.c_str(), text.data(), text.size());
 }
 
-ReadLog loadReadLog(const std::string& path) {
+ReadLog readLogOf(std::string_view saved) {
     ReadLog log;
-    const auto text = readTextFile(path);
-    if (!text) return log;
-    std::istringstream in(*text);
-    std::string line;
-    while (std::getline(in, line)) {
+    for (auto&& part : std::views::split(saved, '\n')) {
+        const std::string_view line(part.begin(), part.end());
         std::uint64_t h = 0;
         if (std::from_chars(line.data(), line.data() + line.size(), h, 16).ec == std::errc{}) log.insert(h);
     }
     return log;
 }
 
-bool saveReadLog(const ReadLog& log, const std::string& path) {
+std::string readLogText(const ReadLog& log) {
     std::string out;
     out.reserve(log.size() * 17);
     for (auto h : log) out += std::format("{:016x}\n", h);
-    return SDL_SaveFile(path.c_str(), out.data(), out.size());
+    return out;
 }
 
 const SettingControl* findSettingControl(std::string_view name) {

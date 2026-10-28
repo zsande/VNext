@@ -57,8 +57,8 @@ public:
     [[nodiscard]] const Node* node(std::string_view id) const;
     void clear();
 
-    bool load(const std::string& path);
-    bool save(const std::string& path) const;
+    bool read(std::string_view saved);     // chart.txt's text (false: it isn't one)
+    [[nodiscard]] std::string text() const; // ...and the chart as that
     [[nodiscard]] bool takeChanged() { return std::exchange(changed_, false); }
 
 private:

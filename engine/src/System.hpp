@@ -537,10 +537,11 @@ struct Settings {
     bool save(const std::string& path) const;
 };
 
-// Hashes of every line the player has seen (across all playthroughs), used by "skip read text only".
+// Hashes of every line the player has seen (across all playthroughs), used by "skip read text only":
+// from read.txt's text, and as that.
 using ReadLog = std::unordered_set<std::uint64_t>;
-ReadLog loadReadLog(const std::string& path);
-bool saveReadLog(const ReadLog& log, const std::string& path);
+[[nodiscard]] ReadLog readLogOf(std::string_view saved);
+[[nodiscard]] std::string readLogText(const ReadLog& log);
 
 // A player setting a slider can change (slider setting=NAME): its place on the slider (0 to 1), and
 // how it reads ({NAME} on screens: "45 cps", "80%").
