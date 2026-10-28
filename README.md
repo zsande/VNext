@@ -12,15 +12,19 @@ Open VNext in developer mode and you get an editor with a tab for each part of t
 - **Library**: images, audio, videos and fonts, and the styles, animations and gallery entries a game uses.
 - **Settings** and **Translate**: the game's options, and its translations, with a spreadsheet for translators.
 
-Games made with it can have voices and made-up "speech" sounds, videos, timed and locked choices, phone-style messages, a story flowchart, a gallery, music room and achievements, saving, loading and rewinding, controller and touch support, text read aloud, high-contrast and text-size options, and right-to-left languages. A finished game packs into one folder, ready to share.
+Games made with it can have voices and made-up "speech" sounds, videos, timed and locked choices, phone-style messages, a story flowchart, a gallery, music room and achievements, saving, loading and rewinding, controller and touch support, text read aloud, high-contrast and text-size options, and right-to-left languages. A finished game packs into one file, game.vnext, which also keeps its players' saves: with VNext next to it, it plays on Windows, macOS and Linux.
 
 ## How it's made
 
 The idea, the design and the direction of VNext are mine, and every line of its code is written by Claude, an AI made by Anthropic. I decide what VNext should be, test what comes out and say what to change; Claude writes the code and tests it.
 
+## Download
+
+Get VNext from the [Releases page](https://github.com/zsande/VNext/releases): a zip for Windows, macOS or Linux, with the player and licenses.txt. VNext isn't signed by Apple or Microsoft yet, so the first time, macOS asks you to allow it in System Settings → Privacy & Security (Open Anyway), and Windows says it protected your PC (More info, then Run anyway).
+
 ## Status
 
-VNext runs on macOS today; Windows and Linux versions are on the way. It is in active development and changes quickly.
+VNext is made and tested on macOS. The Windows and Linux versions are new: GitHub builds and starts them on every change, but they have had less real use. VNext is in active development and changes quickly.
 
 ## Building from source
 

@@ -361,9 +361,6 @@ constexpr std::array kSettings{
     Setting{.name = "default.rollback", .label = "Rollback", .standard = "yes", .help = "The mouse wheel goes back to earlier lines", .box = Box::YesNo},
     Setting{.name = "default.read_aloud", .label = "Read aloud", .standard = "no", .help = "The computer reads the lines, choices and buttons pointed at aloud (on Linux: with speech-dispatcher)", .box = Box::YesNo},
     Setting{.name = "default.high_contrast", .label = "High contrast", .standard = "no", .help = "Screens in white on black, what's pointed at in yellow", .with = true, .box = Box::YesNo},
-    Setting{.label = "Packing for Macs"},
-    Setting{.name = "mac_signing", .label = "Developer ID", .help = "What Pack the game signs the Mac app with: your Developer ID Application identity (else it's signed ad hoc, and other Macs warn about it)", .quoted = true, .box = Box::Text},
-    Setting{.name = "notary_profile", .label = "Notary profile", .help = "Your notarytool keychain profile: the signed app is sent to Apple to be notarized, which can take minutes", .quoted = true, .box = Box::Text},
 };
 
 // `line` for a game of another size than 1280 x 720: its text sizes, padding and bars grown or shrunk to

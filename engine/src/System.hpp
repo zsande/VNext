@@ -323,6 +323,12 @@ public:
     [[nodiscard]] IOStreamPtr open(const std::string& path) const;
     // The names of the files in `folder` that end with `extension` (in any case), in order.
     [[nodiscard]] std::vector<std::string> list(const std::string& folder, std::string_view extension) const;
+    // The pack keeps its players' saves too: whether its file can be written to, and a file written into
+    // it (added or replaced) or taken out of it, after its own files, which stay as they are. Only with a
+    // pack open, for a path in it: whether it went well.
+    [[nodiscard]] bool writable() const;
+    bool write(const std::string& path, std::string_view data);
+    bool remove(const std::string& path);
 
 private:
     struct Pack;
@@ -385,15 +391,6 @@ private:
     Info info_;
 };
 inline constexpr std::array<std::string_view, 3> kSystemVideoTypes{".mp4", ".mov", ".m4v"};
-// The running player: its .app on a Mac (when it's in one), else its program file.
-[[nodiscard]] std::string playerPath();
-// Runs a program (its path, then what it's given) and waits for it: whether it went well.
-bool runProgram(const std::vector<std::string>& args);
-// Copies a file or a folder with everything in it (programs stay programs): false when it can't.
-bool copyFiles(const std::string& from, const std::string& to);
-// The folder (and everything in it, under the folder's own name) as a zip file, as it is (not
-// compressed again): why not, if it can't be.
-[[nodiscard]] std::optional<std::string> writeZip(const std::string& folder, const std::string& file);
 
 // Packs the game folder `folder` (with a slash at the end) into the file `file`: everything in it
 // but saves/ and hidden files.
@@ -414,12 +411,14 @@ struct SaveInfo {
     std::string summary; // speaker and line shown when the save was made
 };
 
-// Save slots on disk: one file each, <folder>/<page>-<n>.vnsave. It holds the game state as lines of
-// text (metadata last), then a "thumbnail png <bytes>" line and the thumbnail picture.
+// Save slots: one file each, <folder>/<page>-<n>.vnsave, on the disk or in the game's pack. It holds the
+// game state as lines of text (metadata last), then a "thumbnail png <bytes>" line and the thumbnail picture.
 // Pages are "auto" and "quick" (written round-robin) plus the numbered pages "1".."N".
 class SaveStore {
 public:
-    void setFolder(std::string folder);
+    // Where the saves go: a folder on the disk, or (`pack` given) the one in the game's pack that keeps
+    // them, game.vnext/saves/.
+    void setFolder(std::string folder, GameFiles* pack = nullptr);
     void configure(int pages, int slotsPerPage);
 
     [[nodiscard]] const std::vector<std::string>& pages() const { return pages_; }
@@ -446,6 +445,7 @@ private:
     [[nodiscard]] std::optional<File> load(std::string_view slot) const;
 
     std::string folder_;
+    GameFiles* pack_ = nullptr; // (none: the saves are files on the disk)
     std::vector<std::string> pages_{"auto", "quick"};
     int slots_ = 6;
 };

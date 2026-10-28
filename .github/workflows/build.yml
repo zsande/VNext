@@ -1,14 +1,17 @@
-# Builds the ready-to-run player for Windows, Linux and macOS. (With no game next to it, the player
-# opens in developer mode; About there shows the licenses of what's built into it.)
-# Download the results from the run's "Artifacts" section.
+# Builds VNext for Windows, Linux and macOS, tries each one on GitHub's machines (a small game's story,
+# developer mode, and the game packed and played with the player next to it: a screenshot of each), and
+# zips each player with licenses.txt. A tag like v0.3.0 also makes a release of it, with the three zips.
+# The zips and screenshots are in each run's "Artifacts" section.
 name: build
 
-# (not for a change to the README, its pictures or the Sponsor button alone: there's nothing to build)
+# (not for a change to the README, the license, the README's pictures or the Sponsor button alone: there's nothing to build)
 on:
   push:
-    paths-ignore: ['README.md', '.github/*.png', '.github/FUNDING.yml']
+    branches: [main]
+    tags: ['v*']
+    paths-ignore: ['README.md', 'LICENSE.txt', '.github/*.png', '.github/FUNDING.yml']
   pull_request:
-    paths-ignore: ['README.md', '.github/*.png', '.github/FUNDING.yml']
+    paths-ignore: ['README.md', 'LICENSE.txt', '.github/*.png', '.github/FUNDING.yml']
   workflow_dispatch:
 
 jobs:
@@ -16,7 +19,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-24.04, macos-latest]
+        include:
+          - { os: windows-latest, system: Windows }
+          - { os: ubuntu-22.04, system: Linux } # (the oldest Linux GitHub has: the player runs on Linux as new as what it's built on)
+          - { os: macos-latest, system: macOS }
+    name: ${{ matrix.system }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -24,11 +31,12 @@ jobs:
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test # (GCC 14, for C++26)
           sudo apt-get update
           sudo apt-get install -y g++-14 libasound2-dev libpulse-dev libpipewire-0.3-dev \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
             libxkbcommon-dev libwayland-dev libdecor-0-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev \
-            libdbus-1-dev libibus-1.0-dev libudev-dev
+            libdbus-1-dev libibus-1.0-dev libudev-dev xvfb
           echo "CC=gcc-14" >> "$GITHUB_ENV"
           echo "CXX=g++-14" >> "$GITHUB_ENV"
 
@@ -41,9 +49,104 @@ jobs:
         run: cmake --build --preset release --parallel
 
       - name: Package
-        run: cmake --install engine/build --prefix dist
+        shell: bash
+        run: |
+          cmake --install engine/build --prefix dist
+          cp engine/licenses.txt dist/
+          ls -la dist
+          if [ "$RUNNER_OS" = Linux ]; then
+            echo "The Linux player needs glibc $(objdump -T dist/VNext | grep -o 'GLIBC_[0-9.]*' | cut -d_ -f2 | sort -uV | tail -1) or newer."
+          fi
+
+      - name: Try it
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          set -eu
+          case "$RUNNER_OS" in
+            macOS) player() { "$1/VNext.app/Contents/MacOS/VNext" "${@:2}"; } ;;
+            Windows) player() { "$1/VNext.exe" "${@:2}"; } ;;
+            Linux) player() { xvfb-run -a -s "-screen 0 1600x900x24" "$1/VNext" "${@:2}"; } ;;
+          esac
+          shot() { [ -s "try/$1" ] || { echo "::error::There's no screenshot try/$1."; exit 1; }; }
+          mkdir -p try/game/scripts
+          printf '%s\n' 'config title "Try it"' 'config save_id "vnext_try_it"' '' 'label start' \
+            '    This is the first line of the story.' '    And this is the second.' > try/game/scripts/main.vnscript
+          player dist --help
+          player dist --game try/game --data try/data --screenshot try/1-story.png && shot 1-story.png
+          player dist --data try/developer --screenshot try/2-developer.png && shot 2-developer.png
+          player dist --game try/game --data try/data --pack
+          ls -la "try/Try it"
+          cp -R dist/. "try/Try it/" # (the player next to game.vnext, as players have it)
+          made=$(wc -c < "try/Try it/game.vnext" | tr -d ' ')
+          player "try/Try it" --label start --screenshot try/3-packed.png && shot 3-packed.png # (no --data: its autosave goes into game.vnext)
+          played=$(wc -c < "try/Try it/game.vnext" | tr -d ' ')
+          echo "game.vnext: $made bytes when packed, $played after playing it."
+          [ "$played" -gt "$made" ] || { echo "::error::The autosave didn't go into game.vnext."; exit 1; }
+          player "try/Try it" --screenshot try/4-packed-again.png && shot 4-packed-again.png # (the pack, read with its save in it)
+
+      - name: The logs, when something went wrong
+        if: failure()
+        shell: bash
+        run: |
+          for f in try/data/log.txt try/developer/log.txt $(find "$HOME" -path '*vnext_try_it/log.txt' 2>/dev/null); do
+            echo "== $f"; cat "$f"
+          done
+
+      - name: Zip
+        shell: bash
+        run: |
+          zip="VNext-${{ matrix.system }}.zip"
+          case "$RUNNER_OS" in
+            macOS) ditto -c -k --norsrc --noextattr dist "$zip" ;; # (as macOS zips an app)
+            Linux) (cd dist && zip -r -X "../$zip" .) ;;           # (keeps VNext a program)
+            Windows) (cd dist && cmake -E tar cf "../$zip" --format=zip -- *) ;;
+          esac
+          # Unzipped as someone who downloads it would, it still starts.
+          mkdir unzipped
+          case "$RUNNER_OS" in
+            macOS) ditto -x -k "$zip" unzipped && codesign --verify --deep --strict unzipped/VNext.app && unzipped/VNext.app/Contents/MacOS/VNext --help ;;
+            Linux) (cd unzipped && unzip -q "../$zip") && zipinfo "$zip" && unzipped/VNext --help ;;
+            Windows) (cd unzipped && cmake -E tar xf "../$zip") && unzipped/VNext.exe --help ;;
+          esac
+          ls -la unzipped
 
       - uses: actions/upload-artifact@v4
         with:
-          name: VNext-${{ runner.os }}
-          path: dist
+          name: VNext-${{ matrix.system }}
+          path: VNext-${{ matrix.system }}.zip
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Screenshots-${{ matrix.system }}
+          path: try/*.png
+          if-no-files-found: ignore
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: VNext-*
+          merge-multiple: true
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'EOF'
+          Download the zip for your computer, unzip it and open VNext. With no game next to it, it opens in developer mode, where you make one. To play a finished game, put its game.vnext next to VNext: the game keeps its players' saves in that file.
+
+          - **Windows** (10 or newer): `VNext-Windows.zip`. The first time, Windows may say it protected your PC: click **More info**, then **Run anyway**.
+          - **macOS** (13.3 or newer, Apple silicon and Intel): `VNext-macOS.zip`. The first time, macOS won't open it because Apple hasn't checked it: open **System Settings → Privacy & Security** and click **Open Anyway**.
+          - **Linux** (64-bit, as new as Ubuntu 22.04 or Debian 12, or newer): `VNext-Linux.zip`.
+
+          `licenses.txt`, in each zip, lists the software built into VNext and its licenses. VNext itself is under the zlib license.
+          EOF
+          gh release create "$GITHUB_REF_NAME" VNext-Windows.zip VNext-macOS.zip VNext-Linux.zip \
+            --repo "$GITHUB_REPOSITORY" --title "VNext ${GITHUB_REF_NAME#v}" --notes-file notes.md

@@ -173,13 +173,13 @@ add_executable(vnext
     src/Screens.cpp               # fonts, text, shapes and the script's screens
     src/Assets.cpp                # pictures, sound, made-up voices and videos
     src/System.cpp                # helpers, the game's files (folder or pack), saves, the player's settings
-    src/Licenses.cpp              # the licenses of what's built in, for About and next to packs
+    src/Licenses.cpp              # the licenses of what's built in (licenses.txt), for About and next to packs
     ${CMAKE_CURRENT_BINARY_DIR}/pl_mpeg.c
 )
 set_target_properties(vnext PROPERTIES OUTPUT_NAME "VNext")
 target_compile_definitions(vnext PRIVATE VN_VERSION="${PROJECT_VERSION}")
 
-target_include_directories(vnext PRIVATE src)
+target_include_directories(vnext PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_include_directories(vnext SYSTEM PRIVATE ${pl_mpeg_SOURCE_DIR})
 target_link_libraries(vnext PRIVATE SDL3_mixer::SDL3_mixer SDL3_ttf::SDL3_ttf SDL3_image::SDL3_image SDL3::SDL3 vn_sheenbidi)
 if(APPLE)
@@ -222,6 +222,19 @@ if(NOT EXISTS ${vn_icon})
     message(FATAL_ERROR "The player's icon is missing: put it (a square PNG) at ${vn_icon}.")
 endif()
 
+# Files built into the player as bytes, so it needs nothing next to it: generated/<inc> has the array
+# `name`. (A build configures again when one of them changes.)
+function(vn_embed file name inc)
+    file(READ ${file} hex HEX)
+    string(REPEAT "[0-9a-f][0-9a-f]" 32 row)
+    string(REGEX REPLACE "(${row})" "\\1\n" hex "${hex}") # (32 bytes a line)
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," bytes "${hex}")
+    file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/generated/${inc} CONTENT "constexpr unsigned char ${name}[] = {\n${bytes}};\n" @ONLY)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${file})
+endfunction()
+vn_embed(${vn_icon} kIconPng icon_png.inc)                                   # the window's icon
+vn_embed(${CMAKE_CURRENT_SOURCE_DIR}/licenses.txt kLicensesTxt licenses_txt.inc) # About, packs
+
 if(APPLE)
     file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/Info.plist.in [=[<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -261,8 +274,7 @@ if(APPLE)
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
         MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION})
 
-    # The app's icon, from icon.png: the sizes macOS shows, as VNext.icns in the app (a packed game keeps
-    # it when the game has no icon of its own), and the picture itself, for the window.
+    # The app's icon in the Finder and the Dock, from icon.png: the sizes macOS shows, as VNext.icns in the app.
     set(vn_iconset ${CMAKE_CURRENT_BINARY_DIR}/VNext.iconset)
     set(vn_icns ${CMAKE_CURRENT_BINARY_DIR}/VNext.icns)
     set(vn_icon_sizes)
@@ -277,8 +289,8 @@ if(APPLE)
         ${vn_icon_sizes}
         COMMAND iconutil -c icns ${vn_iconset} -o ${vn_icns}
         DEPENDS ${vn_icon} COMMENT "Making the app icon" VERBATIM)
-    target_sources(vnext PRIVATE ${vn_icns} ${vn_icon})
-    set_source_files_properties(${vn_icns} ${vn_icon} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(vnext PRIVATE ${vn_icns})
+    set_source_files_properties(${vn_icns} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 
     # Sign the whole app (ad hoc), not just the program in it.
     find_program(VN_CODESIGN codesign)
@@ -289,22 +301,15 @@ if(APPLE)
             COMMENT "Signing the app bundle (ad hoc)" VERBATIM)
         add_dependencies(vnext_signed vnext)
     endif()
-else()
-    # Elsewhere the window's icon is icon.png next to the program (copied there, and installed with it);
-    # on Windows the .exe has it too, for Explorer and the taskbar: icon.ico in the build folder, made
-    # from icon.png.
-    add_custom_command(TARGET vnext POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${vn_icon} $<TARGET_FILE_DIR:vnext>/icon.png VERBATIM)
-    install(FILES ${vn_icon} DESTINATION . COMPONENT player)
-    if(WIN32)
-        set(vn_ico ${CMAKE_CURRENT_BINARY_DIR}/icon.ico)
-        if(NOT EXISTS ${vn_ico})
-            message(FATAL_ERROR "The Windows icon is missing: put it (an .ico made from icon.png) at ${vn_ico}.")
-        endif()
-        enable_language(RC)
-        file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/icon.rc CONTENT "1 ICON \"${vn_ico}\"\n")
-        target_sources(vnext PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/icon.rc)
+elseif(WIN32)
+    # The .exe's own icon, for Explorer and the taskbar: icon.ico in the build folder, made from icon.png.
+    set(vn_ico ${CMAKE_CURRENT_BINARY_DIR}/icon.ico)
+    if(NOT EXISTS ${vn_ico})
+        message(FATAL_ERROR "The Windows icon is missing: put it (an .ico made from icon.png) at ${vn_ico}.")
     endif()
+    enable_language(RC)
+    file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/icon.rc CONTENT "1 ICON \"${vn_ico}\"\n")
+    target_sources(vnext PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/icon.rc)
 endif()
 
 # "cmake --install build --prefix DIR" puts the player in DIR: with --prefix .. (from

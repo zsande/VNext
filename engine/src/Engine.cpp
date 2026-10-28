@@ -589,150 +589,31 @@ std::expected<std::string, std::string> Engine::pack(const std::string& file) co
                        megabytes(report->bytes), file, megabytes(report->packed), static_cast<double>(SDL_GetTicksNS() - start) / 1e9);
 }
 
-namespace {
-
-// A picture as a Mac app's icon (.icns): square, in the sizes macOS shows, each as a PNG.
-bool writeIcns(SDL_Surface* picture, const std::string& file) {
-    static constexpr std::pair<int, std::string_view> kSizes[]{{16, "icp4"}, {32, "icp5"}, {64, "icp6"}, {128, "ic07"},
-                                                              {256, "ic08"}, {512, "ic09"}, {1024, "ic10"}};
-    std::string out;
-    auto put32 = [](std::string& b, std::uint32_t v) {
-        for (int shift = 24; shift >= 0; shift -= 8) b += static_cast<char>((v >> shift) & 0xFF);
-    };
-    for (const auto& [size, type] : kSizes) {
-        SurfacePtr square{SDL_CreateSurface(size, size, SDL_PIXELFORMAT_RGBA32)};
-        if (!square) return false;
-        SDL_FillSurfaceRect(square.get(), nullptr, 0); // (see-through around it)
-        const float s = std::min(static_cast<float>(size) / static_cast<float>(picture->w), static_cast<float>(size) / static_cast<float>(picture->h));
-        const int w = std::max(1, static_cast<int>(std::lround(static_cast<float>(picture->w) * s)));
-        const int h = std::max(1, static_cast<int>(std::lround(static_cast<float>(picture->h) * s)));
-        const SDL_Rect at{(size - w) / 2, (size - h) / 2, w, h};
-        SDL_SetSurfaceBlendMode(picture, SDL_BLENDMODE_NONE);
-        SDL_BlitSurfaceScaled(picture, nullptr, square.get(), &at, SDL_SCALEMODE_LINEAR);
-        const IOStreamPtr png{SDL_IOFromDynamicMem()};
-        if (!png || !IMG_SavePNG_IO(square.get(), png.get(), false)) return false;
-        const auto bytes = static_cast<std::size_t>(SDL_GetIOSize(png.get()));
-        const auto* data = static_cast<const char*>(SDL_GetPointerProperty(SDL_GetIOProperties(png.get()), SDL_PROP_IOSTREAM_DYNAMIC_MEMORY_POINTER, nullptr));
-        out += type;
-        put32(out, static_cast<std::uint32_t>(8 + bytes));
-        out.append(data, bytes);
-    }
-    std::string icns = "icns";
-    put32(icns, static_cast<std::uint32_t>(8 + out.size()));
-    icns += out;
-    return SDL_SaveFile(file.c_str(), icns.data(), icns.size());
-}
-
-// A plist's <string> under `key` set to `value` (added before its end when it has none).
-void setPlistString(std::string& plist, std::string_view key, std::string_view value) {
-    std::string escaped;
-    for (const char c : value) escaped += c == '&' ? "&amp;" : c == '<' ? "&lt;" : c == '>' ? "&gt;" : std::string(1, c);
-    const std::string tag = std::format("<key>{}</key>", key);
-    if (const auto at = plist.find(tag); at != std::string::npos) {
-        const auto open = plist.find("<string>", at), close = plist.find("</string>", at);
-        if (open != std::string::npos && close != std::string::npos && open < close) {
-            plist.replace(open + 8, close - open - 8, escaped);
-            return;
-        }
-    }
-    if (const auto end = plist.rfind("</dict>"); end != std::string::npos) plist.insert(end, std::format("    {}\n    <string>{}</string>\n", tag, escaped));
-}
-
-} // namespace
-
-#if defined(SDL_PLATFORM_MACOS)
-namespace {
-// A signed app sent to Apple to be notarized (notarytool, with the keychain profile `profile`; it waits for
-// the answer), and the ticket stapled to it: what to tell the developer.
-std::string notarized(const std::string& app, const std::string& profile) {
-    const std::string zip = app + ".notarizing.zip";
-    if (!runProgram({"/usr/bin/ditto", "-c", "-k", "--keepParent", app, zip})) return " It's signed, but couldn't be zipped to be notarized.";
-    const ScopeExit _([&] { SDL_RemovePath(zip.c_str()); }); // (however it ends)
-    if (!runProgram({"/usr/bin/xcrun", "notarytool", "submit", zip, "--keychain-profile", profile, "--wait"}))
-        return std::format(" It's signed, but Apple didn't notarize it (notarytool, with the profile '{}').", profile);
-    if (!runProgram({"/usr/bin/xcrun", "stapler", "staple", app})) return " It's signed and notarized, but the ticket couldn't be stapled to it.";
-    return " It's signed and notarized.";
-}
-} // namespace
-#endif
-
-// Pack the game: next to the game folder, a folder named after the game with the player, renamed
-// after it (on a Mac My Game.app, with the game's icon and the pack inside it; elsewhere My Game.exe
-// or My Game, with game.vnext beside it) and licenses.txt; and the same folder as a zip. One made
-// before goes to the Trash first.
+// Pack the game: next to the game folder, a folder named after the game with game.vnext (the game in
+// one file, which keeps its players' saves in it too) and licenses.txt. To play it, the player goes
+// next to game.vnext: VNext.app, VNext.exe or VNext, from VNext's releases on GitHub. One made before
+// goes to the Trash first.
 std::expected<std::string, std::string> Engine::finishGame() const {
     if (packed_) return std::unexpected("This game is a pack already: open its game folder to pack it again.");
     if (!script_.ok()) return std::unexpected("Fix the scripts first: a game with mistakes in it can't be packed.");
-    const Uint64 start = SDL_GetTicksNS();
     std::string name; // (the game's title, as a file's name)
     for (const char c : script_.config.title)
         if (!std::string_view("/\\:*?\"<>|").contains(c) && static_cast<unsigned char>(c) >= 32) name += c;
     name = std::string(trim(name));
     while (name.starts_with('.')) name.erase(0, 1);
     if (name.empty()) name = "Game";
-    const std::string next = packPath().substr(0, packPath().size() - kPackName.size()); // (where the game folder is)
-    const std::string folder = next + name, zip = folder + ".zip";
-    for (const std::string& old : {folder, zip})
-        if (SDL_GetPathInfo(old.c_str(), nullptr) && !moveToTrash(old)) return std::unexpected(std::format("Can't replace '{}': move it away first.", old));
+    const std::string folder = packPath().substr(0, packPath().size() - kPackName.size()) + name;
+    if (SDL_GetPathInfo(folder.c_str(), nullptr) && !moveToTrash(folder)) return std::unexpected(std::format("Can't replace '{}': move it away first.", folder));
     if (!SDL_CreateDirectory(folder.c_str())) return std::unexpected(std::format("Can't make '{}': {}.", folder, SDL_GetError()));
-    const std::string player = playerPath();
-    const bool app = player.ends_with(".app");
-#if defined(_WIN32)
-    const std::string copy = folder + "/" + name + (app ? ".app" : ".exe");
-#else
-    const std::string copy = folder + "/" + name + (app ? ".app" : "");
-#endif
-    if (player.empty() || !copyFiles(player, copy)) return std::unexpected(std::format("Can't copy the player '{}' into '{}'.", player, folder));
-    std::string notes; // (what didn't work, said after)
-    if (const char* base = SDL_GetBasePath(); !app && base && script_.config.icon.empty()) // (the window's icon, without one of the game's: the player's, next to it)
-        if (!SDL_CopyFile((std::string(base) + "icon.png").c_str(), (folder + "/icon.png").c_str())) notes += " The player's icon can't be copied next to it.";
-    const std::string inside = app ? copy + "/Contents/Resources/" : folder + "/"; // (where the pack goes)
-    if (app) { // its name, its own identifier (so macOS keeps its permissions apart from other games'), and the game's icon
-        SDL_CreateDirectory(inside.c_str());
-        SDL_RemovePath((inside + std::string(kPackName)).c_str()); // (a player with a game in it already)
-        const std::string plistPath = copy + "/Contents/Info.plist";
-        if (auto plist = readTextFile(plistPath)) {
-            std::string id;
-            for (const char c : lower(script_.config.saveId.empty() ? name : script_.config.saveId))
-                if (std::isalnum(static_cast<unsigned char>(c)) || c == '-') id += c;
-            setPlistString(*plist, "CFBundleName", name);
-            setPlistString(*plist, "CFBundleDisplayName", name);
-            setPlistString(*plist, "CFBundleIdentifier", "dev.vnext.game." + (id.empty() ? std::string("game") : id));
-            setPlistString(*plist, "CFBundleShortVersionString", script_.config.version.empty() ? std::string("1.0") : script_.config.version);
-            if (!script_.config.icon.empty())
-                if (SurfacePtr icon{IMG_Load_IO(files_.open(gameRoot_ + script_.config.icon).release(), true)}) {
-                    if (writeIcns(icon.get(), inside + "icon.icns")) setPlistString(*plist, "CFBundleIconFile", "icon");
-                    else notes += " Its icon can't be made.";
-                }
-            if (!SDL_SaveFile(plistPath.c_str(), plist->data(), plist->size())) notes += std::format(" Its name and icon can't be set: {}.", SDL_GetError());
-        }
-    }
-    const auto report = writePack(gameRoot_, inside + std::string(kPackName));
-    if (!report) return std::unexpected(report.error());
-    for (const std::string& at : {inside, folder + "/"})
-        if (!SDL_SaveFile((at + "licenses.txt").c_str(), licenses().data(), licenses().size()))
-            return std::unexpected(std::format("Can't write '{}licenses.txt': {}.", at, SDL_GetError()));
-#if defined(SDL_PLATFORM_MACOS)
-    if (app) { // (signed again: its name and icon changed what it was signed with)
-        runProgram({"/usr/bin/xattr", "-cr", copy});
-        const std::string& identity = script_.config.macSigning;
-        if (identity.empty()) {
-            if (!runProgram({"/usr/bin/codesign", "--force", "--deep", "--sign", "-", copy})) notes += " It can't be signed again, so it may not open: try Pack the game again.";
-        } else if (!runProgram({"/usr/bin/codesign", "--force", "--deep", "--options", "runtime", "--timestamp", "--sign", identity, copy})) {
-            notes += std::format(" It can't be signed with '{}' (is that identity in your keychain?), so other Macs may not open it.", identity);
-        } else if (const std::string& profile = script_.config.notaryProfile; !profile.empty()) {
-            notes += notarized(copy, profile);
-        } else {
-            notes += std::format(" It's signed with '{}' (not notarized: no notary profile).", identity);
-        }
-    }
-#endif
-    if (const auto problem = writeZip(folder, zip)) return std::unexpected(*problem);
-    return std::format("Made {} ({}, and licenses.txt) and {}.zip next to the game folder, ready to share: {} files packed ({:.1f} MB) in {:.1f} seconds.{}",
-                       folder, app ? name + ".app with the game in it" : name + " with game.vnext", name, report->files, megabytes(report->packed),
-                       static_cast<double>(SDL_GetTicksNS() - start) / 1e9, notes);
+    auto packed = pack(folder + "/" + std::string(kPackName));
+    if (packed) *packed += " To play it, put VNext next to game.vnext: VNext.app, VNext.exe or VNext, from VNext's releases on GitHub.";
+    return packed;
 }
 
+
+namespace {
+#include "icon_png.inc" // (kIconPng: the bytes of the player's icon.png)
+} // namespace
 
 // Applies what the script sets up: canvas, window title, save pages, fonts, screens. Script
 // errors switch to the error screen.
@@ -741,17 +622,21 @@ void Engine::configure() {
     canvas_ = {static_cast<float>(cfg.width), static_cast<float>(cfg.height)};
     defaults_ = defaultSettings(cfg);
     useLanguage(); // texts, window title, fonts
-    // The window's icon: the game's (config icon), else the player's own (icon.png with the program: in the app).
+    // The window's icon: the game's (config icon), else the player's own (icon.png, built into it).
     SurfacePtr icon{noGame_ || cfg.icon.empty() ? nullptr : IMG_Load_IO(files_.open(gameRoot_ + cfg.icon).release(), true)}; // (a missing file is fine)
-    if (const char* base = SDL_GetBasePath(); !icon && base) icon.reset(IMG_Load((std::string(base) + "icon.png").c_str()));
+    if (!icon) icon.reset(IMG_Load_IO(SDL_IOFromConstMem(kIconPng, sizeof kIconPng), true));
     if (icon) SDL_SetWindowIcon(window_.get(), icon.get());
-    // Saves go in game/saves, unless --data was given, the game is a pack (finished games keep them
-    // in the player's own folder), or the folder can't take them.
+    // Saves go in game/saves, or into game.vnext itself for a pack (a finished game keeps its players'
+    // saves in it), unless --data was given or that can't take them (a pack that can't be written to, a
+    // game inside an app): then in the player's own folder.
     std::string saves = prefPath_ + "saves/";
-    if (!dataFolder_ && !packed_ && !noGame_ && gameRoot_.find(".app/Contents/Resources/") == std::string::npos &&
-        SDL_CreateDirectory((gameRoot_ + "saves").c_str()))
+    GameFiles* pack = nullptr;
+    if (!dataFolder_ && !noGame_ && gameRoot_.find(".app/Contents/Resources/") == std::string::npos &&
+        (packed_ ? files_.writable() : SDL_CreateDirectory((gameRoot_ + "saves").c_str()))) {
         saves = gameRoot_ + "saves/";
-    saves_.setFolder(saves);
+        if (packed_) pack = &files_;
+    }
+    saves_.setFolder(saves, pack);
     assets_->setPixelArt(cfg.pixelArt);
     // The mouse pointer: a picture from images/ (config cursor), or the system's.
     cursor_.reset();
@@ -770,7 +655,7 @@ void Engine::configure() {
     assets_->setMemoryLimit(static_cast<std::size_t>(cfg.imageMemory) * 1024 * 1024);
     saves_.configure(cfg.savePages, cfg.saveSlots);
     hasSave_ = saves_.newest().has_value();
-    if (!noGame_) logInfo("Saves go in '{}'.", saves);
+    if (!noGame_) logInfo("Saves go in '{}'.", pack ? gameRoot_.substr(0, gameRoot_.size() - 1) : saves);
     applySettings();
 
     overlays_.clear();

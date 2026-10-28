@@ -555,8 +555,6 @@ struct GameConfig {
     std::string saveId = "VNext";
     std::string icon;
     std::string cursor;               // a picture for the mouse pointer (else the system's)
-    std::string macSigning;           // Pack the game: the Developer ID the Mac app is signed with (else ad hoc)
-    std::string notaryProfile;        // ...and the notarytool keychain profile it's notarized with (else it isn't)
     SDL_Point cursorHotspot{0, 0};    // the point of it that clicks
     SDL_Color letterboxColor{0, 0, 0, 255}; // around the picture when the window isn't the same shape
     int width = 1280;

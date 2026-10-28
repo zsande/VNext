@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <limits>
 #include <map>
@@ -286,10 +287,13 @@ namespace {
 // the end: for each file its path (2 bytes saying how long, then the letters), where it starts,
 // how long it is in the pack and how long it really is (8 bytes each), how it's packed (1 byte:
 // 0 as it is, 1 compressed) and its check (4 bytes). Numbers are little-endian; the list and the
-// files are scrambled.
+// files are scrambled. Files added later (the players' saves, in saves/) go after the list, then a new
+// list, and only then does the header name that one: what's after the list it names is left over.
 constexpr std::string_view kMagic = "VNXPACK1";
 constexpr std::uint64_t kHeaderSize = 32;
 constexpr std::uint64_t kListSeed = 0x564e657874ull; // scrambles the list (a file: where it starts)
+constexpr std::string_view kSavesIn = "saves/";      // where in a pack its players' saves are
+constexpr std::uint64_t kLeftOver = 4ull << 20;      // left over from replaced saves before they're tidied
 
 struct Entry {
     std::uint64_t offset = 0, stored = 0, size = 0;
@@ -326,6 +330,35 @@ void scramble(std::span<char> bytes, std::uint64_t seed) {
 std::uint32_t checkOf(std::string_view data) {
     const std::uint64_t h = fnv1a(data);
     return static_cast<std::uint32_t>(h ^ (h >> 32));
+}
+
+// A file's line in the list.
+void putEntry(std::string& list, std::string_view path, const Entry& e) {
+    put(list, path.size(), 2);
+    list += path;
+    put(list, e.offset, 8);
+    put(list, e.stored, 8);
+    put(list, e.size, 8);
+    put(list, e.method, 1);
+    put(list, e.check, 4);
+}
+
+// The header, for `count` files and the (scrambled) list at `listAt`, `listSize` long.
+std::string headerOf(std::uint64_t count, std::uint64_t listAt, std::uint64_t listSize) {
+    std::string header(kMagic);
+    put(header, count, 4);
+    put(header, 0, 4);
+    put(header, listAt, 8);
+    put(header, listSize, 8);
+    return header;
+}
+
+// A file cut to `size` bytes, where the system can (what's after goes).
+void cutFile(const std::string& path, std::uint64_t size) {
+    std::u8string name(path.size(), u8'\0');
+    std::memcpy(name.data(), path.data(), path.size());
+    std::error_code error;
+    std::filesystem::resize_file(std::filesystem::path(name), size, error);
 }
 
 // Compression: LZ77, like LZ4's blocks. A step is a token byte (its high 4 bits: how many bytes
@@ -448,6 +481,7 @@ struct GameFiles::Pack {
     std::string root; // file + "/": the paths of the files in it start with this
     std::unordered_map<std::string, Entry, StringHash, std::equal_to<>> entries; // by lower-case path
     std::vector<std::string> paths;                                              // as written, in order
+    std::uint64_t listAt = 0, listSize = 0;                                      // where the list the header names is
 
     // The path of a file in it, as its list has it (lower case), if it's under its root.
     [[nodiscard]] std::optional<std::string> keyOf(std::string_view path) const {
@@ -477,6 +511,68 @@ struct GameFiles::Pack {
         logError("'{}' is damaged: '{}' can't be read from it.", file, key);
         SDL_SetError("%s is damaged", file.c_str());
         return std::nullopt;
+    }
+
+    // Files added, replaced (data given) or taken out (none): written from `at` (after the list the
+    // header names, when none: what's there is left over), then the new list, and only then the header
+    // naming it, so stopping halfway leaves the pack as it was.
+    bool change(const std::vector<std::pair<std::string, std::optional<std::string>>>& changes, std::optional<std::uint64_t> at = std::nullopt) {
+        auto now = entries;
+        auto order = paths;
+        const std::uint64_t from = at.value_or(listAt + listSize);
+        std::uint64_t end = from;
+        std::string written;
+        for (const auto& [path, data] : changes) {
+            std::string key = lower(path);
+            if (!data) {
+                if (now.erase(key) > 0) std::erase_if(order, [&](const std::string& p) { return lower(p) == key; });
+                continue;
+            }
+            std::string stored = *data;
+            scramble(stored, end);
+            if (!now.contains(key)) order.push_back(path);
+            now.insert_or_assign(std::move(key), Entry{.offset = end, .stored = stored.size(), .size = data->size(), .method = 0, .check = checkOf(*data)});
+            end += stored.size();
+            written += stored;
+        }
+        std::string list;
+        for (const std::string& p : order) putEntry(list, p, now.find(lower(p))->second);
+        scramble(list, kListSeed);
+        const std::string header = headerOf(order.size(), end, list.size());
+        IOStreamPtr io{SDL_IOFromFile(file.c_str(), "r+b")};
+        const bool ok = io && SDL_SeekIO(io.get(), static_cast<Sint64>(from), SDL_IO_SEEK_SET) >= 0 &&
+                        SDL_WriteIO(io.get(), written.data(), written.size()) == written.size() &&
+                        SDL_WriteIO(io.get(), list.data(), list.size()) == list.size() && SDL_FlushIO(io.get()) &&
+                        SDL_SeekIO(io.get(), 0, SDL_IO_SEEK_SET) == 0 && SDL_WriteIO(io.get(), header.data(), header.size()) == header.size();
+        if (!io || !SDL_CloseIO(io.release()) || !ok) return false; // (closed here: what it says about the last writes counts)
+        entries = std::move(now);
+        paths = std::move(order);
+        listAt = end;
+        listSize = list.size();
+        return true;
+    }
+
+    // Once what replaced saves left over is more than the saves themselves (and kLeftOver), they're
+    // written again straight after its own files: first after the list, as any change, then from where
+    // its own files end, which is all left over by then; and the file is cut after that.
+    void tidy() {
+        std::uint64_t own = kHeaderSize, saved = 0; // (where its own files end; what the saves take)
+        std::vector<std::pair<std::string, std::optional<std::string>>> saves;
+        for (const std::string& p : paths) {
+            const Entry& e = entries.find(lower(p))->second;
+            if (lower(p).starts_with(kSavesIn)) {
+                saved += e.stored;
+                saves.emplace_back(p, std::nullopt);
+            } else {
+                own = std::max(own, e.offset + e.stored);
+            }
+        }
+        if (listAt < own + saved || listAt - own - saved <= std::max(kLeftOver, saved)) return;
+        for (auto& [path, data] : saves)
+            if (!(data = read(lower(path)))) return; // (a damaged save stays where it is)
+        if (!change(saves)) return;
+        if (own + saved + listSize > listAt - saved) return; // (the second copy would reach the first: kept as it is)
+        if (change(saves, own)) cutFile(file, listAt + listSize);
     }
 };
 
@@ -531,6 +627,24 @@ std::vector<std::string> GameFiles::list(const std::string& folder, std::string_
     return names;
 }
 
+bool GameFiles::writable() const {
+    return pack_ && IOStreamPtr{SDL_IOFromFile(pack_->file.c_str(), "r+b")} != nullptr;
+}
+
+bool GameFiles::write(const std::string& path, std::string_view data) {
+    const auto key = pack_ ? pack_->keyOf(path) : std::nullopt;
+    if (!key || !pack_->change({{*key, std::string(data)}})) return false;
+    pack_->tidy();
+    return true;
+}
+
+bool GameFiles::remove(const std::string& path) {
+    const auto key = pack_ ? pack_->keyOf(path) : std::nullopt;
+    if (!key || !pack_->entries.contains(*key) || !pack_->change({{*key, std::nullopt}})) return false;
+    pack_->tidy();
+    return true;
+}
+
 std::expected<void, std::string> GameFiles::openPack(const std::string& file) {
     const std::string name = file.substr(file.find_last_of("/\\") + 1);
     const auto damaged = std::unexpected(std::format("'{}' is damaged, or isn't a VNext pack: make it again in developer mode.", name));
@@ -539,15 +653,15 @@ std::expected<void, std::string> GameFiles::openPack(const std::string& file) {
     std::string header(kHeaderSize, '\0'), list;
     bool ok = SDL_ReadIO(io.get(), header.data(), header.size()) == header.size() && header.starts_with(kMagic);
     std::size_t at = kMagic.size();
-    std::uint64_t count = 0, listAt = 0;
+    std::uint64_t count = 0, listAt = 0, listSize = 0;
     if (ok) {
         count = get(header, at, 4);
         at += 4;
         listAt = get(header, at, 8);
-        const std::uint64_t listSize = get(header, at, 8);
+        listSize = get(header, at, 8);
         const Sint64 size = SDL_GetIOSize(io.get());
         ok = size >= 0 && listAt >= kHeaderSize && listSize < (std::uint64_t{1} << 30) &&
-             listAt + listSize == static_cast<std::uint64_t>(size);
+             listAt + listSize <= static_cast<std::uint64_t>(size); // (what's after it: left over from a change that stopped halfway)
         if (ok) {
             list.resize(static_cast<std::size_t>(listSize));
             ok = SDL_SeekIO(io.get(), static_cast<Sint64>(listAt), SDL_IO_SEEK_SET) >= 0 && SDL_ReadIO(io.get(), list.data(), list.size()) == list.size();
@@ -556,7 +670,7 @@ std::expected<void, std::string> GameFiles::openPack(const std::string& file) {
     io.reset();
     if (!ok) return damaged;
     scramble(list, kListSeed);
-    auto opened = std::make_unique<Pack>(Pack{.file = file, .root = file + "/", .entries = {}, .paths = {}});
+    auto opened = std::make_unique<Pack>(Pack{.file = file, .root = file + "/", .entries = {}, .paths = {}, .listAt = listAt, .listSize = listSize});
     at = 0;
     for (std::uint64_t i = 0; i < count; ++i) {
         if (list.size() - at < 2) return damaged;
@@ -663,23 +777,13 @@ std::expected<PackReport, std::string> writePack(const std::string& folder, cons
         e.stored = data->size();
         scramble(*data, at);
         if (SDL_WriteIO(out.get(), data->data(), data->size()) != data->size()) return fail(std::format("Can't write '{}': {}.", file, SDL_GetError()));
-        put(list, path.size(), 2);
-        list += path;
-        put(list, e.offset, 8);
-        put(list, e.stored, 8);
-        put(list, e.size, 8);
-        put(list, e.method, 1);
-        put(list, e.check, 4);
+        putEntry(list, path, e);
         at += e.stored;
         ++report.files;
         report.bytes += e.size;
     }
     scramble(list, kListSeed);
-    std::string header(kMagic);
-    put(header, paths.size(), 4);
-    put(header, 0, 4);
-    put(header, at, 8);
-    put(header, list.size(), 8);
+    const std::string header = headerOf(paths.size(), at, list.size());
     if (SDL_WriteIO(out.get(), list.data(), list.size()) != list.size() || SDL_SeekIO(out.get(), 0, SDL_IO_SEEK_SET) != 0 ||
         SDL_WriteIO(out.get(), header.data(), header.size()) != header.size())
         return fail(std::format("Can't write '{}': {}.", file, SDL_GetError()));
@@ -698,9 +802,10 @@ std::expected<PackReport, std::string> writePack(const std::string& folder, cons
 // SaveStore
 // ---------------------------------------------------------------------------
 
-void SaveStore::setFolder(std::string folder) {
+void SaveStore::setFolder(std::string folder, GameFiles* pack) {
     folder_ = withSlash(std::move(folder));
-    SDL_CreateDirectory(folder_.c_str());
+    pack_ = pack;
+    if (!pack_) SDL_CreateDirectory(folder_.c_str());
 }
 
 void SaveStore::configure(int pages, int slotsPerPage) {
@@ -728,7 +833,7 @@ std::string pngBytes(SDL_Surface* surface) {
 } // namespace
 
 std::optional<SaveStore::File> SaveStore::load(std::string_view slot) const {
-    const auto data = readTextFile(path(slot));
+    const auto data = pack_ ? pack_->readText(path(slot)) : readTextFile(path(slot));
     if (!data) return std::nullopt;
     // The text ends at the thumbnail line (no line of the state starts with "thumbnail").
     File file;
@@ -756,8 +861,8 @@ std::string SaveStore::thumbnail(std::string_view slot) const {
 
 SaveInfo SaveStore::info(std::string_view slot) const {
     SaveInfo info;
-    SDL_PathInfo file{};
-    if (!SDL_GetPathInfo(path(slot).c_str(), &file) || file.type != SDL_PATHTYPE_FILE) return info;
+    SDL_PathInfo file{}; // (none for a pack's: its saves say when they were made)
+    if (pack_ ? !pack_->exists(path(slot)) : !SDL_GetPathInfo(path(slot).c_str(), &file) || file.type != SDL_PATHTYPE_FILE) return info;
     const auto save = load(slot);
     if (!save) return info;
     info.exists = true;
@@ -780,6 +885,7 @@ bool SaveStore::write(std::string_view slot, std::string_view state, std::string
     std::ranges::replace(flat, '\n', ' ');
     std::string data = std::format("{}meta time {}\nmeta summary {}\n", state, now, flat);
     if (const std::string png = pngBytes(thumbnail); !png.empty()) data += std::format("{}{}\n{}", kThumbnail, png.size(), png);
+    if (pack_) return pack_->write(path(slot), data); // (the pack keeps the old one whole until the new one is in)
     // Written next to it first, so stopping halfway (a crash, a full disk) leaves the old save whole.
     const std::string file = path(slot), part = file + ".part";
     if (!SDL_SaveFile(part.c_str(), data.data(), data.size()) || !SDL_RenamePath(part.c_str(), file.c_str())) {
@@ -790,7 +896,8 @@ bool SaveStore::write(std::string_view slot, std::string_view state, std::string
 }
 
 void SaveStore::remove(std::string_view slot) {
-    SDL_RemovePath(path(slot).c_str());
+    if (pack_) pack_->remove(path(slot));
+    else SDL_RemovePath(path(slot).c_str());
 }
 
 std::string SaveStore::rotatingSlot(std::string_view page) const {
@@ -1029,10 +1136,8 @@ const SettingControl* findSettingControl(std::string_view name) {
 
 #if defined(__APPLE__)
 #include <CoreFoundation/CoreFoundation.h>
-#include <mach-o/dyld.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
-#include <sys/stat.h>
 #elif defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -1042,9 +1147,6 @@ const SettingControl* findSettingControl(std::string_view name) {
 #endif
 #include <windows.h>
 #include <shellapi.h>
-#else
-#include <sys/stat.h>
-#include <unistd.h>
 #endif
 
 namespace vn {
@@ -1106,176 +1208,5 @@ void learnSpelling(std::string_view) {}
 void speak(std::string_view) {}
 std::unique_ptr<SystemVideo> SystemVideo::open(const std::string&, const std::string*) { return nullptr; }
 #endif
-
-std::string playerPath() {
-#if defined(__APPLE__)
-    std::uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::string path(size, '\0');
-    if (_NSGetExecutablePath(path.data(), &size) != 0) return {};
-    path.resize(std::strlen(path.c_str()));
-    struct Free { // (what realpath made)
-        void operator()(char* p) const noexcept { std::free(p); }
-    };
-    if (const std::unique_ptr<char, Free> real{realpath(path.c_str(), nullptr)}) path = real.get();
-    if (const auto at = path.rfind(".app/Contents/MacOS/"); at != std::string::npos) return path.substr(0, at + 4); // (the .app)
-    return path;
-#elif defined(_WIN32)
-    std::wstring wide(32768, L'\0');
-    const DWORD n = GetModuleFileNameW(nullptr, wide.data(), static_cast<DWORD>(wide.size()));
-    if (n == 0) return {};
-    const int bytes = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), static_cast<int>(n), nullptr, 0, nullptr, nullptr);
-    std::string out(static_cast<std::size_t>(bytes), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), static_cast<int>(n), out.data(), bytes, nullptr, nullptr);
-    return out;
-#else
-    std::string path(4096, '\0');
-    const ssize_t n = readlink("/proc/self/exe", path.data(), path.size());
-    return n > 0 ? path.substr(0, static_cast<std::size_t>(n)) : std::string{};
-#endif
-}
-
-bool runProgram(const std::vector<std::string>& args) {
-    std::vector<const char*> argv;
-    argv.reserve(args.size() + 1);
-    for (const std::string& a : args) argv.push_back(a.c_str());
-    argv.push_back(nullptr);
-    const Owned<SDL_Process*, SDL_DestroyProcess> process{SDL_CreateProcess(argv.data(), false)};
-    if (!process) return false;
-    int code = -1;
-    return SDL_WaitProcess(process.get(), true, &code) && code == 0;
-}
-
-namespace {
-
-// A file's permissions (a program's let it run), or 0644 where the system has none.
-unsigned modeOf(const std::string& path) {
-#if defined(_WIN32)
-    (void)path;
-    return 0644;
-#else
-    struct stat st{};
-    return stat(path.c_str(), &st) == 0 ? static_cast<unsigned>(st.st_mode & 07777) : 0644;
-#endif
-}
-
-// Everything in a folder (folders too, each before what's in it), from it: "a", "a/b.txt"...
-std::vector<std::pair<std::string, bool>> everything(const std::string& folder, const std::string& under = {}) {
-    std::vector<std::pair<std::string, bool>> out; // (path, is a folder)
-    std::vector<std::string> names;
-    SDL_EnumerateDirectory(
-        (folder + under).c_str(),
-        [](void* list, const char*, const char* name) -> SDL_EnumerationResult {
-            return withoutThrowing(SDL_ENUM_FAILURE, [&] {
-                static_cast<std::vector<std::string>*>(list)->emplace_back(name);
-                return SDL_ENUM_CONTINUE;
-            });
-        },
-        &names);
-    std::ranges::sort(names);
-    for (const std::string& name : names) {
-        SDL_PathInfo info{};
-        if (!SDL_GetPathInfo((folder + under + name).c_str(), &info)) continue;
-        const bool dir = info.type == SDL_PATHTYPE_DIRECTORY;
-        out.emplace_back(under + name, dir);
-        if (dir)
-            for (auto& inside : everything(folder, under + name + "/")) out.push_back(std::move(inside));
-    }
-    return out;
-}
-
-} // namespace
-
-bool copyFiles(const std::string& from, const std::string& to) {
-#if defined(__APPLE__) // (ditto keeps what an app needs: its links, permissions and signature)
-    return runProgram({"/usr/bin/ditto", from, to});
-#else
-    SDL_PathInfo info{};
-    if (!SDL_GetPathInfo(from.c_str(), &info)) return false;
-    auto one = [](const std::string& a, const std::string& b) {
-        if (!SDL_CopyFile(a.c_str(), b.c_str())) return false;
-#if !defined(_WIN32)
-        chmod(b.c_str(), static_cast<mode_t>(modeOf(a)));
-#endif
-        return true;
-    };
-    if (info.type != SDL_PATHTYPE_DIRECTORY) return one(from, to);
-    if (!SDL_CreateDirectory(to.c_str())) return false;
-    for (const auto& [path, dir] : everything(from + "/"))
-        if (dir ? !SDL_CreateDirectory((to + "/" + path).c_str()) : !one(from + "/" + path, to + "/" + path)) return false;
-    return true;
-#endif
-}
-
-std::optional<std::string> writeZip(const std::string& folder, const std::string& file) {
-    std::string dir = folder;
-    while (dir.ends_with('/') || dir.ends_with('\\')) dir.pop_back();
-    const std::string top = dir.substr(dir.find_last_of("/\\") + 1);
-    static const auto table = [] { // (CRC-32, as zip files have it)
-        std::array<std::uint32_t, 256> t{};
-        for (std::uint32_t i = 0; i < 256; ++i) {
-            std::uint32_t c = i;
-            for (int k = 0; k < 8; ++k) c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
-            t[i] = c;
-        }
-        return t;
-    }();
-    SDL_DateTime now{};
-    SDL_Time time = 0;
-    if (SDL_GetCurrentTime(&time)) SDL_TimeToDateTime(time, &now, true);
-    const auto dosTime = static_cast<std::uint16_t>((now.hour << 11) | (now.minute << 5) | (now.second / 2));
-    const auto dosDate = static_cast<std::uint16_t>(((std::max(now.year, 1980) - 1980) << 9) | (now.month << 5) | now.day);
-    IOStreamPtr out{SDL_IOFromFile(file.c_str(), "wb")};
-    if (!out) return std::format("Can't write '{}': {}.", file, SDL_GetError());
-    std::string central;
-    std::size_t count = 0;
-    std::uint64_t offset = 0;
-    auto put16 = [](std::string& b, std::uint16_t v) { b += static_cast<char>(v & 0xFF), b += static_cast<char>(v >> 8); };
-    auto put32 = [&](std::string& b, std::uint32_t v) { put16(b, static_cast<std::uint16_t>(v & 0xFFFF)), put16(b, static_cast<std::uint16_t>(v >> 16)); };
-    std::vector<std::pair<std::string, bool>> entries{{"", true}};
-    for (auto& e : everything(dir + "/")) entries.push_back(std::move(e));
-    for (const auto& [path, isDir] : entries) {
-        const std::string name = top + "/" + path + (isDir && !path.empty() ? "/" : "");
-        const std::string full = dir + "/" + path;
-        std::string data;
-        if (!isDir) {
-            std::size_t size = 0;
-            const SdlOwned<> bytes{SDL_LoadFile(full.c_str(), &size)};
-            if (!bytes) return std::format("Can't read {}: {}", full, SDL_GetError());
-            data.assign(static_cast<const char*>(bytes.get()), size);
-        }
-        if (data.size() >= 0xFFFFFFFFu || offset >= 0xFFFFFFFFu) return std::format("{} is too big for a zip file.", folder);
-        std::uint32_t crc = 0xFFFFFFFFu;
-        for (const char ch : data) crc = table[(crc ^ static_cast<unsigned char>(ch)) & 0xFF] ^ (crc >> 8);
-        crc ^= 0xFFFFFFFFu;
-        const unsigned mode = isDir ? 040755u : 0100000u | modeOf(full);
-        std::string local;
-        put32(local, 0x04034b50);
-        put16(local, 20), put16(local, 0x0800), put16(local, 0); // (version, the name in UTF-8, stored)
-        put16(local, dosTime), put16(local, dosDate), put32(local, crc);
-        put32(local, static_cast<std::uint32_t>(data.size())), put32(local, static_cast<std::uint32_t>(data.size()));
-        put16(local, static_cast<std::uint16_t>(name.size())), put16(local, 0);
-        local += name;
-        put32(central, 0x02014b50);
-        put16(central, (3 << 8) | 20), put16(central, 20), put16(central, 0x0800), put16(central, 0); // (made on Unix: its permissions count)
-        put16(central, dosTime), put16(central, dosDate), put32(central, crc);
-        put32(central, static_cast<std::uint32_t>(data.size())), put32(central, static_cast<std::uint32_t>(data.size()));
-        put16(central, static_cast<std::uint16_t>(name.size())), put16(central, 0), put16(central, 0), put16(central, 0), put16(central, 0);
-        put32(central, (mode << 16) | (isDir ? 0x10u : 0u));
-        put32(central, static_cast<std::uint32_t>(offset));
-        central += name;
-        if (SDL_WriteIO(out.get(), local.data(), local.size()) != local.size() || (!data.empty() && SDL_WriteIO(out.get(), data.data(), data.size()) != data.size()))
-            return std::format("Can't write '{}': {}.", file, SDL_GetError());
-        offset += local.size() + data.size();
-        ++count;
-    }
-    std::string end;
-    put32(end, 0x06054b50);
-    put16(end, 0), put16(end, 0), put16(end, static_cast<std::uint16_t>(count)), put16(end, static_cast<std::uint16_t>(count));
-    put32(end, static_cast<std::uint32_t>(central.size())), put32(end, static_cast<std::uint32_t>(offset)), put16(end, 0);
-    const bool ok = SDL_WriteIO(out.get(), central.data(), central.size()) == central.size() && SDL_WriteIO(out.get(), end.data(), end.size()) == end.size();
-    if (!SDL_CloseIO(out.release()) || !ok) return std::format("Can't write '{}': {}.", file, SDL_GetError()); // (closed here: what it says counts)
-    return std::nullopt;
-}
 
 } // namespace vn

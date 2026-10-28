@@ -191,8 +191,8 @@ private:
     // Packs the game folder into `file` (game.vnext next to the folder): what was done, or why not.
     [[nodiscard]] std::expected<std::string, std::string> pack(const std::string& file) const;
     [[nodiscard]] std::string packPath() const;
-    // The finished game, ready to share, next to the game folder (Pack the game, --pack): what was
-    // made, or why not.
+    // Pack the game (and --pack): game.vnext and licenses.txt in a folder named after the game, next to
+    // the game folder: what was made, or why not.
     [[nodiscard]] std::expected<std::string, std::string> finishGame() const;
     [[nodiscard]] bool writeVoiceList() const;
     [[nodiscard]] bool writeTranslation(const std::string& id);

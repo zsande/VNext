@@ -1915,8 +1915,7 @@ private:
             {"letterbox_color", &GameConfig::letterboxColor}};
         static const std::map<std::string_view, std::string GameConfig::*> texts{
             {"title", &GameConfig::title}, {"version", &GameConfig::version}, {"save_id", &GameConfig::saveId}, {"icon", &GameConfig::icon},
-            {"cursor", &GameConfig::cursor}, {"language", &GameConfig::language}, {"mac_signing", &GameConfig::macSigning},
-            {"notary_profile", &GameConfig::notaryProfile}};
+            {"cursor", &GameConfig::cursor}, {"language", &GameConfig::language}};
         static constexpr std::pair<std::string_view, bool> filters[]{{"smooth", false}, {"pixel", true}};
         static constexpr std::pair<std::string_view, SDL_Keymod> holds[]{
             {"ctrl", SDL_KMOD_CTRL}, {"shift", SDL_KMOD_SHIFT}, {"alt", SDL_KMOD_ALT}, {"none", 0}};
