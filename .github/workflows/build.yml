@@ -1,0 +1,46 @@
+# Builds the ready-to-run player for Windows, Linux and macOS. (With no game next to it, the player
+# opens in developer mode; About there shows the licenses of what's built into it.)
+# Download the results from the run's "Artifacts" section.
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 libasound2-dev libpulse-dev libpipewire-0.3-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libdecor-0-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libdbus-1-dev libibus-1.0-dev libudev-dev
+          echo "CC=gcc-14" >> "$GITHUB_ENV"
+          echo "CXX=g++-14" >> "$GITHUB_ENV"
+
+      - name: Configure
+        working-directory: engine
+        run: cmake --preset release
+
+      - name: Build
+        working-directory: engine
+        run: cmake --build --preset release --parallel
+
+      - name: Package
+        run: cmake --install engine/build.nosync --prefix dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VNext-${{ runner.os }}
+          path: dist

@@ -1,0 +1,25 @@
+# Build output (".nosync" keeps iCloud Drive from uploading it), but the player's icons (icon.png, and
+# icon.ico for Windows: tools/make_icon.py), which live there
+engine/build.nosync/*
+!engine/build.nosync/icon.png
+!engine/build.nosync/icon.ico
+build/
+dist/
+# The game being made: it stays on this computer (the repository is the engine)
+/game/
+# The packed game (Pack the game / VNext --pack), and the licenses.txt written next to it
+*.vnext
+*.vnext.part
+/licenses.txt
+# The player built into the project folder
+/VNext.app/
+/VNext.exe
+/VNext
+# Editors and the OS
+.cache/
+.vs/
+.vscode/
+.idea/
+*.user
+.DS_Store
+compile_commands.json

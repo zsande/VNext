@@ -1,0 +1,14 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release",
+      "binaryDir": "${sourceDir}/build.nosync",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release", "configuration": "Release" }
+  ]
+}
