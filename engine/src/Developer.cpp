@@ -258,7 +258,7 @@ void Developer::useTool(int tool) {
     case kLookAgain:
         if (!engine.lookForGame()) {
             d.failed = true;
-            d.status = "There's still no game folder next to the player.";
+            d.status = "There's still no game folder or game.vnext next to the player.";
         }
         break;
     case kQuit:
@@ -475,7 +475,7 @@ void Developer::drawDeveloper() {
     }
     if (engine.noGame() && !d.saidNoGame) {
         d.saidNoGame = true;
-        logInfo("There's no game yet: make a New game, or put a game folder next to the player and Look again.");
+        logInfo("There's no game yet: make a New game, or put a game folder or game.vnext next to the player and Look again.");
     }
 
     const SDL_FRect area{margin, barH + 12 * k, w - 2 * margin, h - barH - 12 * k};

@@ -22,7 +22,7 @@ jobs:
         include:
           - { os: windows-latest, system: Windows }
           - { os: ubuntu-22.04, system: Linux } # (the oldest Linux GitHub has: the player runs on Linux as new as what it's built on)
-          - { os: macos-latest, system: macOS }
+          - { os: macos-15-intel, system: macOS } # (GitHub's Apple-chip Macs are often all busy; the player is for both kinds anyway)
     name: ${{ matrix.system }}
     runs-on: ${{ matrix.os }}
     steps:
@@ -39,6 +39,12 @@ jobs:
             libdbus-1-dev libibus-1.0-dev libudev-dev xvfb
           echo "CC=gcc-14" >> "$GITHUB_ENV"
           echo "CXX=g++-14" >> "$GITHUB_ENV"
+
+      - name: Use the newest Xcode
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          clang++ --version
 
       - name: Configure
         working-directory: engine
