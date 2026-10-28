@@ -21,8 +21,9 @@
 #include <vector>
 
 // A deleted function with its reason, which the compiler says where it's used: C++26's = delete("...")
-// (a plain = delete where the compiler doesn't have it yet).
-#if defined(__cpp_deleted_function) && __cpp_deleted_function >= 202403L
+// (a plain = delete where the compiler doesn't have it yet, or builds an earlier C++: clang has it there too,
+// as an extension it warns about).
+#if defined(__cpp_deleted_function) && __cpp_deleted_function >= 202403L && __cplusplus > 202302L
 #define VN_DELETED(reason) = delete(reason)
 #else
 #define VN_DELETED(reason) = delete

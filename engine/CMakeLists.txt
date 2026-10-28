@@ -18,15 +18,15 @@ if(APPLE)
     enable_language(OBJCXX) # (src/Apple.mm)
 endif()
 
-# C++26; Visual C++ has no switch by that name yet: CMake gives it /std:c++latest for 23 (all of C++23 and
-# what it has of C++26; what's C++26-only is used where a compiler has it, see VN_DELETED in System.hpp).
-if(MSVC)
-    set(CMAKE_CXX_STANDARD 23)
+# C++26 for VNext's own code (the libraries keep their own: see the player below). Visual C++ has no switch
+# by that name yet: CMake gives it /std:c++latest for 23 (all of C++23 and what it has of C++26); and Apple's
+# compilers before clang 21 stop at Apple's own headers in C++26 (they mix enum types), so they get 23 too.
+# What's C++26-only is used where a compiler has it (VN_DELETED in System.hpp).
+if(MSVC OR (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 21))
+    set(vn_cxx 23)
 else()
-    set(CMAKE_CXX_STANDARD 26)
+    set(vn_cxx 26)
 endif()
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Windows: the C++ runtime goes inside the .exe (and SDL's libraries), so players don't need to
 # install anything.
@@ -176,7 +176,9 @@ add_executable(vnext
     src/Licenses.cpp              # the licenses of what's built in (licenses.txt), for About and next to packs
     ${CMAKE_CURRENT_BINARY_DIR}/pl_mpeg.c
 )
-set_target_properties(vnext PROPERTIES OUTPUT_NAME "VNext")
+set_target_properties(vnext PROPERTIES OUTPUT_NAME "VNext"
+    CXX_STANDARD ${vn_cxx} CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+    OBJCXX_STANDARD ${vn_cxx} OBJCXX_STANDARD_REQUIRED ON OBJCXX_EXTENSIONS OFF)
 target_compile_definitions(vnext PRIVATE VN_VERSION="${PROJECT_VERSION}")
 
 target_include_directories(vnext PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/generated)

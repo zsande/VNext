@@ -95,8 +95,9 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          for f in try/data/log.txt try/developer/log.txt $(find "$HOME" -path '*vnext_try_it/log.txt' 2>/dev/null); do
-            echo "== $f"; cat "$f"
+          for f in try/data/log.txt try/developer/log.txt "$HOME/Library/Application Support/VNext/vnext_try_it/log.txt" \
+                   "$HOME/.local/share/VNext/vnext_try_it/log.txt" "$HOME/AppData/Roaming/VNext/vnext_try_it/log.txt"; do
+            if [ -f "$f" ]; then echo "== $f"; cat "$f"; fi
           done
 
       - name: Zip
