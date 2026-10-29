@@ -1,7 +1,8 @@
 # Builds VNext for Windows, Linux and macOS, tries each one on GitHub's machines (a small game's story,
 # developer mode, and the game packed and played with the player next to it: a screenshot of each), and
-# zips each player with licenses.txt. A tag like v0.3.0 also makes a release of it, with the three zips.
-# The zips and screenshots are in each run's "Artifacts" section.
+# zips each player with licenses.txt. A tag like v0.3.0 also makes a release of it, with the three zips
+# and What's new: the release commit's message after its first line (write it as a list: "- ..."), or
+# else the commits since the release before. The zips and screenshots are in each run's "Artifacts" section.
 name: build
 
 # (not for a change to the README, the license, the README's pictures or the Sponsor button alone: there's nothing to build)
@@ -137,6 +138,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          fetch-depth: 0 # (the commits and tags before it, for What's new)
+
       - uses: actions/download-artifact@v4
         with:
           pattern: VNext-*
@@ -146,7 +152,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cat > notes.md <<'EOF'
+          new=$(git -C source log -1 --format=%b "$GITHUB_SHA" | grep -v '^Co-Authored-By:' || true)
+          if [ -z "$new" ]; then # (the commits since the release before)
+            last=$(git -C source describe --tags --abbrev=0 "$GITHUB_SHA^" 2>/dev/null || true)
+            new=$(git -C source log --no-merges --format='- %s' ${last:+"$last.."}"$GITHUB_SHA^")
+          fi
+          printf "## What's new\n\n%s\n\n## Download\n\n" "$new" > notes.md
+          cat >> notes.md <<'EOF'
           Download the zip for your computer, unzip it and open VNext. With no game next to it, it opens in developer mode, where you make one. To play a finished game, put its game.vnext next to VNext: the game keeps its players' saves and progress in that file.
 
           - **Windows** (10 or newer): `VNext-Windows.zip`. The first time, Windows may say it protected your PC: click **More info**, then **Run anyway**.
