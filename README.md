@@ -20,7 +20,7 @@ The idea, the design and the direction of VNext are mine, and every line of its 
 
 ## Download
 
-Get VNext from the [Releases page](https://github.com/zsande/VNext/releases): a zip for Windows or macOS, with the player and licenses.txt, or an AppImage for Linux, which you first allow to run as a program. VNext isn't signed by Apple or Microsoft yet, so the first time, macOS asks you to allow it in System Settings → Privacy & Security (Open Anyway), and Windows says it protected your PC (More info, then Run anyway).
+Get VNext from the [Releases page](https://github.com/zsande/VNext/releases): a zip for Windows, macOS or Linux, with the player and licenses.txt (on Linux, the player is an AppImage). VNext isn't signed by Apple or Microsoft yet, so the first time, macOS asks you to allow it in System Settings → Privacy & Security (Open Anyway), and Windows says it protected your PC (More info, then Run anyway).
 
 ## Status
 
