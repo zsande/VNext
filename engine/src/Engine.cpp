@@ -580,14 +580,15 @@ std::string Engine::packPath() const {
 // (licenses.txt), to go out with them.
 std::expected<std::string, std::string> Engine::pack(const std::string& file) const {
     if (packed_) return std::unexpected("This game is a pack already: open its game folder to pack it again.");
-    if (!script_.ok()) return std::unexpected("Fix the scripts first: a game with mistakes in it can't be packed.");
+    if (!script_.ok()) return std::unexpected("Fix the scripts first: a game with mistakes in it can't be packed. The Story tab and the log say where.");
     const Uint64 start = SDL_GetTicksNS();
     const auto report = writePack(gameRoot_, file);
     if (!report) return std::unexpected(report.error());
     const std::string notices = file.substr(0, file.find_last_of("/\\") + 1) + "licenses.txt";
     if (!SDL_SaveFile(notices.c_str(), licenses().data(), licenses().size()))
         return std::unexpected(std::format("Packed the game, but can't write '{}': {}.", notices, SDL_GetError()));
-    return std::format("Packed {} files ({:.1f} MB) into {} ({:.1f} MB) in {:.1f} seconds, with licenses.txt next to it.", report->files,
+    return std::format("Packed {} ({:.1f} MB) into {} ({:.1f} MB) in {:.1f} seconds, with licenses.txt next to it.",
+                       report->files == 1 ? std::string("1 file") : std::format("{} files", report->files),
                        megabytes(report->bytes), file, megabytes(report->packed), static_cast<double>(SDL_GetTicksNS() - start) / 1e9);
 }
 
@@ -597,19 +598,23 @@ std::expected<std::string, std::string> Engine::pack(const std::string& file) co
 // goes to the Trash first.
 std::expected<std::string, std::string> Engine::finishGame() const {
     if (packed_) return std::unexpected("This game is a pack already: open its game folder to pack it again.");
-    if (!script_.ok()) return std::unexpected("Fix the scripts first: a game with mistakes in it can't be packed.");
+    if (!script_.ok()) return std::unexpected("Fix the scripts first: a game with mistakes in it can't be packed. The Story tab and the log say where.");
+    const std::string folder = finishedFolder();
+    if (SDL_GetPathInfo(folder.c_str(), nullptr) && !moveToTrash(folder)) return std::unexpected(std::format("Can't replace '{}': move it away first.", folder));
+    if (!SDL_CreateDirectory(folder.c_str())) return std::unexpected(std::format("Can't make '{}': {}.", folder, SDL_GetError()));
+    auto packed = pack(folder + "/" + std::string(kPackName));
+    if (packed) *packed += " To play it, put VNext next to game.vnext: VNext.app, VNext.exe or VNext, from VNext's releases on GitHub.";
+    return packed;
+}
+
+std::string Engine::finishedFolder() const {
     std::string name; // (the game's title, as a file's name)
     for (const char c : script_.config.title)
         if (!std::string_view("/\\:*?\"<>|").contains(c) && static_cast<unsigned char>(c) >= 32) name += c;
     name = std::string(trim(name));
     while (name.starts_with('.')) name.erase(0, 1);
     if (name.empty()) name = "Game";
-    const std::string folder = packPath().substr(0, packPath().size() - kPackName.size()) + name;
-    if (SDL_GetPathInfo(folder.c_str(), nullptr) && !moveToTrash(folder)) return std::unexpected(std::format("Can't replace '{}': move it away first.", folder));
-    if (!SDL_CreateDirectory(folder.c_str())) return std::unexpected(std::format("Can't make '{}': {}.", folder, SDL_GetError()));
-    auto packed = pack(folder + "/" + std::string(kPackName));
-    if (packed) *packed += " To play it, put VNext next to game.vnext: VNext.app, VNext.exe or VNext, from VNext's releases on GitHub.";
-    return packed;
+    return packPath().substr(0, packPath().size() - kPackName.size()) + name;
 }
 
 

@@ -231,6 +231,7 @@ void Developer::useTool(int tool) {
     case kPack:
         d.packIn = 2; // after the next frame, which says what's happening
         d.status = "Packing the game...";
+        engine.reloadRequested_ = true; // (first the game is read again, so its scripts are checked as they are now)
         break;
     case kFolder: {
         const std::string folder = engine.noGame() ? engine.gamePlaces().front() : engine.gameRoot();
@@ -284,7 +285,7 @@ void Developer::reloaded() {
     } else if (d.open) {
         d.editor.load(engine.gameRoot()); // (the files may have changed outside the player)
         d.failed = engine.mode() == Engine::Mode::Error;
-        d.status = d.failed ? "The scripts need fixing: the Story tab and the log say where." : "Reloaded the scripts, images and audio.";
+        if (d.packIn == 0) d.status = d.failed ? "The scripts need fixing: the Story tab and the log say where." : "Reloaded the scripts, images and audio.";
     }
 }
 
@@ -307,6 +308,22 @@ void Developer::updateDeveloper() {
         const auto packed = engine.finishGame();
         d.failed = !packed;
         d.status = packed ? *packed : packed.error();
+        // Said in a window of its own too (the log isn't always in view), with the way to the packed game.
+        const SDL_MessageBoxButtonData buttons[]{
+            {.flags = 0, .buttonID = 1, .text = "Show the folder"},
+            {.flags = SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT | SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, .buttonID = 0, .text = "OK"}};
+        const SDL_MessageBoxData box{.flags = (packed ? SDL_MESSAGEBOX_INFORMATION : SDL_MESSAGEBOX_ERROR) | SDL_MESSAGEBOX_BUTTONS_LEFT_TO_RIGHT,
+                                     .window = engine.window(),
+                                     .title = packed ? "The game is packed" : "The game can't be packed",
+                                     .message = d.status.c_str(),
+                                     .numbuttons = packed ? 2 : 1,
+                                     .buttons = packed ? buttons : buttons + 1,
+                                     .colorScheme = nullptr};
+        int clicked = 0;
+        if (SDL_ShowMessageBox(&box, &clicked) && clicked == 1) {
+            const std::string folder = engine.finishedFolder();
+            if (!SDL_OpenURL(fileUrl(folder).c_str())) d.status += std::format(" Can't show '{}': {}.", folder, SDL_GetError());
+        }
     }
 }
 
