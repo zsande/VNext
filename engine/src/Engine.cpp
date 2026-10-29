@@ -576,20 +576,34 @@ std::string Engine::packPath() const {
     return (slash == std::string::npos ? std::string{} : folder.substr(0, slash + 1)) + std::string(kPackName);
 }
 
+// What packing says, a sentence or two a line (the developer tools' window shows the lines apart, the log
+// on one line).
+namespace {
+constexpr std::string_view kPackedAlready = "Can't pack the game: it's a pack already.\nOpen its game folder to pack it again.";
+constexpr std::string_view kScriptsWrong = "Can't pack the game: its scripts have mistakes.\nThe Story tab and the log say where.";
+} // namespace
+
 // Packs the game into `file`, and writes the licenses of what's built into the player next to it
 // (licenses.txt), to go out with them.
 std::expected<std::string, std::string> Engine::pack(const std::string& file) const {
-    if (packed_) return std::unexpected("This game is a pack already: open its game folder to pack it again.");
-    if (!script_.ok()) return std::unexpected("Fix the scripts first: a game with mistakes in it can't be packed. The Story tab and the log say where.");
+    if (packed_) return std::unexpected(std::string(kPackedAlready));
+    if (!script_.ok()) return std::unexpected(std::string(kScriptsWrong));
+    const auto holds = packInto(file);
+    if (!holds) return holds;
+    return std::format("Packed the game into '{}', with 'licenses.txt' next to it.\n{}", file, *holds);
+}
+
+// The pack written as `file`, with licenses.txt next to it: what it holds and how long it took to make.
+std::expected<std::string, std::string> Engine::packInto(const std::string& file) const {
     const Uint64 start = SDL_GetTicksNS();
     const auto report = writePack(gameRoot_, file);
     if (!report) return std::unexpected(report.error());
     const std::string notices = file.substr(0, file.find_last_of("/\\") + 1) + "licenses.txt";
     if (!SDL_SaveFile(notices.c_str(), licenses().data(), licenses().size()))
         return std::unexpected(std::format("Packed the game, but can't write '{}': {}.", notices, SDL_GetError()));
-    return std::format("Packed {} ({:.1f} MB) into {} ({:.1f} MB) in {:.1f} seconds, with licenses.txt next to it.",
-                       report->files == 1 ? std::string("1 file") : std::format("{} files", report->files),
-                       megabytes(report->bytes), file, megabytes(report->packed), static_cast<double>(SDL_GetTicksNS() - start) / 1e9);
+    return std::format("The pack holds {} ({:.1f} MB) in {:.1f} MB, made in {:.1f} seconds.",
+                       report->files == 1 ? std::string("1 file") : std::format("{} files", report->files), megabytes(report->bytes),
+                       megabytes(report->packed), static_cast<double>(SDL_GetTicksNS() - start) / 1e9);
 }
 
 // Pack the game: next to the game folder, a folder named after the game with game.vnext (the game in
@@ -597,14 +611,16 @@ std::expected<std::string, std::string> Engine::pack(const std::string& file) co
 // next to game.vnext: VNext.app, VNext.exe or VNext, from VNext's releases on GitHub. One made before
 // goes to the Trash first.
 std::expected<std::string, std::string> Engine::finishGame() const {
-    if (packed_) return std::unexpected("This game is a pack already: open its game folder to pack it again.");
-    if (!script_.ok()) return std::unexpected("Fix the scripts first: a game with mistakes in it can't be packed. The Story tab and the log say where.");
+    if (packed_) return std::unexpected(std::string(kPackedAlready));
+    if (!script_.ok()) return std::unexpected(std::string(kScriptsWrong));
     const std::string folder = finishedFolder();
     if (SDL_GetPathInfo(folder.c_str(), nullptr) && !moveToTrash(folder)) return std::unexpected(std::format("Can't replace '{}': move it away first.", folder));
     if (!SDL_CreateDirectory(folder.c_str())) return std::unexpected(std::format("Can't make '{}': {}.", folder, SDL_GetError()));
-    auto packed = pack(folder + "/" + std::string(kPackName));
-    if (packed) *packed += " To play it, put VNext next to game.vnext: VNext.app, VNext.exe or VNext, from VNext's releases on GitHub.";
-    return packed;
+    const auto holds = packInto(folder + "/" + std::string(kPackName));
+    if (!holds) return holds;
+    return std::format("Packed the game: 'game.vnext' and 'licenses.txt' are in '{}'.\n{}\n"
+                       "To play it, put VNext next to 'game.vnext': VNext.app, VNext.exe or VNext, from VNext's releases on GitHub.",
+                       folder, *holds);
 }
 
 std::string Engine::finishedFolder() const {

@@ -190,6 +190,7 @@ private:
     [[nodiscard]] Script readScript() const;
     // Packs the game folder into `file` (game.vnext next to the folder): what was done, or why not.
     [[nodiscard]] std::expected<std::string, std::string> pack(const std::string& file) const;
+    [[nodiscard]] std::expected<std::string, std::string> packInto(const std::string& file) const; // (what pack() and finishGame() share)
     [[nodiscard]] std::string packPath() const;
     // Pack the game (and --pack): game.vnext and licenses.txt in a folder named after the game, next to
     // the game folder (finishedFolder()): what was made, or why not.

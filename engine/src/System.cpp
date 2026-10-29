@@ -766,8 +766,8 @@ std::expected<PackReport, std::string> writePack(const std::string& folder, cons
     std::uint64_t at = kHeaderSize;
     for (const std::string& path : paths) {
         auto data = readFile(folder + path);
-        if (!data) return fail(std::format("Can't read {}: {}", path, SDL_GetError()));
-        if (path.size() > 0xFFFF) return fail(std::format("The path {} is too long.", path));
+        if (!data) return fail(std::format("Can't read '{}': {}.", path, SDL_GetError()));
+        if (path.size() > 0xFFFF) return fail(std::format("Can't pack '{}': its path is too long.", path));
         Entry e{.offset = at, .stored = 0, .size = data->size(), .method = 0, .check = checkOf(*data)};
         if (compressible(path))
             if (std::string small = compress(*data); small.size() < data->size() - data->size() / 16) {

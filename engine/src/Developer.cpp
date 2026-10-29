@@ -306,16 +306,22 @@ void Developer::updateDeveloper() {
     if (d.packIn > 0) --d.packIn;
     if (packNow) {
         const auto packed = engine.finishGame();
+        const std::string& said = packed ? *packed : packed.error(); // (a sentence or two a line)
         d.failed = !packed;
-        d.status = packed ? *packed : packed.error();
-        // Said in a window of its own too (the log isn't always in view), with the way to the packed game.
+        d.status = said;
+        std::ranges::replace(d.status, '\n', ' '); // (the log has it on one line)
+        // Said in a window of its own too (the log isn't always in view): its title says how it went, the
+        // rest a line apart, and after a pack there's the way to it.
+        const std::string title = packed ? "Packed the game" : "Can't pack the game";
+        std::string body = said.starts_with(title + ": ") ? upperFirst(said.substr(title.size() + 2)) : said;
+        for (std::size_t at = body.find('\n'); at != std::string::npos; at = body.find('\n', at + 2)) body.insert(at, 1, '\n');
         const SDL_MessageBoxButtonData buttons[]{
             {.flags = 0, .buttonID = 1, .text = "Show the folder"},
             {.flags = SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT | SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, .buttonID = 0, .text = "OK"}};
         const SDL_MessageBoxData box{.flags = (packed ? SDL_MESSAGEBOX_INFORMATION : SDL_MESSAGEBOX_ERROR) | SDL_MESSAGEBOX_BUTTONS_LEFT_TO_RIGHT,
                                      .window = engine.window(),
-                                     .title = packed ? "The game is packed" : "The game can't be packed",
-                                     .message = d.status.c_str(),
+                                     .title = title.c_str(),
+                                     .message = body.c_str(),
                                      .numbuttons = packed ? 2 : 1,
                                      .buttons = packed ? buttons : buttons + 1,
                                      .colorScheme = nullptr};
