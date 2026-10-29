@@ -650,6 +650,7 @@ void Engine::configure() {
     SurfacePtr icon{noGame_ || cfg.icon.empty() ? nullptr : IMG_Load_IO(files_.open(gameRoot_ + cfg.icon).release(), true)}; // (a missing file is fine)
     if (!icon) icon.reset(IMG_Load_IO(SDL_IOFromConstMem(kIconPng, sizeof kIconPng), true));
     if (icon) SDL_SetWindowIcon(window_.get(), icon.get());
+    SDL_SetWindowResizable(window_.get(), cfg.resizable); // (the developer tools too: one setting for both)
     // Saves go into game.vnext for a pack that keeps them (inPack_), in game/saves for a game folder
     // (unless --data was given, or it's inside an app, or the folder can't take them), else in the
     // player's own folder.

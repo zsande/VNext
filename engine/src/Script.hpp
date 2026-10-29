@@ -557,6 +557,7 @@ struct GameConfig {
     std::string cursor;               // a picture for the mouse pointer (else the system's)
     SDL_Point cursorHotspot{0, 0};    // the point of it that clicks
     SDL_Color letterboxColor{0, 0, 0, 255}; // around the picture when the window isn't the same shape
+    bool resizable = true;            // the window's edges can be dragged to resize it (the game's, and the developer tools': one setting)
     int width = 1280;
     int height = 720;
     int savePages = 9;

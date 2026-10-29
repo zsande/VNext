@@ -390,7 +390,7 @@ void Developer::drawDeveloper() {
     DeveloperUi ui(engine, r, engine.toolsFonts_, d, k);
     if (!std::exchange(d.listenShown, false)) engine.audio().stopListening(); // (its button is gone)
     if (d.moviePlaying && engine.audio().listening() != d.movieOf) d.stopMovie();   // (stopped, or something else plays)
-    draw::rect(r, {0, 0, w, h}, kPanel);
+    draw::rect(r, {0, 0, w, h}, kPanel); // (opaque: the game under the tools is drawn at its own size, and would show through)
     // A list open under a field takes the clicks and the wheel over it (it's drawn last, over the
     // rest); a click anywhere else but its field closes it.
     d.popup.shown = false;
@@ -445,6 +445,9 @@ void Developer::drawDeveloper() {
             engine.canvas_ = {static_cast<float>(c.width), static_cast<float>(c.height)};
             engine.updatePixelScale(); // (the game's view takes it; the tools' stays the window's)
         }
+        // Whether the window can be resized, as Settings has it now: the tools' window is the game's.
+        if (const bool resizable = d.script->config.resizable; resizable != ((SDL_GetWindowFlags(window) & SDL_WINDOW_RESIZABLE) != 0))
+            SDL_SetWindowResizable(window, resizable);
         std::ranges::move(missingFiles(*d.script), std::back_inserter(d.problems));
     }
 

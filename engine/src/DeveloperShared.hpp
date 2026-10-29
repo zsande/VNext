@@ -289,6 +289,7 @@ constexpr std::array kSettings{
     Setting{.name = "resolution", .label = "Game size", .standard = "1280 720", .help = "Width and height in pixels: the screens are laid out on it", .box = Box::WidthHeight},
     Setting{.name = "icon", .label = "Icon", .help = "The window's icon", .quoted = true, .box = Box::PictureFile},
     Setting{.name = "letterbox_color", .label = "Letterbox colour", .standard = "black", .help = "The colour around the game when the window isn't the same shape", .box = Box::Colour},
+    Setting{.name = "resizable", .label = "Resizable window", .standard = "yes", .help = "Whether the window can be resized by dragging its edges, in the game and in the developer tools", .box = Box::YesNo},
     Setting{.name = "cursor", .label = "Mouse pointer", .help = "An image in images/ for the mouse pointer (empty: the system's)", .quoted = true, .box = Box::Picture},
     Setting{.name = "cursor_hotspot", .label = "Pointer's tip", .standard = "0 0", .help = "The pixel of that image that points", .with = true, .box = Box::Point},
     Setting{.label = "Saves"},
@@ -484,7 +485,7 @@ void showStyleValues(std::vector<StoryEditor::Field>& fields, const Style& style
 // (a move's time, a shake's strength, a transition's seconds, blinking...), that value.
 void showConfigValues(std::vector<StoryEditor::Field>& fields, const GameConfig& config, const Palette& palette);
 
-constexpr SDL_Color kPanel{16, 18, 28, 245}, kBar{30, 36, 56, 255}, kAccent{130, 200, 255, 255}, kButton{44, 52, 80, 255},
+constexpr SDL_Color kPanel{16, 18, 28, 255}, kBar{30, 36, 56, 255}, kAccent{130, 200, 255, 255}, kButton{44, 52, 80, 255},
     kButtonHover{66, 82, 126, 255}, kEdge{92, 112, 168, 255}, kChosen{70, 92, 150, 255}, kBox{8, 9, 14, 255}, kGood{140, 230, 160, 255},
     kBad{255, 140, 150, 255}, kWarn{255, 205, 120, 255}, kOptionArrow{210, 150, 255, 255};
 

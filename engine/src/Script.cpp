@@ -1910,7 +1910,7 @@ private:
         };
         static const std::map<std::string_view, bool GameConfig::*> flags{
             {"autosave", &GameConfig::autosave}, {"voice_sync", &GameConfig::voiceSync}, {"developer", &GameConfig::developer}, {"glide", &GameConfig::glide},
-            {"blink", &GameConfig::blink}};
+            {"blink", &GameConfig::blink}, {"resizable", &GameConfig::resizable}};
         static const std::map<std::string_view, SDL_Color GameConfig::*> colors{
             {"flash_color", &GameConfig::flashColor}, {"narrator_color", &GameConfig::narratorColor},
             {"letterbox_color", &GameConfig::letterboxColor}};
