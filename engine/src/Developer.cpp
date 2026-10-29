@@ -336,7 +336,7 @@ void Developer::updateDeveloper() {
 void Developer::listenButton(DeveloperUi& ui, const SDL_FRect& at, const std::string& path, bool small) {
     const bool playing = engine.audio().listening() == path;
     tools.listenShown = tools.listenShown || playing;
-    if (ui.button(at, small ? "" : playing ? "Stop" : "Play", playing, true, small ? 13.0f : 14.0f)) {
+    if (ui.button(at, small ? "" : playing ? "Stop" : "Play", playing, true, small ? layout::smallButtonText : layout::buttonText)) {
         if (playing) {
             engine.audio().stopListening();
         } else {
@@ -354,8 +354,8 @@ void Developer::listenButton(DeveloperUi& ui, const SDL_FRect& at, const std::st
 
 void Developer::asTextButton(DeveloperUi& ui, float rightEdge, float y) {
     const float k = ui.k;
-    const float toggleW = std::max(ui.buttonWidth("As a form", 14, layout::toggleW), ui.buttonWidth("As text", 14, layout::toggleW)); // (one size, either way)
-    if (ui.button({rightEdge - toggleW, y, toggleW, layout::buttonH * k}, tools.asText ? "As a form" : "As text", false, true, 14)) {
+    const float toggleW = std::max(ui.buttonWidth("As a form", layout::buttonText, layout::toggleW), ui.buttonWidth("As text", layout::buttonText, layout::toggleW)); // (one size, either way)
+    if (ui.button({rightEdge - toggleW, y, toggleW, layout::buttonH * k}, tools.asText ? "As a form" : "As text", false, true, layout::buttonText)) {
         tools.asText = !tools.asText;
         tools.focus.clear();
     }
@@ -374,12 +374,23 @@ void Developer::drawDeveloper() {
     SDL_Renderer* r = engine.renderer();
     DeveloperTools& d = tools;
     d.used = 0;
-    const float k = engine.canvas().h / 720.0f, w = engine.canvas().w, h = engine.canvas().h, margin = layout::margin * k, barH = layout::barH * k;
-    DeveloperUi ui(engine, r, engine.fonts_, d, k);
+    // The window as the tools have it (Engine::useView): its own size, in its own points (bigger where the
+    // screen is set to show things bigger, as Windows at 150% does), and all of it smaller in a window too
+    // small for the tools (by sixteenths: a font for each size it's been).
+    SDL_Window* window = engine.window();
+    int ww = 0, wh = 0;
+    SDL_GetWindowSize(window, &ww, &wh);
+    const float w = static_cast<float>(std::max(ww, 1)), h = static_cast<float>(std::max(wh, 1));
+    const float density = SDL_GetWindowPixelDensity(window), shown = SDL_GetWindowDisplayScale(window);
+    const float own = density > 0.0f && shown > 0.0f ? std::clamp(shown / density, 0.5f, 4.0f) : 1.0f;
+    const float k = own * std::floor(std::min({1.0f, w / (layout::leastW * own), h / (layout::leastH * own)}) * 16.0f) / 16.0f;
+    const float margin = layout::margin * k;
+    d.k = k;
+    d.size = {w, h};
+    DeveloperUi ui(engine, r, engine.toolsFonts_, d, k);
     if (!std::exchange(d.listenShown, false)) engine.audio().stopListening(); // (its button is gone)
     if (d.moviePlaying && engine.audio().listening() != d.movieOf) d.stopMovie();   // (stopped, or something else plays)
     draw::rect(r, {0, 0, w, h}, kPanel);
-    draw::rect(r, {0, 0, w, barH}, kBar);
     // A list open under a field takes the clicks and the wheel over it (it's drawn last, over the
     // rest); a click anywhere else but its field closes it.
     d.popup.shown = false;
@@ -432,15 +443,13 @@ void Developer::drawDeveloper() {
         if (const GameConfig& c = d.script->config;
             c.width > 0 && c.height > 0 && (engine.canvas().w != static_cast<float>(c.width) || engine.canvas().h != static_cast<float>(c.height))) {
             engine.canvas_ = {static_cast<float>(c.width), static_cast<float>(c.height)};
-            SDL_RendererLogicalPresentation mode = SDL_LOGICAL_PRESENTATION_LETTERBOX;
-            SDL_GetRenderLogicalPresentation(r, nullptr, nullptr, &mode);
-            SDL_SetRenderLogicalPresentation(r, c.width, c.height, mode); // (the tools are laid out on it too: right from the next frame)
-            engine.updatePixelScale();
+            engine.updatePixelScale(); // (the game's view takes it; the tools' stays the window's)
         }
         std::ranges::move(missingFiles(*d.script), std::back_inserter(d.problems));
     }
 
-    // The bar: the tabs on the left, the tools on the right (narrower in a narrow window).
+    // The bar: the tabs on the left, the tools on the right; in a window too narrow for both, the tools
+    // go on a row of their own under the tabs (and what's still too wide is drawn narrower).
     std::vector<std::pair<View, std::string_view>> tabs;
     if (editing) {
         tabs = {{View::Story, "Story"}, {View::Map, "Map"}, {View::Screens, "Screens"}, {View::Library, "Library"}};
@@ -455,21 +464,25 @@ void Developer::drawDeveloper() {
         if (t.tool == kPlay && !engine.waiting_) t.label = "Back to the game";
         if (t.tool == kPlayScene && d.view == View::Story && d.row && d.moreRows.empty() && !d.character) t.label = "Play from this line";
     }
-    const float pad = layout::tabPad * k, gap = layout::toolGap * k;
-    float needed = 0.0f;
-    for (const auto& tab : tabs) needed += ui.width(tab.second, layout::tabText) + pad;
-    for (const ToolButton& t : toolButtons) needed += ui.width(t.label, layout::toolText) + pad + gap;
-    const float fit = std::min(1.0f, (w - 2 * margin - 24 * k) / needed);
+    const float pad = layout::tabPad * k, gap = layout::toolGap * k, between = 24 * k, room = w - 2 * margin;
+    float tabsW = 0.0f, toolsW = 0.0f;
+    for (const auto& tab : tabs) tabsW += ui.width(tab.second, layout::tabText) + pad;
+    for (const ToolButton& t : toolButtons) toolsW += ui.width(t.label, layout::toolText) + pad + gap;
+    const bool twoRows = (room - between) / (tabsW + toolsW) < layout::barLeast;
+    const float tabsFit = std::min(1.0f, twoRows ? room / tabsW : (room - between) / (tabsW + toolsW)), toolsFit = twoRows ? std::min(1.0f, room / toolsW) : tabsFit;
+    auto shrunk = [](float size, float fit) { return fit < 1.0f ? std::max(10.0f, std::floor(size * fit)) : size; }; // (whole sizes: a font each)
+    const float barH = (twoRows ? layout::tabsRowH : layout::barH) * k, toolsY = twoRows ? barH : 0.0f, barsH = twoRows ? barH + layout::toolsRowH * k : barH;
+    draw::rect(r, {0, 0, w, barsH}, kBar);
     float x = margin;
     for (const auto& [view, label] : tabs) {
-        const float bw = (ui.width(label, layout::tabText) + pad) * fit;
+        const float bw = (ui.width(label, layout::tabText) + pad) * tabsFit;
         auto wrongIn = [&](const auto& items) { return std::ranges::any_of(items, [&](const auto& it) { return d.problemWithin(it.file, it.line, it.end); }); };
         const bool wrong = editing && (view == View::Screens ? wrongIn(d.editor.screens())
                                        : view == View::Library ? wrongIn(d.editor.definitions("variable")) ||
                                                                      std::ranges::any_of(kDefinitionKinds, [&](const DefinitionKind& kind) { return wrongIn(d.editor.definitions(kind.kind)); })
                                        : view == View::Story || view == View::Map ? std::ranges::contains(d.wrongScenes(), true)
                                                                : view == View::Settings && std::ranges::any_of(d.problems, [&](const ScriptError& e) { return inSettings(d.editor, e); }));
-        if (ui.tab({x, 0, bw, barH}, label, d.view == view, wrong) && d.view != view) {
+        if (ui.tab({x, 0, bw, barH}, label, d.view == view, wrong, shrunk(layout::tabText, tabsFit)) && d.view != view) {
             d.view = view;
             d.scroll = 0;
             d.focus.clear();
@@ -478,12 +491,14 @@ void Developer::drawDeveloper() {
         x += bw;
     }
     x = w - margin;
+    const float toolH = (twoRows ? layout::toolsRowH - 6 : layout::barH - 16) * k; // (in the middle of its row)
     for (const ToolButton& t : toolButtons | std::views::reverse) {
-        const float bw = (ui.width(t.label, layout::toolText) + pad) * fit;
+        const float bw = (ui.width(t.label, layout::toolText) + pad) * toolsFit;
         x -= bw;
         const bool enabled = t.tool != kPlayScene || (d.view == View::Story && !d.editor.scenes().empty());
-        if (ui.button({x, 8 * k, bw, barH - 16 * k}, t.label, t.tool == kPlay, enabled, layout::toolText)) useTool(t.tool);
-        x -= gap * fit;
+        const float rowH = twoRows ? layout::toolsRowH * k : barH;  // (the tools' own row, or the tabs')
+        if (ui.button({x, toolsY + (rowH - toolH) / 2, bw, toolH}, t.label, t.tool == kPlay, enabled, shrunk(layout::toolText, toolsFit))) useTool(t.tool);
+        x -= gap * toolsFit;
     }
 
     // What the last tool did goes to the log (the Log tab), once, as it changes.
@@ -501,7 +516,7 @@ void Developer::drawDeveloper() {
         logInfo("There's no game yet: make a New game, or put a game folder or game.vnext next to the player and Look again.");
     }
 
-    const SDL_FRect area{margin, barH + 12 * k, w - 2 * margin, h - barH - 12 * k};
+    const SDL_FRect area{margin, barsH + margin, w - 2 * margin, std::max(0.0f, h - barsH - 2 * margin)}; // (the same room on each side)
     if (d.view == View::Story && editing) drawStory(ui, area);
     else if (d.view == View::Map && editing) drawMap(ui, area);
     else if (d.view == View::Screens && editing) drawScreens(ui, area);
@@ -746,7 +761,7 @@ bool Developer::goTo(const std::string& path, std::size_t line) {
             const auto rows = editor.rows(scenes[i]);
             if (const auto row = std::ranges::find(rows, line, &StoryEditor::Row::line); row != rows.end()) {
                 d.row = line;
-                d.rowsScroll = std::max(0.0f, static_cast<float>(row - rows.begin()) * 30 * (engine.canvas().h / 720.0f) - 120 * (engine.canvas().h / 720.0f));
+                d.rowsScroll = std::max(0.0f, static_cast<float>(row - rows.begin() - 4) * layout::listItemH * d.k); // (a few lines over it in sight)
             }
             return true;
         }

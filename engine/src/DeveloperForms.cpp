@@ -285,7 +285,7 @@ std::optional<std::string> Developer::drawFormatBar(DeveloperUi& ui, const std::
         else if (label == "Pause") list({.name = "pause", .box = Box::Pause});
         else if (label == "Variable") list({.name = "variable", .box = Box::Variable});
         else if (label == "Appears") list({.name = "appears", .box = Box::Reveal, .choices = "letter word line"});
-        else clicked = ui.button(b, label, false, true, 13);
+        else clicked = ui.button(b, label, false, true, layout::smallButtonText);
         if (!clicked && !picked) continue;
         if (label == "Bold") wrap("{bold}", "{/bold}");
         else if (label == "Italic") wrap("{italic}", "{/italic}");
@@ -335,15 +335,15 @@ std::optional<std::string> Developer::drawFormatBar(DeveloperUi& ui, const std::
         std::vector<std::string_view> labels{"Spelling:"};
         for (const std::string& g : it->second) labels.emplace_back(g);
         labels.emplace_back("Learn it");
-        const auto row = ui.flow(labels, w, h, 4 * k, 13);
+        const auto row = ui.flow(labels, w, h, layout::barButtonGap * k, layout::smallButtonText);
         y += 4 * k;
         for (std::size_t i = 0; i < labels.size(); ++i) {
             const SDL_FRect b{x + row[i].x, y + row[i].y, row[i].w, row[i].h};
             if (i == 0) {
-                ui.textAround(labels[0], b.x, b.y + b.h / 2, 13, kBad);
+                ui.textAround(labels[0], b.x, b.y + b.h / 2, layout::labelText, kBad);
                 continue;
             }
-            if (!ui.button(b, labels[i], false, true, 13)) continue;
+            if (!ui.button(b, labels[i], false, true, layout::smallButtonText)) continue;
             if (i + 1 == labels.size()) {
                 learnSpelling(word);
                 d.spelling.erase(language + "|" + word);
@@ -418,16 +418,16 @@ void Developer::drawPopup(DeveloperUi& ui) {
     const float pad = layout::popupPad * k, itemH = layout::itemH * k, cellW = layout::cellW * k, cellH = layout::cellH * k;
     float w = std::max(p.at.w, (pictures ? layout::picturesW : layout::listW) * k);
     for (const PopupEntry& e : entries) // (an entry with what it is said after it: room for the longest, up to half the window)
-        if (!pictures && !e.about.empty()) w = std::max(w, std::min(ui.width(e.label, 14) + 12 * k + ui.width(e.about, 14) + 44 * k, engine.canvas().w / 2));
+        if (!pictures && !e.about.empty()) w = std::max(w, std::min(ui.width(e.label, layout::popupText) + 12 * k + ui.width(e.about, layout::popupText) + 44 * k, d.size.x / 2));
     const auto perRow = pictures ? std::max<std::size_t>(1, static_cast<std::size_t>((w - pad) / (cellW + pad))) : 1;
     const std::size_t rows = (entries.size() + perRow - 1) / perRow;
     const float listH = static_cast<float>(rows) * (pictures ? cellH + pad : itemH) + (byVariable ? itemH : 0.0f);
     const float valueH = layout::codeH * k, discD = layout::wheelD * k; // (the colour's code, then its wheel: drawColourWheel)
     const float gridH = colors ? valueH + pad + itemH + pad + discD + pad : 0.0f; // (the code, the gradient buttons, the wheel)
     const float content = std::max(listH + gridH, itemH) + 2 * pad;
-    const float margin = layout::popupMargin * k, lift = layout::popupGap * k, below = engine.canvas().h - margin - (p.at.y + p.at.h + lift), above = p.at.y - lift - margin;
+    const float margin = layout::popupMargin * k, lift = layout::popupGap * k, below = d.size.y - margin - (p.at.y + p.at.h + lift), above = p.at.y - lift - margin;
     float h = std::min(content, (colors ? layout::wheelMaxH : layout::listMaxH) * k);
-    SDL_FRect box{std::min(p.at.x, engine.canvas().w - margin - w), p.at.y + p.at.h + lift, w, h};
+    SDL_FRect box{std::min(p.at.x, d.size.x - margin - w), p.at.y + p.at.h + lift, w, h};
     if (h > below && above > below) box.y = p.at.y - lift - (h = std::min(h, above)); // (no room under it: over it)
     else h = std::min(h, below);
     box.h = h;
@@ -448,17 +448,17 @@ void Developer::drawPopup(DeveloperUi& ui) {
     if (byVariable) {
         const SDL_FRect row{box.x + pad, listTop, box.w - 2 * pad, itemH - 2 * k};
         if (ui.over(row)) draw::rect(r, row, kButtonHover);
-        ui.textAround("Depends on a variable...", row.x + 8 * k, row.y + row.h / 2, 14, kAccent);
+        ui.textAround("Depends on a variable...", row.x + 8 * k, row.y + row.h / 2, layout::popupText, kAccent);
         if (ui.click(row)) pop.clicked = std::string(kPictureBy);
     }
     const float itemsTop = listTop + (byVariable ? itemH : 0.0f);
-    if (entries.empty() && !colors) ui.textAround("Empty", box.x + 10 * k, itemsTop + itemH / 2, 14, theme::dim);
+    if (entries.empty() && !colors) ui.textAround("Empty", box.x + 10 * k, itemsTop + itemH / 2, layout::popupText, theme::dim);
     for (std::size_t i = 0; i < entries.size(); ++i) {
         const PopupEntry& e = entries[i];
         if (pictures) { // a small picture, its name under it
             const SDL_FRect c{box.x + pad + static_cast<float>(i % perRow) * (cellW + pad), itemsTop + static_cast<float>(i / perRow) * (cellH + pad), cellW, cellH};
             if (c.y + c.h < box.y || c.y > box.y + box.h) continue;
-            if (ui.button(c, "", chosen(e), true, 12)) pop.clicked = e.value;
+            if (ui.button(c, "", chosen(e), true, layout::smallButtonText)) pop.clicked = e.value;
             std::string picture = f.pick == Pick::Expressions ? lower(f.context) + "_" + lower(e.value) : lower(e.value);
             if (f.pick == Pick::PictureFiles) { // ("images/icon.png": the picture, by its name)
                 if (const auto slash = picture.rfind('/'); slash != npos) picture.erase(0, slash + 1);
@@ -470,7 +470,7 @@ void Developer::drawPopup(DeveloperUi& ui) {
                 const float s = std::min((cellW - 8 * k) / std::max(1.0f, pic.w()), (cellH - 26 * k) / std::max(1.0f, pic.h()));
                 pic.draw(r, {c.x + (cellW - pic.w() * s) / 2, c.y + 4 * k, pic.w() * s, pic.h() * s}, 1.0f);
             }
-            ui.textIn(e.label, {c.x + 2 * k, c.y + c.h - 22 * k, c.w - 4 * k, 20 * k}, 12, e.empty ? theme::dim : theme::text);
+            ui.textIn(e.label, {c.x + 2 * k, c.y + c.h - 22 * k, c.w - 4 * k, 20 * k}, layout::cellText, e.empty ? theme::dim : theme::text);
             continue;
         }
         const SDL_FRect row{box.x + pad, itemsTop + static_cast<float>(i) * itemH, box.w - 2 * pad, itemH - 2 * k};
@@ -480,8 +480,8 @@ void Developer::drawPopup(DeveloperUi& ui) {
         if (chosen(e) || ui.over(row)) draw::rect(r, row, chosen(e) ? kChosen : kButtonHover);
         if (const auto color = e.empty ? std::nullopt : colors ? parseColor(e.value, &engine.palette()) : people ? d.characterColor(engine.palette(), e.value) : std::nullopt)
             tx = ui.swatch(tx, row.y + row.h / 2, *color); // (a colour, or a character's name colour: as its box shows it)
-        ui.textAround(e.label, tx, row.y + row.h / 2, 14, e.empty ? theme::dim : theme::text);
-        if (!e.about.empty()) ui.textAround(e.about, tx + ui.width(e.label, 14) + 12 * k, row.y + row.h / 2, 14, theme::dim);
+        ui.textAround(e.label, tx, row.y + row.h / 2, layout::popupText, e.empty ? theme::dim : theme::text);
+        if (!e.about.empty()) ui.textAround(e.about, tx + ui.width(e.label, layout::popupText) + 12 * k, row.y + row.h / 2, layout::popupText, theme::dim);
         if (sounds && !e.empty) listenButton(ui, play, d.cachedAudio(engine.assets(), lower(e.value)), true); // (heard, not picked)
         if (ui.click(row)) pop.clicked = colors ? pop.changed(e.value) : e.value; // (a gradient's: the colour the wheel is on)
     }
@@ -531,7 +531,7 @@ void Developer::drawColourWheel(PopupFrame& pop) {
     }
     std::optional<SDL_Color> set;
     const SDL_FRect codeBox{box.x + pad, top, box.w - 2 * pad, valueH};
-    if (const auto code = ui.field("popup:color", codeBox, p.field.value, 14, f.hint))
+    if (const auto code = ui.field("popup:color", codeBox, p.field.value, layout::popupText, f.hint))
         if (const auto c = parseColor(*code, &pal)) {
             set = *c;
             pop.clicked = *code;
@@ -542,10 +542,10 @@ void Developer::drawColourWheel(PopupFrame& pop) {
     auto third = [&](int i) { return SDL_FRect{buttons.x + static_cast<float>(i) * (bw + pad), buttons.y, bw, buttons.h}; };
     bool arranged = false; // (made a gradient, or one colour again: it stays open)
     if (gradient) {
-        if (ui.button(third(0), "Top", !p.editBottom, true, 13)) p.editBottom = false, arranged = true;
-        if (ui.button(third(1), "Bottom", p.editBottom, true, 13)) p.editBottom = true, arranged = true;
-        if (ui.button(third(2), "One colour", false, true, 13)) pop.clicked = topText, p.editBottom = false, arranged = true;
-    } else if (ui.button(third(0), "Gradient", false, true, 13)) {
+        if (ui.button(third(0), "Top", !p.editBottom, true, layout::smallButtonText)) p.editBottom = false, arranged = true;
+        if (ui.button(third(1), "Bottom", p.editBottom, true, layout::smallButtonText)) p.editBottom = true, arranged = true;
+        if (ui.button(third(2), "One colour", false, true, layout::smallButtonText)) pop.clicked = topText, p.editBottom = false, arranged = true;
+    } else if (ui.button(third(0), "Gradient", false, true, layout::smallButtonText)) {
         const std::string one = parseColor(p.field.value, &pal) ? p.field.value : parseColor(f.hint, &pal) ? std::string(f.hint) : std::string("black");
         pop.clicked = one + "-" + one;
         p.editBottom = true;
@@ -666,7 +666,7 @@ void Developer::drawSettings(DeveloperUi& ui, const SDL_FRect& box) {
     const DeveloperUi::Clip clipped(ui, box, true);
     float y = box.y - scroll;
     for (const ScriptError* e : others) {
-        ui.text(std::format("main.vnscript line {}: {}", e->line, e->message), box.x, y + 4 * k, 14, kBad, box.w);
+        ui.text(std::format("main.vnscript line {}: {}", e->line, e->message), box.x, y + 4 * k, layout::noteText, kBad, box.w);
         y += otherH;
     }
     // A setting's control in `field` (buttons for its choices, else a box with its default in grey)
@@ -686,7 +686,7 @@ void Developer::drawSettings(DeveloperUi& ui, const SDL_FRect& box) {
             StoryEditor::Field f{.name = std::string(s.name), .value = written ? percent ? percentText(*written) : *written : std::string{}, .box = s.box,
                                  .hint = s.standard.empty() ? std::string("None") : std::string(s.standard), .suggest = std::string(s.suggest)};
             applyBox(f);
-            if (const auto value = ui.pickField(id, field, f, 15)) {
+            if (const auto value = ui.pickField(id, field, f, layout::boxText)) {
                 std::string v = *value;
                 if (s.quoted) std::erase(v, '"');
                 if (percent && !v.empty()) v = percentText(v);
@@ -697,8 +697,10 @@ void Developer::drawSettings(DeveloperUi& ui, const SDL_FRect& box) {
         }
         return problem;
     };
-    auto helpText = [&](const Setting& s, const ScriptError* problem, float x, float middle, float w) {
-        ui.textAround(problem ? std::string_view(problem->message) : s.help, x, middle, 13, problem ? kBad : theme::dim, w);
+    auto helpText = [&](const Setting& s, const ScriptError* problem, float x, float middle, float w, bool oneLine = false) { // (a pair's: a line each)
+        const std::string_view said = problem ? std::string_view(problem->message) : s.help;
+        if (oneLine) ui.textAround(ui.fitted(said, layout::smallText, w), x, middle, layout::smallText, problem ? kBad : theme::dim);
+        else ui.textAround(said, x, middle, layout::smallText, problem ? kBad : theme::dim, w);
     };
     for (std::size_t i = 0; i < kSettings.size(); ++i) {
         const Setting& s = kSettings[i];
@@ -709,7 +711,7 @@ void Developer::drawSettings(DeveloperUi& ui, const SDL_FRect& box) {
         if (y < box.y || top > box.y + box.h) continue;
         if (s.name.empty()) {
             ui.text(s.label, box.x, top + 16 * k, layout::settingHeadText, kAccent);
-            if (!s.help.empty()) ui.text(s.help, box.x, top + headH - 2 * k, 13, theme::dim, box.w);
+            if (!s.help.empty()) ui.text(s.help, box.x, top + headH - 2 * k, layout::smallText, theme::dim, box.w);
             continue;
         }
         const float middle = top + rowH / 2;
@@ -721,15 +723,15 @@ void Developer::drawSettings(DeveloperUi& ui, const SDL_FRect& box) {
             continue;
         }
         // The pair: each with a box half as wide, the second's label between, and their help on two lines.
-        const float lw2 = std::min(labelW, ui.width(second->label, 15) + 16 * k);
+        const float lw2 = std::min(labelW, ui.width(second->label, layout::settingLabelText) + 16 * k);
         const ScriptError* problem = control(s, {fieldX, top + 5 * k, pairW, boxH});
         const float x2 = fieldX + pairW + 12 * k;
         ui.textAround(second->label, x2, middle, layout::settingLabelText, theme::text, lw2 - 4 * k);
         const ScriptError* problem2 = control(*second, {x2 + lw2, top + 5 * k, pairW, boxH});
         if (problem || problem2) draw::rect(r, {box.x, top + 6 * k, 4 * k, rowH - 12 * k}, kBad);
         const float hx = x2 + lw2 + pairW + 16 * k, hw = std::max(0.0f, box.x + box.w - hx);
-        helpText(s, problem, hx, middle - 8 * k, hw);
-        helpText(*second, problem2, hx, middle + 8 * k, hw);
+        helpText(s, problem, hx, middle - 8 * k, hw, true);
+        helpText(*second, problem2, hx, middle + 8 * k, hw, true);
     }
 }
 

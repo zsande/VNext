@@ -63,6 +63,109 @@ SDL_FPoint DeveloperUi::measure(std::string_view s, float size, float wrap) {
     return b.size();
 }
 
+std::string DeveloperUi::fitted(std::string_view s, float size, float room) {
+    std::string text(s);
+    if (text.empty() || width(text, size) <= room) return text;
+    std::vector<std::size_t> cuts; // (where a letter starts: it can be cut there)
+    for (std::size_t i = text.size(); i > 0;) cuts.push_back(i = previousLetter(text, i));
+    std::ranges::reverse(cuts);
+    auto shortened = [&](std::size_t cut) { // (no space or comma left hanging before the dots)
+        while (cut > 0 && std::string_view(" ,:;(").contains(text[cut - 1])) --cut;
+        return text.substr(0, cut) + "...";
+    };
+    std::size_t fits = 0, over = cuts.size(); // (the most letters that fit, found by halves)
+    while (over - fits > 1) {
+        const std::size_t mid = (fits + over) / 2;
+        if (width(shortened(cuts[mid]), size) <= room) fits = mid;
+        else over = mid;
+    }
+    return shortened(cuts[fits]);
+}
+
+void DeveloperUi::heading(std::string_view title, float x, float y, float room) {
+    textAround(fitted(title, layout::headingText, room), x, y + layout::headingH * k / 2, layout::headingText, theme::dim);
+}
+
+DeveloperUi::Grouped DeveloperUi::grouped(std::span<const ButtonGroup> groups, float w) {
+    Grouped out;
+    const float h = layout::barButtonH * k, gap = layout::barButtonGap * k, groupGap = layout::gap * k;
+    float nameW = 0.0f;
+    for (const ButtonGroup& g : groups) nameW = std::max(nameW, width(g.name, layout::labelText));
+    if (nameW > 0.0f) nameW += 2 * layout::gap * k;
+    const float room = std::max(1.0f, w - nameW);
+    float y = 0.0f;
+    for (const ButtonGroup& g : groups) {
+        const std::size_t n = g.labels.size();
+        out.names.push_back({0.0f, y, nameW, n > 0 ? h : 0.0f});
+        if (n == 0) continue;
+        std::vector<float> natural(n);
+        for (std::size_t i = 0; i < n; ++i) natural[i] = std::min(room, width(g.labels[i], layout::smallButtonText) + layout::choicePad * k);
+        auto rowW = [&](std::size_t from, std::size_t count) {
+            float x = gap * static_cast<float>(count - 1);
+            for (std::size_t i = from; i < from + count; ++i) x += natural[i];
+            return x;
+        };
+        std::vector<std::size_t> counts; // (the fewest rows: as many to each as fit, in order)
+        for (std::size_t i = 0; i < n;) {
+            std::size_t c = 1;
+            while (i + c < n && rowW(i, c + 1) <= room) ++c;
+            counts.push_back(c);
+            i += c;
+        }
+        std::vector<std::size_t> even(counts.size(), n / counts.size()); // (as many rows, as even as they can be, when they fit so)
+        for (std::size_t row = 0; row < n % counts.size(); ++row) ++even[row];
+        bool evenFits = true;
+        for (std::size_t row = 0, i = 0; row < even.size(); i += even[row++]) evenFits = evenFits && rowW(i, even[row]) <= room;
+        if (evenFits) counts = std::move(even);
+        const std::size_t columns = std::ranges::max(counts);
+        const float cell = (room - gap * static_cast<float>(columns - 1)) / static_cast<float>(columns);
+        const bool grid = std::ranges::all_of(natural, [&](float v) { return v <= cell; });
+        for (std::size_t row = 0, i = 0; row < counts.size(); ++row) {
+            const float stretch = (room - gap * static_cast<float>(counts[row] - 1)) / (rowW(i, counts[row]) - gap * static_cast<float>(counts[row] - 1));
+            float x = nameW;
+            for (std::size_t c = 0; c < counts[row]; ++c, ++i) {
+                const float bw = grid ? cell : natural[i] * stretch;
+                out.buttons.push_back({std::round(x), y, std::round(x + bw) - std::round(x), h}); // (whole pixels: crisp edges)
+                x += bw + gap;
+            }
+            y += h + gap;
+        }
+        y += groupGap - gap;
+    }
+    out.h = std::max(0.0f, y - groupGap);
+    return out;
+}
+
+std::optional<std::size_t> DeveloperUi::groupedButtons(std::span<const ButtonGroup> groups, const Grouped& at, float x, float y,
+                                                       std::span<const std::size_t> chosen, bool enabled) {
+    std::optional<std::size_t> clicked;
+    std::size_t i = 0;
+    for (std::size_t g = 0; g < groups.size() && g < at.names.size(); ++g) {
+        const SDL_FRect& name = at.names[g];
+        if (name.h > 0.0f) textAround(groups[g].name, x + name.x, y + name.y + name.h / 2, layout::labelText, theme::dim);
+        for (const std::string_view label : groups[g].labels) {
+            if (i >= at.buttons.size()) break;
+            const SDL_FRect& b = at.buttons[i];
+            if (button({x + b.x, y + b.y, b.w, b.h}, label, std::ranges::contains(chosen, i), enabled, layout::smallButtonText)) clicked = i;
+            ++i;
+        }
+    }
+    return clicked;
+}
+
+DeveloperUi::Columns DeveloperUi::columns(const SDL_FRect& area, bool form) const {
+    const float gap = layout::columnGap * k;
+    const float leftW = std::round(std::clamp(area.w * layout::sidePart, layout::sideLeast * k, layout::sideMost * k));
+    const float formW = form ? std::round(std::clamp(area.w * layout::formPart, layout::formLeast * k, layout::formMost * k)) : 0.0f;
+    const SDL_FRect left{area.x, area.y, leftW, area.h};
+    const SDL_FRect middle{left.x + leftW + gap, area.y, std::max(0.0f, area.w - leftW - gap - (form ? formW + gap : 0.0f)), area.h};
+    return {left, middle, {middle.x + middle.w + gap, area.y, formW, area.h}};
+}
+
+void DeveloperUi::formTitle(std::string_view title, float x, float y, SDL_Color color) {
+    textAround(title, x, y + layout::buttonH * k / 2, layout::titleText, color);
+}
+
 void DeveloperUi::textIn(std::string_view s, const SDL_FRect& box, float size, SDL_Color color) {
     TextBlock& b = block();
     b.set(font(size), s);
@@ -158,7 +261,7 @@ DeveloperUi::ListEvent DeveloperUi::editList(const std::string& id, const SDL_FR
         const float xw = (armed ? layout::crossArmedW : layout::crossW) * k;
         const SDL_FRect cross{item.x + item.w - xw - 3 * k, item.y + 3 * k, xw, item.h - 6 * k};
         if (renaming) {
-            if (auto name = field(renameId, item, items.name ? items.name(i) : items.label(i), 15)) event = {.kind = Event::Renamed, .item = i, .to = 0, .name = std::move(*name)};
+            if (auto name = field(renameId, item, items.name ? items.name(i) : items.label(i), layout::listText)) event = {.kind = Event::Renamed, .item = i, .to = 0, .name = std::move(*name)};
         } else {
             const SDL_FRect content{item.x, item.y, item.w - (deletes ? xw + 6 * k : 0.0f), item.h};
             const Clip clippedItem(*this, content);
@@ -168,7 +271,7 @@ DeveloperUi::ListEvent DeveloperUi::editList(const std::string& id, const SDL_FR
         if (deletes) {
             draw::rect(r, cross, armed ? SDL_Color{150, 50, 64, 255} : over(cross) ? kButtonHover : kButton);
             draw::outline(r, cross, armed ? kBad : kEdge);
-            textIn(armed ? "Delete" : "x", cross, 14, theme::text);
+            textIn(armed ? "Delete" : "x", cross, layout::smallButtonText, theme::text);
         }
         if (renaming || !d.clicked || !pointed) continue;
         d.clicked = false;
@@ -322,7 +425,7 @@ std::optional<std::string> DeveloperUi::choices(const SDL_FRect& box, const Stor
     std::optional<std::string> clicked;
     for (std::size_t i = 0; i < n; ++i) {
         const bool chosen = f.multi ? std::ranges::contains(on, words[i]) : f.value == words[i];
-        if (!button(places[i], shown[i], chosen, true, 14)) continue;
+        if (!button(places[i], shown[i], chosen, true, layout::buttonText)) continue;
         if (!f.multi) {
             if (!chosen) clicked = std::string(words[i]);
             continue;
@@ -338,10 +441,10 @@ std::optional<std::string> DeveloperUi::choices(const SDL_FRect& box, const Stor
     return clicked;
 }
 
-bool DeveloperUi::tab(const SDL_FRect& box, std::string_view label, bool chosen, bool wrong) {
+bool DeveloperUi::tab(const SDL_FRect& box, std::string_view label, bool chosen, bool wrong, float size) {
     if (!chosen && over(box)) draw::rect(r, box, kButton);
     if (chosen) draw::rect(r, {box.x + 8 * k, box.y + box.h - 3 * k, box.w - 16 * k, 3 * k}, wrong ? kBad : kAccent);
-    textIn(label, box, 16, wrong ? kBad : chosen ? kAccent : over(box) ? theme::text : theme::dim);
+    textIn(label, box, size, wrong ? kBad : chosen ? kAccent : over(box) ? theme::text : theme::dim);
     return click(box);
 }
 
@@ -543,7 +646,7 @@ std::optional<std::string> DeveloperUi::listButton(const std::string& id, const 
     const std::optional<std::string> picked = takePicked(id);
     if (picked && d.popup.id == id) d.popup.field.value = *picked; // (still open, as a wheel stays: the code above it is the colour now)
     const bool open = d.popup.id == id;
-    if (button(box, label, open, true, 13)) {
+    if (button(box, label, open, true, layout::smallButtonText)) {
         if (open) d.popup.id.clear();
         else openPopup(id, f, box);
     }
@@ -673,6 +776,21 @@ void DeveloperUi::triangle(float x, float y, float size, Pointing to, SDL_Color 
                           {.position = right ? SDL_FPoint{x - tip, y + size} : SDL_FPoint{x + size, y - tip}, .color = c, .tex_coord = {}},
                           {.position = right ? SDL_FPoint{x + tip, y} : SDL_FPoint{x, y + tip}, .color = c, .tex_coord = {}}};
     SDL_RenderGeometry(r, nullptr, v, 3, nullptr, 0);
+}
+
+bool PreviewHead::button(std::string_view label, bool chosen, bool enabled) {
+    const float k = ui_.k;
+    const float w = ui_.buttonWidth(label, layout::smallButtonText, layout::previewButtonW);
+    right_ -= w;
+    const float h = layout::smallButtonH * k;
+    const bool clicked = ui_.button({right_, row_.y + (row_.h - h) / 2, w, h}, label, chosen, enabled, layout::smallButtonText); // (in the middle of the row)
+    right_ -= layout::gap * k;
+    return clicked;
+}
+
+void PreviewHead::title(std::string_view text) { // (as every panel's heading, in the room the buttons leave)
+    const float k = ui_.k;
+    ui_.heading(text, row_.x, row_.y, right_ - row_.x - layout::gap * k);
 }
 
 } // namespace vn

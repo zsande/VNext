@@ -124,10 +124,10 @@ void Developer::drawMap(DeveloperUi& ui, const SDL_FRect& area) {
     float lx = area.x + 12 * k;
     for (const auto& [label, color] : {std::pair{"Jump", kEdge}, {"Call (dashed)", kWarn}, {"Option", kOptionArrow}}) {
         draw::rect(r, {lx, area.y + 14 * k, 18 * k, 3 * k}, color);
-        lx += 24 * k + ui.text(label, lx + 24 * k, area.y + 6 * k, 13, theme::dim).x + 14 * k;
+        lx += 24 * k + ui.text(label, lx + 24 * k, area.y + 6 * k, layout::smallText, theme::dim).x + 14 * k;
     }
     ui.text("Drag a scene to move it, or its dot to another to jump there. Click an arrow to take it away; double-click a scene to open it.", lx + 10 * k,
-            area.y + 6 * k, 13, theme::dim, area.x + area.w - 170 * k - lx);
+            area.y + 6 * k, layout::noteText, theme::dim, area.x + area.w - 170 * k - lx);
     const float nodeW = layout::nodeW * k, gapX = layout::nodeGapX * k;
     if (f.unreachedLaidOut && f.reached < static_cast<int>(scenes.size()))
         ui.text("Nothing jumps to these", area.x + layout::mapPadX * k + static_cast<float>(f.reached) * (nodeW + gapX) - d.mapX, area.y + layout::mapNoteY * k - d.mapY,
@@ -303,7 +303,7 @@ void Developer::drawMapArrows(const MapFrame& f) {
         const SDL_FRect x{mid.x - layout::smallButtonH / 2 * k, mid.y - layout::smallButtonH / 2 * k, layout::smallButtonH * k, layout::smallButtonH * k};
         draw::rect(r, x, ui.over(x) ? kButtonHover : kButton);
         draw::outline(r, x, kAccent);
-        ui.textIn("x", x, 13, theme::text);
+        ui.textIn("x", x, layout::smallButtonText, theme::text);
     }
 }
 
@@ -329,12 +329,12 @@ void Developer::drawMapScenes(const MapFrame& f) {
         draw::outline(r, boxes[i], target == i ? kAccent : wrong[i] ? kBad : kEdge);
         const std::string id = std::format("map:rename:{}", i);
         if (d.focus == id) { // (renamed as it's typed: the jumps to it follow)
-            if (const auto name = ui.field(id, boxes[i], scenes[i].name, 15)) {
+            if (const auto name = ui.field(id, boxes[i], scenes[i].name, layout::listText)) {
                 d.saidRenamed(editor.renameScene(i, std::string(trim(*name)), std::format("map-name:{}:{}", i, d.focusCount)), "A scene's name is one word (letters, numbers, _ and -) that no other scene has.");
             }
             continue;
         }
-        ui.textIn(scenes[i].name, {boxes[i].x, boxes[i].y, boxes[i].w - 14 * k, boxes[i].h}, 15,
+        ui.textIn(scenes[i].name, {boxes[i].x, boxes[i].y, boxes[i].w - 14 * k, boxes[i].h}, layout::listText,
                   unreached && scenes[i].name != "start" ? theme::dim : theme::text);
         const SDL_FRect dot = f.dotOf(boxes[i]);
         const SDL_Color dc = hoveredDot == i || (d.mapPress && d.mapPress->dot && d.mapPress->from == i) ? kAccent : kEdge;

@@ -206,6 +206,10 @@ private:
     [[nodiscard]] std::unique_ptr<Game> makeGame();
     [[nodiscard]] std::optional<Value> builtin(std::string_view name) const;
     void updatePixelScale();
+    // The window as the game draws on it (its size, shown as Settings scales it) or as the developer tools
+    // do (the window's own size: they lay themselves out in it). Clicks are read in the view they're for.
+    void useView(bool tools);
+    void applyGameView();
     void refreshWindowSizes();
     // Controls: the keys in effect (the player's choice, else the script's), as names and parsed.
     [[nodiscard]] std::vector<std::string> keyNames(const Control& control) const;
@@ -299,6 +303,9 @@ private:
         Uint64 start = 0;
     } touch_;
     FontCache fonts_{files_};
+    FontCache toolsFonts_;      // the developer tools' (the computer's own font, as sharp as the window's pixels)
+    bool toolsView_ = false;    // the window is laid out for the developer tools now (else for the game)
+    SDL_Point toolsViewSize_{}; // (the window's size it was laid out for)
     SaveStore saves_;
     SlotBrowser slots_;
     std::optional<std::string> musicBeforeSongs_; // what played before the music room (a path; empty: nothing)

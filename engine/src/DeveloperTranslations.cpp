@@ -184,7 +184,6 @@ std::string Developer::importTranslationSheet() {
 // change; every change is written to the file at once.
 void Developer::drawTranslations(DeveloperUi& ui, const SDL_FRect& area) {
     DeveloperTools& d = tools;
-    const float k = ui.k;
     std::vector<std::string> ids;
     for (const std::string& name : d.cachedFiles(engine.gameRoot() + "translations/", ".vnscript"))
         if (!name.contains('/')) ids.push_back(stemOf(name));
@@ -193,14 +192,13 @@ void Developer::drawTranslations(DeveloperUi& ui, const SDL_FRect& area) {
     if (!t.id.empty() && !std::ranges::contains(ids, t.id)) t = {};
     translationKeys();
     pruneTranslation();
-    const float gap = 14 * k, leftW = std::round(area.w * 0.18f);
-    const SDL_FRect left{area.x, area.y, leftW, area.h};
-    const SDL_FRect right{left.x + leftW + gap, area.y, area.w - leftW - gap, area.h};
+    const auto columns = ui.columns(area, false); // (no form: the table takes the rest)
+    const SDL_FRect &left = columns.left, &right = columns.middle;
     if (drawLanguages(ui, left, ids)) return; // (a button did its work: the rest next frame)
     if (t.id.empty()) {
         ui.text("A translation is a file in translations/ with every text the game shows, each with its translation under it. Make one with "
                 "+ New language, then pick its language.",
-                right.x, right.y, 15, theme::dim, right.w);
+                right.x, right.y, layout::noteText, theme::dim, right.w);
         return;
     }
     drawTranslation(ui, right, ids);
@@ -214,7 +212,7 @@ bool Developer::drawLanguages(DeveloperUi& ui, const SDL_FRect& left, const std:
     using ListKind = DeveloperUi::ListEvent::Kind;
     const auto& t = d.translation;
     const float headingH = layout::headingH * k, listButtonH = layout::buttonH * k, listGap = layout::gap * k;
-    ui.text("Languages", left.x, left.y, layout::headingText, theme::dim);
+    ui.heading("Languages", left.x, left.y);
     const SDL_FRect listBox{left.x, left.y + headingH, left.w, left.h - headingH - 4 * (listButtonH + listGap)};
     const auto event = ui.editList("languages", listBox, d.kindsScroll,
                                    {.count = ids.size(),
@@ -273,7 +271,7 @@ void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const s
     // One row: the language, picked from the world's, each with its code (typing narrows the list; a
     // name typed that isn't listed is kept as it is, with the code its name says, if any), then how
     // many texts there are and the button that shows only the untranslated ones.
-    ui.textAround("Language", right.x, y + boxH / 2, 13, theme::dim);
+    ui.textAround("Language", right.x, y + boxH / 2, layout::labelText, theme::dim);
     const StoryEditor::Field languageField{.name = "language", .value = code.empty() ? name : std::format("{} ({})", name, code), .box = Box::Language};
     if (const auto v = ui.pickField("lang:language", {right.x + labelW, y, std::min(layout::languageW * k, right.w - labelW), boxH}, languageField, layout::boxText);
         v && !languageOf(*v).first.empty()) { // (emptied: it keeps its language)
@@ -291,7 +289,7 @@ void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const s
     // (a code that isn't the language's: a computer set to it wouldn't pick this translation)
     if (const std::string known = languageCode(name); !known.empty() && !code.empty() && lower(code) != known && !lower(code).starts_with(known + "-"))
         y += ui.text(std::format("Computers set to {} say {}, not {}: with code={} they'd start with this translation.", name, known, code, known), right.x, y,
-                     13, kWarn, right.w).y + 8 * k;
+                     layout::noteText, kWarn, right.w).y + 8 * k;
 
     const std::vector<TextPair> pairs = textPairs(t.lines); // (after the language's line: it may have come first just now)
     auto untranslated = [&](const TextPair& p) { return untranslatedPair(t.lines, p); };
@@ -299,7 +297,7 @@ void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const s
     const SDL_FRect only{right.x + right.w - layout::onlyW * k, right.y + 1 * k, layout::onlyW * k, boxH - 2 * k};
     if (ui.button(only, d.untranslatedOnly ? "Show every text" : "Only untranslated", d.untranslatedOnly, true, layout::smallButtonText)) d.untranslatedOnly = !d.untranslatedOnly;
     const std::string count = std::format("{} text{}, {} not translated yet", pairs.size(), pairs.size() == 1 ? "" : "s", todo);
-    ui.textAround(count, only.x - 12 * k - ui.width(count, 13), right.y + boxH / 2, 13, theme::dim);
+    ui.textAround(count, only.x - 12 * k - ui.width(count, layout::smallText), right.y + boxH / 2, layout::smallText, theme::dim);
     const SDL_FRect table{right.x, y + 6 * k, right.w, right.y + right.h - y - 6 * k};
     draw::rect(r, table, kBox);
     const float rowH = layout::tableRowH * k, half = std::round((table.w - 30 * k) / 2);
@@ -319,9 +317,7 @@ void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const s
         if (ry + rowH < table.y || ry > table.y + table.h) continue;
         const TextPair& p = *shown[i];
         const std::string original = unquote(trim(t.lines[p.original]));
-        std::string shownText = original; // (one too long for its column ends with ...)
-        while (!shownText.empty() && ui.width(shownText + "...", 15) > half - 10 * k) shownText = shownText.substr(0, previousLetter(shownText, shownText.size()));
-        ui.textAround(shownText == original ? original : shownText + "...", table.x + 10 * k, ry + rowH / 2 - 3 * k, 15, theme::text);
+        ui.textAround(ui.fitted(original, layout::listText, half - 10 * k), table.x + 10 * k, ry + rowH / 2 - 3 * k, layout::listText, theme::text); // (one too long for its column ends with ...)
         const std::string now = p.translated ? unquote(trim(t.lines[*p.translated])) : std::string{};
         const std::string id = std::format("tr:{}:{}", t.id, p.original);
         if (const auto v = ui.field(id, {table.x + half + 20 * k, ry + 2 * k, half, rowH - 10 * k}, now, layout::boxText))

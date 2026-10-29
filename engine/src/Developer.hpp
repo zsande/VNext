@@ -37,11 +37,12 @@ inline constexpr float labelPart = 0.3f;     // a form's labels: this much of it
 inline constexpr float partLabelPart = 0.4f; // a screen part's form: its labels are longer
 inline constexpr float buttonH = 30;         // a button on its own (+ New, Play, As text...)
 inline constexpr float toggleW = 96;         // the As text / As a form button
-inline constexpr float barButtonH = 26, barButtonGap = 4; // a bar of small buttons (the text format bar, the add-a-line bar, a preview's choices)
+inline constexpr float barButtonH = 26, barButtonGap = 4; // a bar of small buttons (the text format bar, New line's and New part's, a preview's choices)
 inline constexpr float swatch = 20;          // a colour's square in its box
 inline constexpr float popupPad = 4;         // around and between what a list shows
+inline constexpr float popupText = 14;       // what a popup's list says
 inline constexpr float itemH = 28;           // a row of a list
-inline constexpr float cellW = 92, cellH = 74;            // a picture in a list: its cell
+inline constexpr float cellW = 92, cellH = 74, cellText = 12; // a picture in a list: its cell, and a label in it
 inline constexpr float listW = 260, picturesW = 400;      // a list's least width: names, or pictures
 inline constexpr float listMaxH = 320, wheelMaxH = 440;   // a list's most height: names or pictures, or with the wheel over them
 inline constexpr float codeH = 28;           // the colour's code box over the wheel
@@ -49,10 +50,17 @@ inline constexpr float wheelD = 150;         // the wheel's diameter
 inline constexpr float barW = 16, barGap = 8; // the value and alpha bars beside it, and the gaps between
 inline constexpr float boxText = 15, labelText = 13, titleText = 18; // text sizes: in a box, its label, a form's title
 // The window: its bar, its panels and their lists.
+inline constexpr float leastW = 1024, leastH = 640; // the smallest window the tools fit at their own size (in a smaller one, all of them shrinks)
 inline constexpr float barH = 48;            // the bar with the tabs and the tools
-inline constexpr float margin = 16;          // around the panels
+inline constexpr float barLeast = 0.85f;     // ...in a narrower window, as small as this beside each other; narrower still, in two rows:
+inline constexpr float tabsRowH = 40, toolsRowH = 36; // the tabs', then the tools'
+// A tab's columns (Story, Screens, Library, Translate): its lists at the left, the chosen thing's form at
+// the right (Story, Screens, Library), what's chosen between them; each this much of the room.
+inline constexpr float columnGap = 14, sidePart = 0.18f, formPart = 0.36f;
+inline constexpr float sideLeast = 180, sideMost = 360, formLeast = 300, formMost = 720; // (and within these, to read well in any window)
+inline constexpr float margin = 16;          // around the panels: between them and the bar, and the window's sides and bottom
 inline constexpr float tabPad = 28, toolGap = 6, tabText = 16, toolText = 15; // a tab or tool: its label and this much, the gap between tools
-inline constexpr float headingH = 22, headingText = 14; // a panel's heading ("Scenes", "Library"...) over its list
+inline constexpr float headingH = 22, headingText = 14; // a panel's heading ("Scenes", "Library", "Preview"...): its row, over its list
 inline constexpr float gap = 6;              // between a list and its button, between buttons, and the like
 inline constexpr float listItemH = 30;       // a row of a panel's list
 inline constexpr float listIndent = 18;      // a row inside another (an option in its choice)
@@ -60,8 +68,8 @@ inline constexpr float listPad = 10, listText = 15; // a row's text: in from its
 inline constexpr float crossW = 24, crossArmedW = 64; // a row's x, and once clicked (to click again)
 inline constexpr float markW = 4;            // a row's mark at its left (a mistake, or never reached)
 // Buttons.
-inline constexpr float smallButtonH = 22;    // (Save as a text file, Audio off, a jump's x)
-inline constexpr float mediumButtonH = 28;   // (Try it, the Map's + New scene, The screen or the part)
+inline constexpr float smallButtonH = 22;    // (Save as a text file, a preview's buttons, a jump's x)
+inline constexpr float mediumButtonH = 28;   // (the Map's + New scene, Line up and Spread evenly)
 inline constexpr float bigButtonH = 34;      // (Make it the game's own, the first + New scene)
 inline constexpr float wideButtonW = 120;    // the least for: Play, Replace..., Import... (DeveloperUi::buttonWidth)
 inline constexpr float widerButtonW = 160;   // the least for: + Font, + Sub-image, Go to the line
@@ -70,8 +78,8 @@ inline constexpr float listenW = 64;         // the voice row's Play
 inline constexpr float buttonText = 14, smallButtonText = 13;
 inline constexpr float buttonPad = 24;       // a button in a row of them: its label and this much
 inline constexpr float choicePad = 16;       // a choice's button: its label and this much
-inline constexpr float previewButtonW = 80;  // the least for: Preview on, Audio off, Reset
-inline constexpr float previewHeadH = 28;    // the preview's title row, with those buttons (all that's left of it when it's off)
+inline constexpr float previewButtonW = 80;  // the least for a preview's buttons: Preview on, Try it, Audio off, Reset
+inline constexpr float previewHeadH = headingH + gap; // a preview's heading, with those buttons, and the gap under it (when it's off, the heading is all there is)
 // Texts.
 inline constexpr float noteText = 14;        // notes, help and problems
 inline constexpr float smallText = 13;       // small labels
@@ -92,6 +100,7 @@ inline constexpr float nodeW = 170, nodeH = 36, nodeGapX = 90, nodeGapY = 16, ma
 inline constexpr float logRowH = 21;
 // What's shown over a Library form (at most this high, or this much of the room), and a list's popup.
 inline constexpr float sampleStyleH = 110, sampleAtlasH = 230, sampleAnimationH = 240, sampleSubPictureH = 380;
+inline constexpr float sampleText = 12;      // words drawn over a sample (an atlas's expression, how to mark a sub-image)
 inline constexpr float sampleStylePart = 0.25f, sampleAtlasPart = 0.42f, sampleAnimationPart = 0.4f, sampleSubPicturePart = 0.55f;
 inline constexpr float popupShadow = 3, popupMargin = 8, popupGap = 2;
 } // namespace layout
@@ -479,6 +488,8 @@ struct DeveloperTools {
     // What happened since the last frame; the drawing acts on it (buttons act when drawn).
     float mouseX = -1.0f, mouseY = -1.0f, wheel = 0.0f;
     bool clicked = false, doubleClick = false;
+    float k = 1.0f;     // this frame's scale (DeveloperUi::k) and the window's size the tools are laid out in
+    SDL_FPoint size{};
     std::string typed;
     std::vector<SDL_KeyboardEvent> keys;
     // The Story tab: the visual editor.
@@ -645,7 +656,8 @@ struct DeveloperTools {
     std::optional<std::size_t> part;
     bool picking = false;  // + New screen: the screens to start from show
     std::string screenTip; // the Screens tab's word of help for the moment (said as its form is drawn, shown under the preview's buttons the next frame)
-    bool addingPart = false, addInto = false; // + New part: its kinds show (and it goes in the part chosen, or the screen)
+    bool addInto = false; // New part goes in the part chosen (else on the screen), as it was set for that part
+    std::optional<std::size_t> addIntoOf;
     bool trying = false;   // Try it: the screen works as in the game (what its buttons would do is said)
     bool tryHeld = false;  // ...the mouse was pressed on it
     Settings trySettings;  // ...and its setting buttons and sliders change these (the player's own stay as they are)
@@ -876,15 +888,15 @@ private:
     struct ScreensFrame; // (that tab this frame: what its columns share)
     bool drawScreenLists(const ScreensFrame& f);   // the screens and the parts of the one open (true: changed, the rest next frame)
     bool drawScreenPreview(ScreensFrame& f); // the screen: Try it, and parts chosen, moved and resized on it (true: changed)
+    bool drawNewPart(ScreensFrame& f);       // New part, under it: where it goes, and a button for each kind (true: one added)
     void chooseOnScreen(ScreensFrame& f);    // ...parts chosen on it, and moving or resizing them started
     bool dragOnScreen(ScreensFrame& f);      // ...parts moved or resized, lined up; written once let go (true)
     bool screenKeys(ScreensFrame& f);        // ...copy, cut, paste, duplicate, and the arrows that nudge (true: changed)
-    void paintScreen(const ScreensFrame& f, bool canTry); // ...the screen drawn, and Try it and the sound's button under it
+    void paintScreen(const ScreensFrame& f, bool canTry); // ...the screen drawn, with its heading (Try it, its sound) and the help under it
     void runTryIt(const ScreensFrame& f);    // ...Try it, this frame
     void stopTrying(); // ...and when it stops
     void drawScreenForm(const ScreensFrame& f);    // the form: the screens to start from, the chosen part's settings, or the screen's
     void drawNewScreenForm(const ScreensFrame& f); // ...+ New screen's: the screens to start from
-    void drawNewPartForm(const ScreensFrame& f);   // ...+ New part's: its kind, and where it goes
     void drawBuiltInForm(const ScreensFrame& f);   // ...a built-in screen's
     void drawLineUpForm(const ScreensFrame& f);    // ...several parts': lined up, or spread out
     void drawPartForm(const ScreensFrame& f);      // ...a part's (or the screen's own)

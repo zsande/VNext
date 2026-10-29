@@ -4,7 +4,7 @@
 
 ## What's in it
 
-Open VNext in developer mode and you get an editor with a tab for each part of the work:
+Open VNext in developer mode and you get an editor that fits any window size, with a tab for each part of the work:
 
 - **Story**: scenes and their lines as forms, with a live preview of what players see at each line, and "Play from this line".
 - **Map**: every scene as a box, with arrows where the story branches and jumps.

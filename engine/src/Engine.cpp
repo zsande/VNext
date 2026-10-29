@@ -265,6 +265,7 @@ SDL_AppResult Engine::init(int argc, char** argv) {
     window_.reset(window);
     renderer_.reset(renderer);
     SDL_SetWindowMinimumSize(window, 320, 240);
+    toolsFonts_.configure({}, systemFonts(), systemFallbackFonts());
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
     assets_ = std::make_unique<Assets>(renderer, gameRoot_, files_);
@@ -782,10 +783,37 @@ std::optional<Value> Engine::builtin(std::string_view name) const {
 }
 
 void Engine::updatePixelScale() {
-    // Rasterize text at the size the canvas is actually shown at (depends on the scaling mode).
-    SDL_FRect shown{};
-    if (!renderer_ || !SDL_GetRenderLogicalPresentationRect(renderer_.get(), &shown) || shown.w <= 0 || shown.h <= 0) return;
-    fonts_.setPixelScale(std::max(shown.w / canvas_.w, shown.h / canvas_.h));
+    // Text is rasterized at the size it's shown at: the game's as its view scales the canvas (Settings'
+    // scaling), the developer tools' as sharp as the window's pixels.
+    if (!renderer_) return;
+    const bool tools = toolsView_;
+    useView(false);
+    if (SDL_FRect shown{}; SDL_GetRenderLogicalPresentationRect(renderer_.get(), &shown) && shown.w > 0 && shown.h > 0)
+        fonts_.setPixelScale(std::max(shown.w / canvas_.w, shown.h / canvas_.h));
+    useView(tools);
+    toolsFonts_.setPixelScale(SDL_GetWindowPixelDensity(window_.get()));
+}
+
+void Engine::applyGameView() {
+    static constexpr std::array modes{SDL_LOGICAL_PRESENTATION_LETTERBOX, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
+                                      SDL_LOGICAL_PRESENTATION_STRETCH, SDL_LOGICAL_PRESENTATION_OVERSCAN};
+    SDL_SetRenderLogicalPresentation(renderer_.get(), static_cast<int>(canvas_.w), static_cast<int>(canvas_.h),
+                                     modes[static_cast<std::size_t>(settings_.scaling)]);
+    toolsView_ = false;
+}
+
+void Engine::useView(bool tools) {
+    if (!renderer_) return;
+    if (!tools) {
+        if (toolsView_) applyGameView();
+        return;
+    }
+    SDL_Point size{};
+    SDL_GetWindowSize(window_.get(), &size.x, &size.y);
+    if (toolsView_ && size.x == toolsViewSize_.x && size.y == toolsViewSize_.y) return;
+    toolsView_ = true;
+    toolsViewSize_ = size;
+    SDL_SetRenderLogicalPresentation(renderer_.get(), std::max(size.x, 1), std::max(size.y, 1), SDL_LOGICAL_PRESENTATION_LETTERBOX); // (as big as it: no bars)
 }
 
 void Engine::refreshWindowSizes() {
@@ -1726,10 +1754,7 @@ void Engine::applySettings() {
         SDL_SetWindowSize(window, s.windowWidth, s.windowHeight);
         SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     }
-    static constexpr std::array modes{SDL_LOGICAL_PRESENTATION_LETTERBOX, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
-                                      SDL_LOGICAL_PRESENTATION_STRETCH, SDL_LOGICAL_PRESENTATION_OVERSCAN};
-    SDL_SetRenderLogicalPresentation(renderer, static_cast<int>(canvas_.w), static_cast<int>(canvas_.h),
-                                     modes[static_cast<std::size_t>(s.scaling)]);
+    applyGameView();
     if (!SDL_SetRenderVSync(renderer, s.vsync ? 1 : 0)) logWarn("Can't change VSync: {}.", SDL_GetError());
     SDL_SetHint(SDL_HINT_MAIN_CALLBACK_RATE, std::to_string(s.frameLimit).c_str());
     audio_.setVolume(static_cast<float>(s.masterVolume) / 100.0f, static_cast<float>(s.musicVolume) / 100.0f,
@@ -1916,6 +1941,7 @@ SDL_AppResult Engine::event(SDL_Event& e) {
     default:
         break;
     }
+    useView(developer_.isOpen()); // (clicks are read in the view they're for)
     SDL_ConvertEventToRenderCoordinates(renderer_.get(), &e);
     switch (e.type) {
     case SDL_EVENT_QUIT:
@@ -2154,6 +2180,7 @@ SDL_AppResult Engine::iterate() {
     readAloud();
 
     SDL_Renderer* r = renderer_.get();
+    useView(false); // (the game as it's shown, under the developer tools too)
     const SDL_Color bars = config().letterboxColor;
     SDL_SetRenderDrawColor(r, bars.r, bars.g, bars.b, 255);
     SDL_RenderClear(r);
@@ -2175,7 +2202,11 @@ SDL_AppResult Engine::iterate() {
         if (ScreenView* v = !l.then && !std::ranges::contains(overlays_, l.name) ? view(l.name) : nullptr) v->draw(r);
     if (veil_) draw::rect(r, {0.0f, 0.0f, canvas_.w, canvas_.h}, veil_->color());
     if (ScreenView* v = view("notify"); v && noticeTime_ > 0.0f) v->draw(r, std::min(1.0f, noticeTime_ * 2.0f));
-    if (developer_.isOpen()) developer_.drawDeveloper();
+    if (developer_.isOpen()) {
+        useView(true); // (the tools lay themselves out in the window's own size)
+        developer_.drawDeveloper();
+    }
+    useView(developer_.isOpen()); // (until the next frame: the clicks are for the tools, or the game)
     if (textInputWanted_ != textInputActive_) { // on-screen keyboards / IME only while typing
         textInputActive_ = textInputWanted_;
         if (textInputActive_) SDL_StartTextInput(window_.get());

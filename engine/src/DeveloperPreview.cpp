@@ -11,12 +11,11 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
     DeveloperTools& d = tools;
     SDL_Renderer* r = ui.r;
     const float k = ui.k;
-    if (!d.previewOn) { // (off: its title row, with the button that turns it on)
+    if (!d.previewOn) { // (off: its heading, with the button that turns it on)
         if (d.preview) d.dropPreviews();
-        ui.text("Preview", box.x, box.y + box.h - 22 * k, 13, theme::dim);
-        const float offW = ui.buttonWidth("Preview off", 12, layout::previewButtonW);
-        if (ui.button({box.x + box.w - offW, box.y + box.h - 26 * k, offW, layout::smallButtonH * k}, "Preview off", false, true, 12))
-            d.previewOn = true;
+        PreviewHead head(ui, box); // (all there is of it)
+        if (head.button("Preview off", false)) d.previewOn = true;
+        head.title("Preview");
         d.previewShown = {};
         return;
     }
@@ -37,32 +36,24 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
     if (!placing) d.placeDrag.reset();
     // Its buttons, from the right: off, its sound (only while no game is going on behind the tools: it
     // would cut into that one's), and back to the line after it has played on; then its title, in the room left.
-    float bx = shown.x + shown.w;
-    auto headButton = [&](std::string_view label, bool chosen) { // (each left of the last)
-        const float headW = ui.buttonWidth(label, 12, layout::previewButtonW);
-        bx -= headW;
-        const bool pressed = ui.button({bx, shown.y - 26 * k, headW, layout::smallButtonH * k}, label, chosen, true, 12);
-        bx -= layout::gap * k;
-        return pressed;
-    };
-    if (headButton("Preview on", true)) {
+    PreviewHead head(ui, PreviewHead::over(shown, k));
+    if (head.button("Preview on", true)) {
         d.previewOn = false;
         d.dropPreviews();
         return;
     }
-    if (engine.waiting_ && headButton(d.previewSound ? "Audio on" : "Audio off", d.previewSound)) {
+    if (engine.waiting_ && head.button(d.previewSound ? "Audio on" : "Audio off", d.previewSound)) {
         d.previewSound = !d.previewSound;
         d.dropPreviews(); // (made again, heard or not)
         return;
     }
-    if (d.previewPlaying && headButton("Reset", false)) { // (back to the line)
+    if (d.previewPlaying && head.button("Reset", false)) { // (back to the line)
         d.dropPreviews();
         return;
     }
-    ui.textAround(d.preview && !d.previewReached ? "Preview (not reached from the scene's start)"
-                  : placing                      ? (camera ? "Preview: drag to look elsewhere, or zoom with the wheel" : "Preview: drag them, or zoom with the wheel")
-                                                 : "Preview",
-                  shown.x, shown.y - 15 * k, 13, theme::dim, std::max(0.0f, bx - shown.x - 8 * k));
+    head.title(d.preview && !d.previewReached ? "Preview (not reached from the start)" // (short, to fit beside the buttons)
+               : placing                      ? (camera ? "Preview: drag the view; the wheel zooms" : "Preview: drag them; the wheel zooms")
+                                              : "Preview");
     draw::rect(r, shown, kBox);
     if (d.preview) {
         // It takes the mouse and the keys as the game does (previewEvent): its buttons, choices and
@@ -208,7 +199,7 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
         previewDid(); // (a button whose click animation is over)
     } else {
         ui.textAround(d.problems.empty() ? "Nothing to show here yet." : "The preview shows once the mistakes are fixed.", shown.x + 14 * k,
-                      shown.y + shown.h / 2, 14, theme::dim, shown.w - 28 * k);
+                      shown.y + shown.h / 2, layout::noteText, theme::dim, shown.w - 28 * k);
     }
     draw::outline(r, shown, kEdge);
 }

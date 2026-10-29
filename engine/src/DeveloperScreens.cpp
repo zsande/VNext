@@ -438,39 +438,46 @@ std::vector<std::string> placesFromPixels(const std::vector<std::string>& lines,
 // look's colours by their names and nothing a part doesn't need.
 struct PartStart {
     std::string_view kind, line;
-    bool with = false; // stays on the row with the one before it, in + New part (the textbox's parts, the extras' lists...)
 };
-
-constexpr std::array kParts{
-    PartStart{"Container", "container x=310 y=210 w=660 h=300"},
-    PartStart{"Text", "text \"Text\" x=460 y=345 w=360 align=center"},
-    PartStart{"Button", "button \"Button\" x=460 y=334 w=360 h=52", true},
-    PartStart{"Key", "key escape action=close"},
-    PartStart{"Image", "image \"PICTURE\" x=0 y=0 w=1280 h=720 fit=cover"},
-    PartStart{"Movie", "movie \"MOVIE\" x=0 y=0 w=1280 h=720 fit=cover", true},
-    PartStart{"Bar", "bar x=460 y=354 w=360 h=12 value=points max=10"},
-    PartStart{"Slider", "slider x=460 y=344 w=360 h=32 setting=master_volume", true},
-    PartStart{"Input", "input x=460 y=334 w=360 h=52 var=name"},
-    PartStart{"Control", "control advance x=460 y=344 w=360 h=32 waiting=\"Press a key...\""},
-    PartStart{"Namebox", "namebox x=64 y=470 h=46"},
-    PartStart{"Dialogue", "dialogue x=72 y=528 w=1136", true},
-    PartStart{"Indicator", "indicator x=1195 y=648 w=18 h=12", true},
-    PartStart{"Face", "face x=64 y=452 w=190 h=232", true},
-    PartStart{"Choices", "choices x=280 y=40 w=720 h=420 item_h=54 gap=14"},
-    PartStart{"Message", "message x=1220 y=32 w=560 align=right"},
-    PartStart{"Pages", "pages x=200 y=30 h=34 item_w=44 wide_w=76 gap=6 auto=Auto quick=Quick"},
-    PartStart{"Slots", "slots x=60 y=92 columns=3 item_w=360 item_h=262 gap_x=40 gap_y=16 confirm=\"Overwrite this save?\" load_confirm=\"Load this save? Progress since your last save will be lost.\" delete_confirm=\"Delete this save?\"", true},
-    PartStart{"History", "history x=60 y=92 w=1160 h=540 name_w=200 gap=18"},
-    PartStart{"Page", "page x=60 y=92 w=1160 h=560 name_w=200 gap=18", true},
-    PartStart{"Gallery", "gallery x=60 y=92 w=1160 h=560 columns=3 item_h=208 gap=24"},
-    PartStart{"Endings", "endings x=60 y=92 w=1160 h=560 item_h=80 gap=10 hidden=???", true},
-    PartStart{"Songs", "songs x=60 y=92 w=1160 h=560 item_h=60 gap=10", true},
-    PartStart{"Achievements", "achievements x=60 y=92 w=1160 h=560 item_h=80 gap=10 hidden=???", true},
-    PartStart{"Tips", "tips x=60 y=92 w=1160 h=560 item_h=60 gap=10", true},
-    PartStart{"Chart", "chart x=60 y=92 w=1160 h=560 confirm=\"Go back to this point? Progress since your last save will be lost.\"", true},
-    PartStart{"Phone", "phone x=900 y=140 w=340 h=270 item_w=270 gap=12"},
-    PartStart{"Contacts", "contacts x=900 y=140 w=340 h=270 item_h=62 gap=8", true},
+constexpr PartStart kPartBasics[]{
+    {"Container", "container x=310 y=210 w=660 h=300"},
+    {"Text", "text \"Text\" x=460 y=345 w=360 align=center"},
+    {"Button", "button \"Button\" x=460 y=334 w=360 h=52"},
+    {"Image", "image \"PICTURE\" x=0 y=0 w=1280 h=720 fit=cover"},
+    {"Movie", "movie \"MOVIE\" x=0 y=0 w=1280 h=720 fit=cover"},
+    {"Key", "key escape action=close"},
 };
+constexpr PartStart kPartValues[]{
+    {"Bar", "bar x=460 y=354 w=360 h=12 value=points max=10"},
+    {"Slider", "slider x=460 y=344 w=360 h=32 setting=master_volume"},
+    {"Input", "input x=460 y=334 w=360 h=52 var=name"},
+    {"Control", "control advance x=460 y=344 w=360 h=32 waiting=\"Press a key...\""},
+};
+constexpr PartStart kPartTextbox[]{
+    {"Namebox", "namebox x=64 y=470 h=46"},
+    {"Dialogue", "dialogue x=72 y=528 w=1136"},
+    {"Indicator", "indicator x=1195 y=648 w=18 h=12"},
+    {"Face", "face x=64 y=452 w=190 h=232"},
+    {"Choices", "choices x=280 y=40 w=720 h=420 item_h=54 gap=14"},
+    {"Message", "message x=1220 y=32 w=560 align=right"},
+};
+constexpr PartStart kPartLists[]{
+    {"Pages", "pages x=200 y=30 h=34 item_w=44 wide_w=76 gap=6 auto=Auto quick=Quick"},
+    {"Slots", "slots x=60 y=92 columns=3 item_w=360 item_h=262 gap_x=40 gap_y=16 confirm=\"Overwrite this save?\" load_confirm=\"Load this save? Progress since your last save will be lost.\" delete_confirm=\"Delete this save?\""},
+    {"History", "history x=60 y=92 w=1160 h=540 name_w=200 gap=18"},
+    {"Page", "page x=60 y=92 w=1160 h=560 name_w=200 gap=18"},
+    {"Gallery", "gallery x=60 y=92 w=1160 h=560 columns=3 item_h=208 gap=24"},
+    {"Endings", "endings x=60 y=92 w=1160 h=560 item_h=80 gap=10 hidden=???"},
+    {"Songs", "songs x=60 y=92 w=1160 h=560 item_h=60 gap=10"},
+    {"Achievements", "achievements x=60 y=92 w=1160 h=560 item_h=80 gap=10 hidden=???"},
+    {"Tips", "tips x=60 y=92 w=1160 h=560 item_h=60 gap=10"},
+    {"Chart", "chart x=60 y=92 w=1160 h=560 confirm=\"Go back to this point? Progress since your last save will be lost.\""},
+    {"Phone", "phone x=900 y=140 w=340 h=270 item_w=270 gap=12"},
+    {"Contacts", "contacts x=900 y=140 w=340 h=270 item_h=62 gap=8"},
+};
+// New part's groups, as the Story tab's New line has its lines.
+constexpr std::pair<std::string_view, std::span<const PartStart>> kParts[]{
+    {"Basics", kPartBasics}, {"Values", kPartValues}, {"Textbox", kPartTextbox}, {"Lists", kPartLists}};
 
 // Each kind of part's own settings (and whether it's a list, with the settings of one).
 struct PartKind {
@@ -713,6 +720,12 @@ struct Developer::ScreensFrame {
     SDL_FRect left, middle, right;
     float gap;
     const std::string& tip; // (what the form said last frame: shown under the screen's buttons)
+    // New part, under the screen and its help: its buttons (Goes in, with a part chosen; then the kinds
+    // of parts, in groups) and where they go; what Goes in calls the part chosen.
+    std::vector<DeveloperUi::ButtonGroup> newParts{};
+    DeveloperUi::Grouped newPartPlaces{};
+    std::string intoName{};
+    float helpH = 0.0f; // (the room under the screen for the tab's help: three lines)
     // What the screen's column found, for the form: the parts chosen (in the script's order), and
     // whether the screen can be changed here (the game's own, read without mistakes).
     std::vector<std::size_t> chosenLines{};
@@ -733,7 +746,6 @@ struct Developer::ScreensFrame {
         d.armed.clear();
         d.asText = false;
         d.drag.reset();
-        d.addingPart = false;
     }
     [[nodiscard]] bool problemIn(std::size_t from, std::size_t to) const { return screen && d.problemWithin(screen->file, from, to); }
     [[nodiscard]] SDL_FRect onScreen(const SDL_FRect& b) const { return {shown.x + b.x * scale, shown.y + b.y * scale, b.w * scale, b.h * scale}; }
@@ -800,17 +812,14 @@ void Developer::drawScreens(DeveloperUi& ui, const SDL_FRect& area) {
     }
     std::vector<std::optional<std::size_t>> elementByPart(parts.size()); // (found once a frame, not for each row of the list)
 
-    const float gap = 14 * k;
-    const float leftW = std::round(area.w * 0.16f), formW = std::round(area.w * 0.28f);
-    const SDL_FRect left{area.x, area.y, leftW, area.h};
-    const SDL_FRect middle{left.x + leftW + gap, area.y, area.w - leftW - formW - 2 * gap, area.h};
-    const std::string tip = std::exchange(d.screenTip, {}); // (what the form said last frame: the form comes after the buttons it's shown under)
-    const SDL_FRect right{middle.x + middle.w + gap, area.y, formW, area.h};
+    const auto [left, middle, right] = ui.columns(area);
+    const float gap = layout::columnGap * k;
+    const std::string tip = std::exchange(d.screenTip, {}); // (what the form said last frame: the form is drawn after the screen it's shown under)
 
     ScreensFrame f{.ui = ui, .d = d, .entries = entries, .entry = entry, .chosen = &*chosen, .screen = screen, .parts = parts, .selected = selected, .def = def,
                          .elementByPart = elementByPart, .left = left, .middle = middle, .right = right, .gap = gap, .tip = tip};
     for (std::size_t i = 0; i < parts.size(); ++i) elementByPart[i] = f.elementOf(parts[i].line);
-    if (drawScreenLists(f) || drawScreenPreview(f)) return; // (a screen or part changed: the rest is drawn next frame)
+    if (drawScreenLists(f) || drawScreenPreview(f) || drawNewPart(f)) return; // (a screen or part changed: the rest is drawn next frame)
     drawScreenForm(f);
 }
 
@@ -830,7 +839,7 @@ bool Developer::drawScreenLists(const ScreensFrame& f) {
     // --- The screens and the parts of the one open.
     const float half = std::round(left.h * 0.42f);
     const float headingH = layout::headingH * k, listButtonH = layout::buttonH * k, listGap = layout::gap * k;
-    ui.text("Screens", left.x, left.y, layout::headingText, theme::dim);
+    ui.heading("Screens", left.x, left.y);
     const SDL_FRect screensBox{left.x, left.y + headingH, left.w, half - headingH - listButtonH - 2 * listGap};
     // A click opens a screen; the game's own can be renamed with a double click (where it's opened
     // follows) and deleted with their x.
@@ -893,9 +902,9 @@ bool Developer::drawScreenLists(const ScreensFrame& f) {
     // its x deletes it, and dragging one changes which are drawn over which, and (dragged right or left)
     // puts it in the part above it, or out of the one it's in. + New part adds one (in the part chosen, or
     // the screen).
-    ui.text("Parts", left.x, left.y + half, layout::headingText, theme::dim);
-    const SDL_FRect partsBox{left.x, left.y + half + headingH, left.w, left.h - half - headingH - listButtonH - listGap};
-    const float inStep = 14 * k; // (each part it's in)
+    ui.heading("Parts", left.x, left.y + half);
+    const SDL_FRect partsBox{left.x, left.y + half + headingH, left.w, left.h - half - headingH}; // (New part is under the screen)
+    const float inStep = layout::listIndent * k; // (each part it's in, as the Story's lines are)
     const auto partEvent = ui.editList("parts", partsBox, d.partsScroll,
                                        {.count = parts.size(),
                                         .label = [&](std::size_t i) { return partTitle(parts[i]); },
@@ -937,13 +946,13 @@ bool Developer::drawScreenLists(const ScreensFrame& f) {
                                                 float x = at.x + 10 * k;
                                                 const float mid = at.y + at.h / 2;
                                                 const SDL_Color shade = faint ? theme::dim : theme::text;
-                                                ui.textAround(title, x, mid, 15, shade);
-                                                x += ui.width(title, 15) + 8 * k;
+                                                ui.textAround(title, x, mid, layout::listText, shade);
+                                                x += ui.width(title, layout::listText) + 8 * k;
                                                 if (color) {
                                                     const auto grad = parseGradient(parts[i].text, &engine.palette());
-                                                    ui.textAround(colorWords(parts[i].text, &engine.palette()), ui.swatch(x, mid, *color, false, grad ? std::optional(grad->second) : std::nullopt), mid, 15, shade);
+                                                    ui.textAround(colorWords(parts[i].text, &engine.palette()), ui.swatch(x, mid, *color, false, grad ? std::optional(grad->second) : std::nullopt), mid, layout::listText, shade);
                                                 }
-                                                else if (named) ui.textAround(parts[i].kind, x, mid, 13, theme::dim);
+                                                else if (named) ui.textAround(parts[i].kind, x, mid, layout::smallText, theme::dim);
                                             }});
     switch (partEvent.kind) {
     case ListKind::Chosen:
@@ -971,14 +980,6 @@ bool Developer::drawScreenLists(const ScreensFrame& f) {
     case ListKind::None:
         break;
     }
-    if (ui.button({left.x, partsBox.y + partsBox.h + listGap, left.w, listButtonH}, "+ New part", d.addingPart, screen.has_value() && !d.trying, layout::buttonText)) {
-        const bool now = !d.addingPart;
-        d.picking = false;
-        d.addingPart = now;
-        d.addInto = d.part.has_value();
-        d.formScroll = 0.0f;
-    }
-
     return false;
 }
 
@@ -986,11 +987,27 @@ bool Developer::drawScreenPreview(ScreensFrame& f) {
     DeveloperTools& d = tools;
     const float k = f.ui.k;
     using Part = StoryEditor::Part;
-    // --- The screen, with Try it under it.
+    // --- The screen, with its heading over it (Try it, its sound), the tab's help under it, and New part
+    // under that (drawNewPart).
     const SDL_FRect& middle = f.middle;
-    const float tryH = layout::mediumButtonH * k;
-    f.scale = std::min(middle.w / engine.canvas().w, (middle.h - tryH - 16 * k) / engine.canvas().h);
-    f.shown = {middle.x + (middle.w - engine.canvas().w * f.scale) / 2, middle.y, engine.canvas().w * f.scale, engine.canvas().h * f.scale};
+    if (d.addIntoOf != d.part) { // (another part chosen: New part goes in it if it's a container, else on the screen)
+        d.addIntoOf = d.part;
+        const auto chosen = d.part ? std::ranges::find(f.parts, *d.part, &Part::line) : f.parts.end(); // (chosen just now: not f.selected yet)
+        d.addInto = chosen != f.parts.end() && chosen->kind == "container";
+    }
+    if (f.selected) {
+        f.intoName = f.ui.fitted(partTitle(*f.selected, &engine.palette()), layout::smallButtonText, middle.w / 2);
+        f.newParts.push_back({.name = "Goes in", .labels = {"The screen", f.intoName}});
+    }
+    for (const auto& [name, starts] : kParts) {
+        DeveloperUi::ButtonGroup& g = f.newParts.emplace_back(DeveloperUi::ButtonGroup{.name = name, .labels = {}});
+        for (const PartStart& start : starts) g.labels.push_back(start.kind);
+    }
+    f.newPartPlaces = f.ui.grouped(f.newParts, middle.w);
+    f.helpH = 3 * f.ui.measure("Ag", layout::noteText).y + 2 * layout::gap * k;
+    const float headH = layout::previewHeadH * k, newH = layout::headingH * k + f.newPartPlaces.h;
+    f.scale = std::max(0.01f, std::min(middle.w / engine.canvas().w, (middle.h - headH - f.helpH - newH) / engine.canvas().h));
+    f.shown = {middle.x + (middle.w - engine.canvas().w * f.scale) / 2, middle.y + headH, engine.canvas().w * f.scale, engine.canvas().h * f.scale};
     f.editable = f.screen && f.def && d.screenView;
     f.mx = (d.mouseX - f.shown.x) / f.scale;
     f.my = (d.mouseY - f.shown.y) / f.scale;
@@ -1310,14 +1327,12 @@ void Developer::paintScreen(const ScreensFrame& f, bool canTry) {
     const auto& entry = f.entry;
     const auto& screen = f.screen;
     const ScreenDef* def = f.def;
-    const SDL_FRect& middle = f.middle;
     const std::string& tip = f.tip;
     const SDL_FRect& shown = f.shown;
     const float scale = f.scale;
     const auto& hovered = f.hovered;
     const auto& selectedElement = f.selectedElement;
     const SDL_FRect& handle = f.handle;
-    const float tryH = layout::mediumButtonH * k;
     draw::rect(r, shown, kBox);
     if (def && d.screenView &&
         paintCanvas([&] {
@@ -1348,8 +1363,8 @@ void Developer::paintScreen(const ScreensFrame& f, bool canTry) {
         d.screenTip = f.problemIn(screen ? screen->line : 0, screen ? screen->end : 0) ? "The screen shows once its mistakes are fixed." : "The screen shows once the scripts' mistakes are fixed.";
     }
     draw::outline(r, shown, kEdge);
-    const float tryW = ui.width("Try it", layout::buttonText) + 22 * k, tryY = shown.y + shown.h + 10 * k;
-    if (ui.button({middle.x, tryY, tryW, tryH}, "Try it", d.trying, canTry, layout::buttonText)) {
+    PreviewHead head(ui, PreviewHead::over(shown, k)); // (as the Story tab's preview has it)
+    if (head.button("Try it", d.trying, canTry)) {
         if (d.trying) {
             stopTrying();
         } else {
@@ -1366,19 +1381,17 @@ void Developer::paintScreen(const ScreensFrame& f, bool canTry) {
             d.status = "Trying it: its buttons work as in the game, and what they'd do there is written to the log. Esc stops.";
         }
     }
-    if (engine.waiting_) { // its sound, as the Story tab's preview has it (only while no game is going on behind the tools: it would cut into that one's)
-        const float audioW = std::max(ui.buttonWidth("Audio on", layout::buttonText, layout::previewButtonW), ui.buttonWidth("Audio off", layout::buttonText, layout::previewButtonW));
-        const SDL_FRect box{middle.x + tryW + layout::gap * k, tryY, audioW, tryH};
-        if (ui.button(box, d.previewSound ? "Audio on" : "Audio off", d.previewSound, true, layout::buttonText)) {
-            d.previewSound = !d.previewSound;
-            d.sampleMade = false; // (made again, heard or not)
-            if (d.heard) d.heard->stopAll(0.2f);
-            d.heard = nullptr;
-        }
+    // Its sound (only while no game is going on behind the tools: it would cut into that one's).
+    if (engine.waiting_ && head.button(d.previewSound ? "Audio on" : "Audio off", d.previewSound)) {
+        d.previewSound = !d.previewSound;
+        d.sampleMade = false; // (made again, heard or not)
+        if (d.heard) d.heard->stopAll(0.2f);
+        d.heard = nullptr;
     }
-    // Every word of help the tab has to say goes here, under the buttons: what the form would say of what's chosen.
+    head.title("Preview");
+    // Every word of help the tab has to say goes here, under the screen: what the form would say of what's chosen.
     if (d.trying) d.screenTip = "Its buttons work as in the game, and what they'd do there goes to the log. Esc stops.";
-    if (!tip.empty()) ui.text(tip, middle.x, tryY + tryH + 10 * k, 13, theme::dim, middle.w);
+    if (!tip.empty()) ui.text(tip, shown.x, shown.y + shown.h + layout::gap * k, layout::noteText, theme::dim, shown.w);
 }
 
 // A screen tried stops: the story under it as it was, the screens it opened gone, its music stopped.
@@ -1561,7 +1574,6 @@ void Developer::runTryIt(const ScreensFrame& f) {
 
 void Developer::drawScreenForm(const ScreensFrame& f) {
     if (tools.picking) return drawNewScreenForm(f);
-    if (tools.addingPart && f.screen) return drawNewPartForm(f);
     if (!f.screen) return drawBuiltInForm(f);
     if (f.selected && !tools.moreParts.empty()) return drawLineUpForm(f);
     drawPartForm(f);
@@ -1577,7 +1589,7 @@ void Developer::drawNewScreenForm(const ScreensFrame& f) {
     const SDL_FRect& right = f.right;
     float y = right.y;
     const float titleH = layout::titleH * k;
-    ui.text("New screen", right.x, y, layout::titleText, kAccent);
+    ui.formTitle("New screen", right.x, y);
     const SDL_FRect list{right.x, y + titleH, right.w, right.y + right.h - y - titleH};
     ui.scrollForm(list, 60 * k);
     y = list.y - d.formScroll;
@@ -1615,58 +1627,60 @@ void Developer::drawNewScreenForm(const ScreensFrame& f) {
     ui.formDrawn(list, y);
 }
 
-// + New part: what kind, and where it goes (in the part chosen, at its top left, or the screen).
-void Developer::drawNewPartForm(const ScreensFrame& f) {
+// New part, under the screen and its help, as the Story tab's New line is under its lines: Goes in (the
+// screen, or the part chosen), then a button for each kind of part, in groups. A part goes in at the top
+// left of the part it goes in.
+bool Developer::drawNewPart(ScreensFrame& f) {
     using Part = StoryEditor::Part;
-    const auto& screen = f.screen;
-    const Part* selected = f.selected;
     DeveloperTools& d = tools;
     StoryEditor& editor = d.editor;
     DeveloperUi& ui = f.ui;
     const float k = ui.k;
-    const SDL_FRect& right = f.right;
-    float y = right.y;
-    const float titleH = layout::titleH * k;
-    ui.text("New part", right.x, y, layout::titleText, kAccent);
-    y += titleH;
+    const auto& screen = f.screen;
+    const Part* selected = f.selected;
+    const float y = f.shown.y + f.shown.h + f.helpH; // (under the help's room)
+    ui.heading(!screen ? "New part (once the screen is the game's own)" : "New part", f.middle.x, y, f.middle.w);
+    const std::size_t goesIn = selected ? 2 : 0; // (its two buttons first)
+    const std::vector<std::size_t> chosen{d.addInto ? std::size_t{1} : std::size_t{0}};
+    const auto clicked = ui.groupedButtons(f.newParts, f.newPartPlaces, f.middle.x, y + layout::headingH * k, selected ? std::span(chosen) : std::span<const std::size_t>{},
+                                           screen.has_value() && !d.trying);
+    if (!clicked || !screen) return false;
+    if (*clicked < goesIn) {
+        d.addInto = *clicked == 1;
+        return false;
+    }
+    const PartStart* start = nullptr;
+    for (std::size_t i = *clicked - goesIn; const auto& [name, starts] : kParts) {
+        if (i < starts.size()) {
+            start = &starts[i];
+            break;
+        }
+        i -= starts.size();
+    }
+    if (!start) return false;
     const Part* into = d.addInto ? selected : nullptr;
-    if (selected) {
-        ui.textAround("Goes in", right.x, y + 14 * k, 13, theme::dim);
-        const std::string chosenName = partTitle(*selected, &engine.palette());
-        const float bw = (right.w - 76 * k) / 2;
-        if (ui.button({right.x + 70 * k, y, bw, layout::mediumButtonH * k}, "The screen", !d.addInto, true, layout::smallButtonText)) d.addInto = false;
-        if (ui.button({right.x + 76 * k + bw, y, bw, layout::mediumButtonH * k}, chosenName, d.addInto, true, layout::smallButtonText)) d.addInto = true;
-        y += 40 * k;
-    }
-    std::vector<std::string_view> kinds;
-    std::vector<bool> kindWith;
-    for (const PartStart& add : kParts) kinds.push_back(add.kind), kindWith.push_back(add.with);
-    const auto places = ui.flow(kinds, right.w, layout::buttonH * k, layout::gap * k, layout::buttonText, kindWith);
-    for (std::size_t i = 0; i < kParts.size(); ++i) {
-        const SDL_FRect box{right.x + places[i].x, y + places[i].y, places[i].w, places[i].h};
-        if (!ui.button(box, kParts[i].kind, false, true, 14)) continue;
-        std::string line(kParts[i].line);
-        const auto pictures = editor.names(StoryEditor::Pick::Pictures), movies = editor.names(StoryEditor::Pick::Movies); // (the first, or none to pick)
-        line = replaced(line, "PICTURE", pictures.empty() ? "" : pictures.front());
-        line = replaced(line, "MOVIE", movies.empty() ? "" : movies.front());
-        line = std::string(trim(scaled("    " + line, engine.canvas().h / 720.0f)));
-        // (written for 1280 x 720: as places and shares, on the screen or at the top left of the part it goes in)
-        std::vector<std::string> layout{"screen new", "    " + line};
-        if (into)
-            if (const auto el = f.elementOf(into->line); el && d.screenView) {
-                const SDL_FRect b = d.screenView->bounds(*el);
-                const float sx = 1280.0f / engine.canvas().w, sy = 720.0f / engine.canvas().h;
-                std::string at;
-                for (const std::string& word : rawWords(line))
-                    at += (at.empty() ? "" : " ") + (word.starts_with("x=") ? std::string("x=0") : word.starts_with("y=") ? std::string("y=0") : word);
-                layout = {"screen new", std::format("    container x={} y={} w={} h={}", b.x * sx, b.y * sy, b.w * sx, b.h * sy), "        " + at};
-            }
-        line = std::string(trim(placesFromPixels(layout, 1280.0f, 720.0f).back()));
-        std::vector<std::string> needs = needsOf(editor, {"screen new", "    " + line}, "new"); // (the colours and styles it uses that the game lacks)
-        for (std::string& l : needs) l = scaled(l, engine.canvas().h / 720.0f);
-        f.choose(editor.addPart(*screen, into, line, needs));
-        return;
-    }
+    std::string line(start->line);
+    const auto pictures = editor.names(StoryEditor::Pick::Pictures), movies = editor.names(StoryEditor::Pick::Movies); // (the first, or none to pick)
+    line = replaced(line, "PICTURE", pictures.empty() ? "" : pictures.front());
+    line = replaced(line, "MOVIE", movies.empty() ? "" : movies.front());
+    line = std::string(trim(scaled("    " + line, engine.canvas().h / 720.0f)));
+    // (written for 1280 x 720: as places and shares, on the screen or at the top left of the part it goes in)
+    std::vector<std::string> lines{"screen new", "    " + line};
+    if (into)
+        if (const auto el = f.elementOf(into->line); el && d.screenView) {
+            const SDL_FRect b = d.screenView->bounds(*el);
+            const float sx = 1280.0f / engine.canvas().w, sy = 720.0f / engine.canvas().h;
+            std::string at;
+            for (const std::string& word : rawWords(line))
+                at += (at.empty() ? "" : " ") + (word.starts_with("x=") ? std::string("x=0") : word.starts_with("y=") ? std::string("y=0") : word);
+            lines = {"screen new", std::format("    container x={} y={} w={} h={}", b.x * sx, b.y * sy, b.w * sx, b.h * sy), "        " + at};
+        }
+    line = std::string(trim(placesFromPixels(lines, 1280.0f, 720.0f).back()));
+    std::vector<std::string> needs = needsOf(editor, {"screen new", "    " + line}, "new"); // (the colours and styles it uses that the game lacks)
+    for (std::string& l : needs) l = scaled(l, engine.canvas().h / 720.0f);
+    d.picking = false;
+    f.choose(editor.addPart(*screen, into, line, needs));
+    return true;
 }
 
 // A built-in screen (the textbox, the choice menu): what it is, and a button that makes it the game's own.
@@ -1679,7 +1693,7 @@ void Developer::drawBuiltInForm(const ScreensFrame& f) {
     const SDL_FRect& right = f.right;
     float y = right.y;
     const float titleH = layout::titleH * k;
-    ui.text(entry.name, right.x, y, layout::titleText, kAccent);
+    ui.formTitle(entry.name, right.x, y);
     y += titleH;
     d.screenTip = entry.name == "say" ? "The player's textbox: the speaker's name, the line and the arrow" : "The player's choice menu";
     if (ui.button({right.x, y, 220 * k, layout::bigButtonH * k}, "Make it the game's own")) { // (a copy in the game's screens, used instead)
@@ -1706,8 +1720,8 @@ void Developer::drawLineUpForm(const ScreensFrame& f) {
     const float k = ui.k;
     const SDL_FRect& right = f.right;
     float y = right.y;
-    ui.text(std::format("{} parts", chosenLines.size()), right.x, y + 4 * k, layout::titleText, kAccent);
-    y += 40 * k;
+    ui.formTitle(std::format("{} parts", chosenLines.size()), right.x, y);
+    y += layout::titleH * k;
     struct Item {
         std::size_t line = 0, element = 0;
         SDL_FRect b{};
@@ -1722,11 +1736,11 @@ void Developer::drawLineUpForm(const ScreensFrame& f) {
     std::optional<std::string_view> clicked;
     for (const auto& [label, words, need] : {std::tuple{std::string_view("Line up"), std::span<const std::string_view>(kLineUp), std::size_t{2}},
                                              {std::string_view("Spread evenly"), std::span<const std::string_view>(kSpread), std::size_t{3}}}) {
-        ui.textAround(label, right.x, y + bh / 2, 13, theme::dim, labelW - 8 * k);
+        ui.textAround(label, right.x, y + bh / 2, layout::labelText, theme::dim, labelW - 8 * k);
         const std::vector<bool> with(words.size() == 6 ? std::vector<bool>{false, true, true, false, true, true} : std::vector<bool>{}); // (across together, down together)
-        const auto places = ui.flow({words.begin(), words.end()}, right.w - labelW, bh, 4 * k, 13, with);
+        const auto places = ui.flow({words.begin(), words.end()}, right.w - labelW, bh, layout::barButtonGap * k, layout::smallButtonText, with);
         for (std::size_t i = 0; i < words.size(); ++i)
-            if (ui.button({right.x + labelW + places[i].x, y + places[i].y, places[i].w, places[i].h}, words[i], false, items.size() >= need, 13))
+            if (ui.button({right.x + labelW + places[i].x, y + places[i].y, places[i].w, places[i].h}, words[i], false, items.size() >= need, layout::smallButtonText))
                 clicked = words[i];
         y += places.back().y + bh + 10 * k;
     }
@@ -1781,13 +1795,13 @@ void Developer::drawPartForm(const ScreensFrame& f) {
     float y = right.y;
     const float labelH = layout::labelAboveH * k, boxH = layout::boxH * k, rowGap = layout::rowGap * k, titleH = layout::titleH * k;
     auto field = [&](std::string_view label, const std::string& id, const std::string& value, float x, float w, std::string_view hint = {}) {
-        ui.text(label, x, y, 13, theme::dim);
-        return ui.field(id, {x, y + labelH, w, boxH}, value, 15, hint);
+        ui.text(label, x, y, layout::smallText, theme::dim);
+        return ui.field(id, {x, y + labelH, w, boxH}, value, layout::boxText, hint);
     };
     const bool header = !selected;
     const Part p = header ? editor.part(*screen, screen->line) : *selected;
-    ui.text(header ? std::format("Screen: {}", p.text) : p.option("name").empty() ? upperFirst(p.kind) : std::format("{}: {}", upperFirst(p.kind), p.option("name")),
-            right.x, y + 4 * k, layout::titleText, kAccent);
+    ui.formTitle(header ? std::format("Screen: {}", p.text) : p.option("name").empty() ? upperFirst(p.kind) : std::format("{}: {}", upperFirst(p.kind), p.option("name")),
+                 right.x, y);
     if (!header) asTextButton(ui, right.x + right.w, y);
     y += titleH;
     const std::string id = std::format("part:{}:{}", screen->line, p.line);
@@ -1813,7 +1827,7 @@ void Developer::drawPartForm(const ScreensFrame& f) {
     y -= d.formScroll;
     const DeveloperUi::Clip clipped(ui, formBox, true);
     const float labelW = std::round(right.w * layout::partLabelPart);
-    if (const ScriptError* problem = d.problemAt(screen->file, p.line)) y += ui.text(problem->message, right.x, y, 14, kBad, right.w).y + 8 * k;
+    if (const ScriptError* problem = d.problemAt(screen->file, p.line)) y += ui.text(problem->message, right.x, y, layout::noteText, kBad, right.w).y + 8 * k;
     // A change from the form: typed (one step for undo while one box is typed into) or picked.
     auto apply = [&](const std::optional<FormEdit>& edit, const std::vector<StoryEditor::Field>& fields, auto&& changed) {
         if (!edit) return;
@@ -1828,7 +1842,7 @@ void Developer::drawPartForm(const ScreensFrame& f) {
         y += 8 * k;
         y += ui.text("Click a part on the screen (or in the list) to choose it: drag it to move it, or its corner to resize it (with Shift: keeping "
                      "its shape), and the arrow keys nudge it (Shift: 10 pixels). Esc lets it go.",
-                     right.x, y, 13, theme::dim, right.w).y;
+                     right.x, y, layout::noteText, theme::dim, right.w).y;
     } else {
         // Its name: what the Parts list calls it (the game doesn't show it).
         const std::vector<StoryEditor::Field> name{{.name = "name", .value = p.option("name"), .label = "Name", .box = Box::Name, .hint = "None"}};

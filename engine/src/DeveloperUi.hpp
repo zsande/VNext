@@ -4,6 +4,8 @@
 
 #include "DeveloperShared.hpp"
 
+#include <limits>
+
 namespace vn {
 
 // Immediate-mode drawing for the developer tools: each widget is drawn and acts on this frame's
@@ -25,6 +27,38 @@ public:
     // the short ones in a row keep one size.
     float buttonWidth(std::string_view label, float size, float least) { return std::max(least * k, width(label, size) + layout::buttonPad * k); }
     SDL_FPoint measure(std::string_view s, float size, float wrap = 0.0f); // (how big text() would draw it)
+    // `s` on one line `room` wide: as it is, or as much of it as fits, ending with "...".
+    std::string fitted(std::string_view s, float size, float room);
+    // A panel's heading ("Scenes", "Images", "Preview"...), the same on every tab: in the middle of its
+    // row (layout::headingH high from `y`), on one line `room` wide.
+    void heading(std::string_view title, float x, float y, float room = std::numeric_limits<float>::infinity());
+    // Buttons that make something new, in named groups, the same on every tab (the Story's New line, the
+    // Screens' New part): each group's name at the left, its buttons after it in as few rows as the room
+    // takes them, as even as they can be (8 in two rows: 4 and 4), as wide as the room, and lined up in
+    // an even grid when every label fits its cell. grouped() lays them out (from the room's top left: each
+    // button, by its place over all the groups, and each group's name), groupedButtons() draws them at
+    // (x, y) and gives the one clicked (`chosen`: the ones that look pressed).
+    struct ButtonGroup {
+        std::string_view name;
+        std::vector<std::string_view> labels;
+    };
+    struct Grouped {
+        std::vector<SDL_FRect> buttons, names;
+        float h = 0.0f;
+    };
+    [[nodiscard]] Grouped grouped(std::span<const ButtonGroup> groups, float w);
+    std::optional<std::size_t> groupedButtons(std::span<const ButtonGroup> groups, const Grouped& at, float x, float y, std::span<const std::size_t> chosen = {},
+                                              bool enabled = true);
+    // A tab's columns, the same on every tab (Story, Screens, Library, Translate): its lists at the left,
+    // the chosen thing's form at the right (with `form`), what's chosen between them; each its share of
+    // the room, the lists' and the form's within what reads well (layout::sideLeast...).
+    struct Columns {
+        SDL_FRect left, middle, right;
+    };
+    [[nodiscard]] Columns columns(const SDL_FRect& area, bool form = true) const;
+    // A form's title ("Line", "Style: shout"...), the same on every tab: at the top of its row
+    // (layout::titleH high from `y`), level with a button there (As text).
+    void formTitle(std::string_view title, float x, float y, SDL_Color color = kAccent);
     void textIn(std::string_view s, const SDL_FRect& box, float size, SDL_Color color);
     // Drawing stays inside `box` (and the box before it) while it lives; with `clicks`, clicks count only
     // in there too (a list that scrolls). Then both are as they were.
@@ -104,7 +138,7 @@ public:
     // one on or off ("none" goes on its own).
     std::optional<std::string> choices(const SDL_FRect& box, const StoryEditor::Field& f, float& y);
     // A tab in the bar at the top (red: what it shows has a mistake).
-    bool tab(const SDL_FRect& box, std::string_view label, bool chosen, bool wrong);
+    bool tab(const SDL_FRect& box, std::string_view label, bool chosen, bool wrong, float size = layout::tabText);
     // Text centred on `middle` (up and down).
     void textAround(std::string_view s, float x, float middle, float size, SDL_Color color, float wrap = 0.0f);
 
@@ -149,6 +183,22 @@ private:
     FontCache& fonts_;
     std::vector<SDL_Rect> clips_;
     const SDL_FRect* within_ = nullptr; // clicks count only in here (a list that scrolls: see Clip)
+};
+
+// A preview's heading, the same on every tab: in `row` (a heading's, layout::headingH high), its buttons
+// from the right, each left of the last (true: clicked), then its title in the room they leave.
+class PreviewHead {
+public:
+    PreviewHead(DeveloperUi& ui, const SDL_FRect& row) : ui_(ui), row_(row), right_(row.x + row.w) {}
+    // The row over a preview shown at `shown`, a gap above it.
+    static SDL_FRect over(const SDL_FRect& shown, float k) { return {shown.x, shown.y - layout::previewHeadH * k, shown.w, layout::headingH * k}; }
+    bool button(std::string_view label, bool chosen, bool enabled = true);
+    void title(std::string_view text);
+
+private:
+    DeveloperUi& ui_;
+    SDL_FRect row_;
+    float right_; // (where the next button ends)
 };
 
 } // namespace vn
