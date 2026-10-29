@@ -310,7 +310,36 @@ elseif(WIN32)
         message(FATAL_ERROR "The Windows icon is missing: put it (an .ico made from icon.png) at ${vn_ico}.")
     endif()
     enable_language(RC)
-    file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/icon.rc CONTENT "1 ICON \"${vn_ico}\"\n")
+    # ...and its details (Explorer's Properties; signing checks the name and version): the project's version,
+    # also as four numbers.
+    string(REPLACE "." "," vn_version_numbers "${PROJECT_VERSION}.0")
+    file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/icon.rc @ONLY CONTENT [=[#pragma code_page(65001)
+1 ICON "@vn_ico@"
+1 VERSIONINFO
+FILEVERSION @vn_version_numbers@
+PRODUCTVERSION @vn_version_numbers@
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "FileDescription", "VNext"
+            VALUE "FileVersion", "@PROJECT_VERSION@"
+            VALUE "InternalName", "VNext"
+            VALUE "LegalCopyright", "Copyright (C) 2026 András Horesta"
+            VALUE "OriginalFilename", "VNext.exe"
+            VALUE "ProductName", "VNext"
+            VALUE "ProductVersion", "@PROJECT_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+]=])
     target_sources(vnext PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/icon.rc)
 endif()
 

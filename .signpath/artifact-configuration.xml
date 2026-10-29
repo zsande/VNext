@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What SignPath signs in a release (the build workflow sends the Windows player's folder: VNext.exe and
+     licenses.txt): VNext.exe, if it says it's VNext at the release's version. Pasted into the VNext project's
+     artifact configuration on SignPath; the workflow passes the version. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="VNext.exe" product-name="VNext" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
