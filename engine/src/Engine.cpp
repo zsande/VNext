@@ -530,7 +530,8 @@ void Engine::configureFonts() {
 }
 
 // The folders a game may be in, first to last: next to the player (next to the .app on macOS, even
-// when macOS runs a downloaded app from a hidden copy of it), then inside the app.
+// when macOS runs a downloaded app from a hidden copy of it; next to the AppImage on Linux, which runs
+// from a folder of its own), then inside the app.
 std::vector<std::string> Engine::gamePlaces() const {
     const char* basePath = SDL_GetBasePath();
     const std::string base = basePath ? basePath : "";
@@ -543,6 +544,15 @@ std::vector<std::string> Engine::gamePlaces() const {
 #endif
         places.insert(places.begin(), app.substr(0, app.find_last_of('/') + 1));
     }
+#if defined(SDL_PLATFORM_LINUX)
+    // (only when this player is the AppImage's own: a program another AppImage starts has its variables too)
+    const char* appDir = SDL_getenv("APPDIR");
+    const char* appImage = SDL_getenv("APPIMAGE");
+    if (std::string dir = appDir ? appDir : ""; appImage && !dir.empty() && base.starts_with(dir.ends_with('/') ? dir : dir + "/")) {
+        const std::string image = appImage;
+        places.insert(places.begin(), image.substr(0, image.find_last_of('/') + 1));
+    }
+#endif
     return places;
 }
 
@@ -609,7 +619,7 @@ std::expected<std::string, std::string> Engine::packInto(const std::string& file
 
 // Pack the game: next to the game folder, a folder named after the game with game.vnext (the game in
 // one file, which keeps its players' saves and progress in it too) and licenses.txt. To play it, the player goes
-// next to game.vnext: VNext.app, VNext.exe or VNext, from VNext's releases on GitHub. One made before
+// next to game.vnext: VNext.app, VNext.exe or VNext-Linux.AppImage, from VNext's releases on GitHub. One made before
 // goes to the Trash first.
 std::expected<std::string, std::string> Engine::finishGame() const {
     if (packed_) return std::unexpected(std::string(kPackedAlready));
@@ -620,7 +630,7 @@ std::expected<std::string, std::string> Engine::finishGame() const {
     const auto holds = packInto(folder + "/" + std::string(kPackName));
     if (!holds) return holds;
     return std::format("Packed the game: 'game.vnext' and 'licenses.txt' are in '{}'.\n{}\n"
-                       "To play it, put VNext next to 'game.vnext': VNext.app, VNext.exe or VNext, from VNext's releases on GitHub.",
+                       "To play it, put VNext next to 'game.vnext': VNext.app, VNext.exe or VNext-Linux.AppImage, from VNext's releases on GitHub.",
                        folder, *holds);
 }
 
