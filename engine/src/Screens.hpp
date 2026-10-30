@@ -7,6 +7,7 @@
 #include "System.hpp"
 
 #include <SDL3_ttf/SDL_ttf.h>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -30,6 +31,36 @@ void circle(SDL_Renderer* r, float cx, float cy, float radius, SDL_Color c);
 void quad(SDL_Renderer* r, SDL_FPoint a, SDL_FPoint b, SDL_FPoint c, SDL_FPoint d, SDL_Color color);
 SDL_Color hsv(float h, float s, float v, Uint8 alpha = 255);
 } // namespace draw
+
+// Something drawn with only part of it showing, as an animation's wipe has it (Animation::Look::wipe):
+// `shown` of it, straight from the left of `box`, or where the picture `shape` is darkest first (its
+// pixels stretched over `box`, softly at the edge). paint() draws it as it is; `canvas`: the game's
+// size, what the drawing's places are in. Where the graphics can't shape it, a straight one.
+class Wiper {
+public:
+    Wiper() = default;
+    Wiper(const Wiper&) VN_DELETED("its textures are its own");
+    Wiper& operator=(const Wiper&) VN_DELETED("its textures are its own");
+    Wiper(Wiper&&) = default;
+    Wiper& operator=(Wiper&&) = default;
+    ~Wiper() = default;
+    void draw(SDL_Renderer* r, Assets& assets, SDL_FPoint canvas, const SDL_FRect& box, float shown, const std::string& shape,
+              const std::function<void()>& paint);
+
+private:
+    // A shape's picture as read (at most 480 across): how bright each pixel is, the mask made of them, and
+    // how much that shows now. (No texture: the picture can't be read, or the graphics can't cut with it.)
+    struct Mask {
+        std::vector<Uint8> brightness;
+        int w = 0, h = 0;
+        TexturePtr texture;
+        float shown = -1.0f;
+    };
+    Mask* maskOf(SDL_Renderer* r, Assets& assets, const std::string& shape); // (each read once: several can wipe at a time; none: a straight wipe)
+    std::map<std::string, Mask, std::less<>> masks_;
+    TexturePtr layer_; // (what's wiped in a shape is drawn here first)
+    int layerW_ = 0, layerH_ = 0;
+};
 
 // Colours for the engine's own drawing (error screen, placeholders). Game screens use script styles.
 namespace theme {
@@ -236,8 +267,17 @@ public:
     void leave();  // it's closing: its hide_animation= plays (it's drawn, but takes no input)
     [[nodiscard]] bool leaving() const; // ...until that's over
     [[nodiscard]] bool hasLeft() const { return leftSince_.has_value(); } // (since leave(), until it opens again)
-    [[nodiscard]] bool startsCovered() const; // its show_animation= begins with everything covered by a colour (fade=)
-    [[nodiscard]] bool endsCovered() const;   // its hide_animation= ends with everything covered (fade=)
+    // The animations it plays this time it's open (open ... with NAME and close with NAME), instead of its
+    // own show_animation= and hide_animation=: until it's opened again. Empty: its own; null: none.
+    using Played = std::optional<std::shared_ptr<const Animation>>;
+    // The animation `name` in `script`, as one opening plays it (none said: its own; one it doesn't
+    // have, or "none": none).
+    [[nodiscard]] static Played animationIn(const Script* script, const std::optional<std::string>& name);
+    void playWith(Played opening, Played closing);
+    [[nodiscard]] const Animation* showAnimation() const { return opening_ ? opening_->get() : def_->showAnimation.get(); }
+    [[nodiscard]] const Animation* hideAnimation() const { return closing_ ? closing_->get() : def_->hideAnimation.get(); }
+    [[nodiscard]] bool startsCovered() const; // its show animation begins with everything covered by a colour (fade=)
+    [[nodiscard]] bool endsCovered() const;   // its hide animation ends with everything covered (fade=)
     void draw(SDL_Renderer* r, float alpha = 1.0f);
     // After a frame: its videos that weren't drawn in it stop (the screen was closed or hidden).
     void endFrame(std::uint64_t frame);
@@ -319,6 +359,8 @@ private:
         std::vector<std::string> ids; // ...the place each item goes to
         std::optional<float> since;     // a part with an animation: when it showed (its animation starts then)
         std::optional<float> clicked;   // a button with click_animation=: when it was clicked (it plays from then)
+        float hover = 0.0f;             // a part with hover_animation=: how far into it (on while it's pointed at, back after)
+        std::optional<float> hoverAt;   // ...and when that was
         float reach = 0.0f, reachX = 0.0f; // a container that scrolls: how far down from its top, and across from its left, its parts reach
         float scrollX = 0.0f;              // ...and how far it's scrolled across
         float glideX = 0.0f, glideY = 0.0f, glideAt = 0.0f; // ...gliding on after a drag: how fast (the game's pixels a second), and when it last moved
@@ -327,10 +369,16 @@ private:
         bool ownWords = false;          // ...one without a picture: as big as its words (drawn as they are, not wrapped)
         bool chosen = false;            // a button with selected=: chosen when it was last drawn (see takeChosen)
     };
-    struct Shift { // what the part a part is in moves it by (its animation's), how faded, and how covered with a colour
+    struct Shift { // what the part a part is in moves it by (its animation's), how faded, how covered with a colour and how wiped
         float x = 0.0f, y = 0.0f, opacity = 1.0f, fade = 0.0f;
         SDL_Color fadeColor{0, 0, 0, 255};
+        float wipe = 1.0f; // (how much of it shows: over `wipeBox`, as `wipeShape` has it)
+        SDL_FRect wipeBox{};
+        std::string wipeShape;
     };
+    // paint(), wiped as `by` says (a part in a wiped one: wiped with it, over its box).
+    template <class Paint> void wiped(SDL_Renderer* r, const Shift& by, const Paint& paint);
+    Wiper screenWiper_, partWiper_; // (the whole screen's wipe, and a part's)
     [[nodiscard]] bool within(std::size_t element, std::size_t container) const; // in it, or in a part in it
     // Where the containers a part is in cut it off (their edges=cut or fade, or scroll=yes), moved by their
     // `shifts` when given; none: nowhere.
@@ -361,10 +409,18 @@ private:
     std::optional<Target> tapping_; // a list's item pressed: it acts when the mouse comes up on it, unless that was a drag
 
     void drawElement(SDL_Renderer* r, std::size_t index, float alpha);
-    // A part with animation= (or a button playing its click_animation=): drawn as its animation has it
-    // now, then put back as it's written. Gives how it looks now (the parts in it move with it).
-    // `shift`: what the part it's in (or its screen) moves it by now (its places are where it's written, and it moves with that).
-    Animation::Look drawAnimated(SDL_Renderer* r, std::size_t index, float alpha, const Animation& a, float seconds, SDL_FPoint shift, const SDL_FRect& box);
+    // A part playing animations (its animation=, its hover_animation= while it's pointed at and back
+    // after, a button's click_animation= once clicked): drawn as they have it now, together, then put
+    // back as it's written. Gives how it looks now (the parts in it move with it). `by`: what the part
+    // it's in (or its screen) moves it by now (its places are where it's written, and it moves with that)
+    // and wipes it by; and then how the parts in it are wiped (its own wipe, when it shows less).
+    Animation::Look drawAnimated(SDL_Renderer* r, std::size_t index, float alpha, Shift& by, const SDL_FRect& box);
+    // Whether a part is pointed at: the one with the focus (the pointer's, or the keys' and a controller's),
+    // or any under the pointer (a box with buttons in it too). hoverOnward(): its hover animation goes on
+    // meanwhile (round and round, if it plays again and again), and back to its start after.
+    [[nodiscard]] bool pointedAt(std::size_t index) const;
+    void hoverOnward(std::size_t index);
+    std::uint64_t seenMotion_ = 0; // the engine's count of pointer moves when the last one here came (older: it's gone elsewhere)
     std::optional<std::size_t> playing_; // a button whose click animation plays: what it does is done when it's over
     float turn_ = 0.0f;                     // ...a picture's turn and tint meanwhile
     SDL_Color tint_{255, 255, 255, 255};
@@ -433,7 +489,12 @@ private:
     Engine& engine_;
     bool tools_ = false;
     [[nodiscard]] float now() const; // the game's clock, or the developer tools'
+    // The player's Animations setting off (not in the tools): animations show how they end, and looping
+    // ones stand at their start. played(): where `a` is after `seconds`, so.
+    [[nodiscard]] bool still() const;
+    [[nodiscard]] float played(const Animation& a, float seconds) const;
     Lookup lookup_; // the engine's names, with a textbox's line's own (speaker, has_face...) for its line
+    std::unordered_map<std::string, RichText, StringHash, std::equal_to<>> richRead_; // rich()'s texts with nothing to fill in, read once
     std::vector<ElementState> state_;
     std::vector<bool> drawn_;
     std::uint64_t drawnFrame_ = 0; // the frame it was last drawn in
@@ -445,7 +506,8 @@ private:
     std::optional<std::size_t> held_;
     bool heldMoved_ = false;
     std::optional<std::size_t> pressing_; // a button the mouse went down on: it looks chosen, and is clicked when the mouse comes up on it
-    std::optional<float> shownSince_, leftSince_; // when it opened (its show_animation=), when it closed (its hide_animation=)
+    std::optional<float> shownSince_, leftSince_; // when it opened (its show animation), when it closed (its hide animation)
+    Played opening_, closing_;
     SDL_FPoint grab_{}, pressed_{};
     Commands chosen_; // (see takeChosen)
     void hold(std::size_t element);

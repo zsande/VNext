@@ -4,6 +4,78 @@
 
 namespace vn {
 
+// ---------------------------------------------------------------------------
+// The developer tools' language (Developer.hpp)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+ToolsTranslation& toolsTranslation() {
+    static ToolsTranslation texts;
+    return texts;
+}
+
+std::vector<std::pair<std::string_view, TextShape>>& listedTexts() {
+    static std::vector<std::pair<std::string_view, TextShape>> texts;
+    return texts;
+}
+
+} // namespace
+
+std::string_view tr(std::string_view english) {
+    const ToolsTranslation& texts = toolsTranslation();
+    if (texts.empty()) return english;
+    const auto it = texts.find(english);
+    return it != texts.end() && !it->second.empty() ? std::string_view(it->second) : english;
+}
+
+std::string said(std::string_view english, std::format_args args) {
+    for (const std::string_view format : {tr(english), english}) {
+        try {
+            return std::vformat(format, args);
+        } catch (const std::format_error&) { // (a translation's {}s that don't fit: as written)
+        }
+    }
+    return std::string(english);
+}
+
+void useToolsTranslation(ToolsTranslation texts) { toolsTranslation() = std::move(texts); }
+
+void listToolsText(std::string_view text, TextShape shape) {
+    if (!text.empty()) listedTexts().emplace_back(text, shape);
+}
+
+std::vector<std::string> toolsTexts() {
+    static_cast<void>(StoryEditor::kindOf(StoryEditor::Box::None)); // (its table is made when it's first asked for)
+    std::vector<std::string> out;
+    std::set<std::string, std::less<>> seen;
+    auto add = [&](std::string_view text) {
+        text = trim(text);
+        if (std::ranges::none_of(text, [](char c) { return std::isalpha(static_cast<unsigned char>(c)) || (static_cast<unsigned char>(c) & 0x80); })) return;
+        if (seen.emplace(text).second) out.emplace_back(text);
+    };
+    for (const auto& [text, shape] : listedTexts()) {
+        switch (shape) {
+        case TextShape::Text: add(text); break;
+        case TextShape::Labels:
+            for (const std::string_view label : wordsOf(text, '|')) add(label);
+            break;
+        case TextShape::Suggestions: // (what each is)
+            for (const std::string_view entry : wordsOf(text, '|'))
+                if (const auto colon = entry.find(':'); colon != npos) add(entry.substr(colon + 1));
+            break;
+        case TextShape::Hint: // (words; not a value, as 100% or 1)
+            if (std::isupper(static_cast<unsigned char>(text.front()))) add(text);
+            break;
+        case TextShape::Group: add(text.starts_with('+') ? text.substr(1) : text); break;
+        case TextShape::Choices: // (as their buttons say them)
+            for (const std::string_view word : wordsOf(text)) add(upperFirst(spaced(word)));
+            break;
+        }
+    }
+    return out;
+}
+
 namespace {
 
 // A colour as a hint says it: its name, or what it's most like (never a code); none (see-through) as None.
@@ -74,7 +146,14 @@ void showStyleValues(std::vector<StoryEditor::Field>& fields, const Style& style
     }
 }
 
-void showConfigValues(std::vector<StoryEditor::Field>& fields, const GameConfig& config, const Palette& palette) {
+std::string secondsText(float seconds) {
+    std::string s = std::format("{:.2f}", std::round(std::max(0.0f, seconds) * 100.0f) / 100.0f);
+    while (s.ends_with('0')) s.pop_back();
+    if (s.ends_with('.')) s.pop_back();
+    return s;
+}
+
+void showConfigValues(std::vector<StoryEditor::Field>& fields, const GameConfig& config) {
     auto value = [&](std::string_view name) { return lower(fieldValue(fields, name)); };
     for (StoryEditor::Field& f : fields) {
         if (f.name == "Image" && f.hint.empty()) { // (a character's pictures, an atlas's: named after them)
@@ -87,11 +166,10 @@ void showConfigValues(std::vector<StoryEditor::Field>& fields, const GameConfig&
         }
         if (f.hint != "From Settings") continue;
         std::string v;
-        if (f.name == "Over") v = std::format("{:g}", config.moveTime);
-        else if (f.name == "Strength") v = std::format("{:g}", config.shakeStrength);
-        else if (f.name == "For") v = std::format("{:g}", value("What") == "flash" ? config.flashTime : config.shakeTime);
-        else if (f.name == "Colour") v = colorText(config.flashColor, palette);
-        else if (f.name.ends_with("Seconds")) v = std::format("{:g}", f.name == "Seconds" && value("Transition") != "fade" ? config.showTransition.duration : config.fadeTime);
+        if (f.name == "Animation on show" || f.name == "Animation on hide") { // (the game's, from Settings: none, or its name)
+            const std::string& named = f.name == "Animation on show" ? config.showAnimation : config.hideAnimation;
+            v = named.empty() ? std::string("None"_hint) : named;
+        }
         else if (f.name == "Its speed") v = std::format("{:g}", config.babbleSpeed);
         else if (f.name == "Blinks every") v = std::format("{:g}", config.blinkEvery);
         else if (f.name == "Mouth's speed") v = std::format("{:g}", config.talkSpeed);
@@ -262,6 +340,15 @@ const std::vector<std::string>& DeveloperTools::cachedFiles(const std::string& f
         generation = filesGeneration;
     }
     return names;
+}
+
+bool DeveloperTools::cachedExists(const std::string& path) {
+    if (filesThereGeneration != filesGeneration) { // (the files are looked at again)
+        filesThereGeneration = filesGeneration;
+        filesThere.clear();
+    }
+    if (const auto known = filesThere.find(path); known != filesThere.end()) return known->second;
+    return filesThere.emplace(path, fileExists(path)).first->second;
 }
 
 bool DeveloperTools::problemWithin(std::size_t file, std::size_t from, std::size_t end) const {

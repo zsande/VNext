@@ -13,6 +13,42 @@ SDL_FRect fitIn(const SDL_FRect& room, float w, float h) {
     return {room.x + (room.w - w * s) / 2, room.y + (room.h - h * s) / 2, w * s, h * s};
 }
 
+// + New animation's animations to start from, as + New screen has screens: its name ("": an empty one
+// to fill in), what the list calls it, what it does, and its lines under it ("|" between them, as the
+// timeline writes them; `loops`: looping).
+struct AnimationStart {
+    std::string_view name;
+    ToolsText label, help;
+    std::string_view steps;
+    bool loops = false;
+};
+
+const std::array kAnimationStarts{
+    AnimationStart{"", "Empty animation", "Nothing in it", ""},
+    AnimationStart{"fade_in", "Fade in", "From unseen to seen, over what was there before", "opacity=0%|opacity=100% over 0.5 seconds"},
+    AnimationStart{"fade_out", "Fade out", "From seen to unseen", "opacity=0% over 0.5 seconds"},
+    AnimationStart{"fade_through_black", "Fade through black", "All goes black, then it comes out of the black",
+                   "opacity=0%|fade=black|opacity=100% over 0.5 seconds|fade=none over 0.5 seconds"},
+    AnimationStart{"flash", "Flash", "A white flash that fades away", "fade=white|fade=none over 0.6 seconds"},
+    AnimationStart{"slide_in_left", "Slide in from the left", "From just off the left to its place", "x=-2|x=home over 0.6 seconds"},
+    AnimationStart{"slide_in_right", "Slide in from the right", "From just off the right to its place", "x=2|x=home over 0.6 seconds"},
+    AnimationStart{"slide_out_left", "Slide out to the left", "From its place to just off the left", "x=-2 over 0.6 seconds"},
+    AnimationStart{"slide_out_right", "Slide out to the right", "From its place to just off the right", "x=2 over 0.6 seconds"},
+    AnimationStart{"wipe_in", "Wipe in", "Shown bit by bit, from the left", "wipe=0%|wipe=100% over 0.75 seconds"},
+    AnimationStart{"wipe_out", "Wipe out", "Hidden bit by bit, from the right", "wipe=0% over 0.75 seconds"},
+    AnimationStart{"pop_in", "Pop in", "Grows from small to a little past its size, and back", "zoom=60% opacity=0%|zoom=100% opacity=100% over 0.35 seconds ease=overshoot"},
+    AnimationStart{"hop", "Hop", "A little jump", "up=4% over 0.15 seconds ease=out|y=home over 0.15 seconds ease=in"},
+    AnimationStart{"shake", "Shake", "Side to side, quickly", "left=1% over 0.05 seconds|right=1% over 0.1 seconds|left=1% over 0.1 seconds|x=home over 0.05 seconds"},
+    AnimationStart{"float", "Float", "Up and down gently, looping", "up=1% over 1.5 seconds|y=home over 1.5 seconds", true},
+};
+
+std::vector<std::string> startLines(const AnimationStart& start) {
+    std::vector<std::string> out;
+    for (const auto part : std::views::split(start.steps, '|'))
+        if (const std::string_view step(part.begin(), part.end()); !step.empty()) out.emplace_back(step);
+    return out;
+}
+
 } // namespace
 
 // The Library tab: the game's images, audio, voices, movies and font files (to look at, hear, import
@@ -47,30 +83,31 @@ void Developer::drawLibrary(DeveloperUi& ui, const SDL_FRect& area) {
     std::vector<std::pair<std::string_view, std::string_view>> kinds; // id, label
     for (const FileKind& file : kFileKinds) {
         kinds.emplace_back(file.id, file.label);
-        if (file.id == "sounds") kinds.emplace_back("voices", "Voices");
+        if (file.id == "sounds") kinds.emplace_back("voices", "Voices"_text);
     }
     for (const DefinitionKind& def : kDefinitionKinds)
         if (def.listed) kinds.emplace_back(def.kind, def.label);
-    kinds.emplace_back("variables", "Variables");
+    kinds.emplace_back("variables", "Variables"_text);
     auto wrongIn = [&](std::string_view kind) { // (images and fonts: what's made from them)
         const std::string_view of = kind == "variables" ? "variable" : kind == "pictures" ? "picture" : kind == "fontfiles" ? "font" : kind;
         return std::ranges::any_of(editor.definitions(of), [&](const StoryEditor::Definition& def) { return d.problemWithin(def.file, def.line, def.end); });
     };
     const float headingH = layout::headingH * k;
-    ui.heading("Library", left.x, left.y);
+    ui.heading("Library"_tr, left.x, left.y);
     const SDL_FRect kindsBox{left.x, left.y + headingH, left.w, left.h - headingH};
-    if (const auto clicked = ui.list(kindsBox, d.kindsScroll, kinds.size(), [&](std::size_t i) { return std::string(kinds[i].second); },
+    if (const auto clicked = ui.list(kindsBox, d.kindsScroll, kinds.size(), [&](std::size_t i) { return std::string(tr(kinds[i].second)); },
                                      [&](std::size_t i) { return kinds[i].first == d.library; }, [&](std::size_t i) { return wrongIn(kinds[i].first); })) {
         d.library = kinds[*clicked].first;
         d.libraryItem.reset();
         d.librarySub.reset();
+        d.pickingAnimation = false;
         d.libraryScroll = d.formScroll = 0.0f;
         d.focus.clear();
         d.armed.clear();
     }
     // The kind chosen: its heading over its list, as every list has.
     if (const auto kind = std::ranges::find(kinds, std::string_view(d.library), &std::pair<std::string_view, std::string_view>::first); kind != kinds.end())
-        ui.heading(kind->second, column.x, column.y);
+        ui.heading(tr(kind->second), column.x, column.y);
     const SDL_FRect middle{column.x, column.y + headingH, column.w, column.h - headingH};
     if (d.library == "variables") return drawVariables(ui, middle, right);
     if (d.library == "voices") return drawVoices(ui, middle, right);
@@ -220,8 +257,8 @@ void Developer::drawLibraryFiles(const LibraryFrame& f) {
                                                 listenButton(ui, {at.x + at.w - at.h, at.y, at.h, at.h}, d.cachedAudio(engine.assets(), lower(stemOf(name))), true);
                                             const auto dot = name.rfind('.'); // (an MP4, MOV or M4V: Linux players need GStreamer for it)
                                             if (row.file && dot != npos && std::ranges::contains(kSystemVideoTypes, std::string_view(lower(name.substr(dot)))))
-                                                ui.textAround("on Linux: needs GStreamer", nx + ui.width(name, layout::listText) + 8 * k, cy, layout::smallText, kWarn);
-                                            else if (row.file && d.unused.contains(name)) ui.textAround("unused", nx + ui.width(name, layout::listText) + 8 * k, cy, layout::smallText, theme::dim);
+                                                ui.textAround("on Linux: needs GStreamer"_tr, nx + ui.width(name, layout::listText) + 8 * k, cy, layout::smallText, kWarn);
+                                            else if (row.file && d.unused.contains(name)) ui.textAround("unused"_tr, nx + ui.width(name, layout::listText) + 8 * k, cy, layout::smallText, theme::dim);
                                         }});
     switch (event.kind) {
     case ListKind::Chosen: {
@@ -239,7 +276,7 @@ void Developer::drawLibraryFiles(const LibraryFrame& f) {
     case ListKind::Renamed: // (a file's waits for Enter, below)
         if (const auto j = rows[event.item].sub) {
             if (trim(event.name).empty()) return; // (emptied: it keeps its name)
-            d.saidRenamed(editor.renameDefinition(subKind, *j, event.name, std::format("def-name:{}:{}", subKind, d.focusCount)), "A name is one word (letters, numbers, _ and -) that no other one of these has.");
+            d.saidRenamed(editor.renameDefinition(subKind, *j, event.name, std::format("def-name:{}:{}", subKind, d.focusCount)), "A name is one word (letters, numbers, _ and -) that no other one of these has."_tr);
             return;
         }
         break;
@@ -265,22 +302,21 @@ void Developer::drawLibraryFiles(const LibraryFrame& f) {
             d.libraryItem = at != now.end() ? std::optional(static_cast<std::size_t>(at - now.begin())) : std::nullopt;
             if (const auto open = std::ranges::find(d.libraryOpen, names[i]); open != d.libraryOpen.end()) *open = name;
             d.failed = false;
-            d.status = *changed == 0 ? std::format("Renamed it {}.", name)
-                     : *changed == 1 ? std::format("Renamed it {}, and the line that uses it.", name)
-                                     : std::format("Renamed it {}, and the {} lines that use it.", name, *changed);
+            d.status = *changed == 0 ? "Renamed it {}."_tr(name)
+                     : *changed == 1 ? "Renamed it {}, and the line that uses it."_tr(name)
+                                     : "Renamed it {}, and the {} lines that use it."_tr(name, *changed);
         } else {
             d.failed = true;
-            d.status = "A file's name is one word (letters, numbers, _ and -) that no other file there has.";
+            d.status = "A file's name is one word (letters, numbers, _ and -) that no other file there has."_tr;
         }
         return;
     }
-    if (ui.button({middle.x, listBox.y + listBox.h + layout::gap * k, middle.w, buttonH}, "Import...", false, true, layout::buttonText))
-        chooseFiles(fileKind->label, fileKind->extensions, {});
+    if (ui.button({middle.x, listBox.y + listBox.h + layout::gap * k, middle.w, buttonH}, "Import..."_tr, false, true, layout::buttonText))
+        chooseFiles(tr(fileKind->label), fileKind->extensions, {});
     if (d.librarySub) return drawDefinition(ui, subKind, subs[*d.librarySub], right);
     if (!d.libraryItem) {
-        ui.text(std::format("The game's {} are in {}{}. Import more here, or drop them on this window: each goes in its folder. Double-click one "
-                            "to rename it.",
-                            lower(fileKind->label), engine.gameRoot(), fileKind->folder),
+        ui.text("The game's {} are in {}{}. Import more here, or drop them on this window: each goes in its folder. Double-click one to rename it."_tr(
+                    lower(tr(fileKind->label)), engine.gameRoot(), fileKind->folder),
                 right.x, right.y, layout::noteText, theme::dim, right.w);
         return;
     }
@@ -298,19 +334,20 @@ void Developer::drawLibraryFile(const LibraryFrame& f, const std::string& name) 
     const FileKind* fileKind = f.fileKind;
     const SDL_FRect& right = f.right;
     const float buttonH = f.buttonH;
-    const float playW = std::max(ui.buttonWidth("Play", layout::buttonText, layout::wideButtonW), ui.buttonWidth("Stop", layout::buttonText, layout::wideButtonW));
+    const float playW = std::max(ui.buttonWidth("Play"_tr, layout::buttonText, layout::wideButtonW), ui.buttonWidth("Stop"_tr, layout::buttonText, layout::wideButtonW));
     const std::string path = std::string(fileKind->folder) + name;
     // What the scripts call it; a translation's own is shown instead of the one it's named after.
     const std::string key = lower(stemOf(name));
     const auto slash = key.find('/');
     const std::string called = scriptName(slash == npos ? key : key.substr(slash + 1)); // ("19. YOMI.flac": 19_yomi)
-    const std::string translation = slash == npos ? std::string{} : std::format(" The {} translation shows it instead.", key.substr(0, slash));
-    ui.formTitle(std::format("{}: {}", fileKind->one, name), right.x, right.y);
+    const std::string translation = slash == npos ? std::string{} : " " + "The {} translation shows it instead."_tr(key.substr(0, slash)); // (said after what it is)
+    ui.formTitle(std::format("{}: {}", tr(fileKind->one), name), right.x, right.y);
     // To the Trash (the system's, so it can be got back): a second click does it.
     const std::string armId = "trash:" + path;
     const bool armed = d.armed == armId;
-    const float trashW = 190 * k;
-    if (ui.button({right.x + right.w - trashW, right.y, trashW, buttonH}, armed ? "Click again to move it" : "Move to the Trash", armed, true, layout::buttonText)) {
+    const float trashW = std::max(ui.buttonWidth("Move to the Trash"_tr, layout::buttonText, layout::widerButtonW), // (one size, either way, as its words say)
+                                  ui.buttonWidth("Click again to move it"_tr, layout::buttonText, layout::widerButtonW));
+    if (ui.button({right.x + right.w - trashW, right.y, trashW, buttonH}, armed ? "Click again to move it"_tr : "Move to the Trash"_tr, armed, true, layout::buttonText)) {
         if (!armed) {
             d.armed = armId;
         } else {
@@ -323,13 +360,13 @@ void Developer::drawLibraryFile(const LibraryFrame& f, const std::string& name) 
                 ++d.filesGeneration;
                 if (!there->empty()) editor.movedFiles({{engine.gameRoot() + path, *there}}); // (undo takes it out again)
                 d.failed = false;
-                d.status = std::format("'{}' is in the Trash now.", name);
+                d.status = "'{}' is in the Trash now."_tr(name);
                 d.libraryItem.reset();
                 ++d.checked; // (the previews are made again)
                 return;
             }
             d.failed = true;
-            d.status = std::format("Can't move '{}' to the Trash.", name);
+            d.status = "Can't move '{}' to the Trash."_tr(name);
         }
     }
     float y = right.y + layout::titleH * k;
@@ -340,19 +377,20 @@ void Developer::drawLibraryFile(const LibraryFrame& f, const std::string& name) 
         const std::string translations = engine.gameRoot() + "translations/";
         const std::vector<std::string>& files = d.cachedFiles(translations, ".vnscript");
         if (files.empty()) return;
-        const std::string_view does = fileKind->id == "pictures" ? "shows" : "plays";
-        y += ui.text(std::format("What each translation {}: this one, or a file of its own ({}).", does,
-                                 fileKind->id == "pictures" ? "a picture with its words on it" : "one in its language"),
+        const bool pictures = fileKind->id == "pictures";
+        y += ui.text(pictures ? "What each translation shows: this one, or a file of its own (an image with its words on it)."_tr
+                              : "What each translation plays: this one, or a file of its own (one in its language)."_tr,
                      right.x, y, layout::smallText, theme::dim, right.w).y + 4 * k;
         for (const std::string& file : files) {
             const std::string id = stemOf(file), as = std::string(fileKind->folder) + id + "/" + called;
-            const auto own = std::ranges::find_if(fileKind->extensions, [&](std::string_view ext) { return fileExists(engine.gameRoot() + as + std::string(ext)); });
+            const auto own = std::ranges::find_if(fileKind->extensions, [&](std::string_view ext) { return d.cachedExists(engine.gameRoot() + as + std::string(ext)); });
             const bool has = own != std::end(fileKind->extensions);
-            const float bw = ui.buttonWidth(has ? "Replace..." : "Its own file...", layout::buttonText, layout::wideButtonW);
-            ui.textAround(has ? std::format("{} {} {}{}", id, does, as, *own) : std::format("{} {} this one", id, does), right.x, y + buttonH / 2, layout::noteText, theme::dim,
+            const float bw = ui.buttonWidth(has ? "Replace..."_tr : "Its own file..."_tr, layout::buttonText, layout::wideButtonW);
+            ui.textAround(has ? (pictures ? "{} shows {}"_tr : "{} plays {}"_tr)(id, as + std::string(*own)) : (pictures ? "{} shows this one"_tr : "{} plays this one"_tr)(id),
+                          right.x, y + buttonH / 2, layout::noteText, theme::dim,
                           right.w - bw - 10 * k);
-            if (ui.button({right.x + right.w - bw, y, bw, buttonH}, has ? "Replace..." : "Its own file...", false, true, layout::buttonText))
-                chooseFiles(fileKind->label, fileKind->extensions, as);
+            if (ui.button({right.x + right.w - bw, y, bw, buttonH}, has ? "Replace..."_tr : "Its own file..."_tr, false, true, layout::buttonText))
+                chooseFiles(tr(fileKind->label), fileKind->extensions, as);
             y += buttonH + layout::gap * k;
         }
         y += 4 * k;
@@ -360,10 +398,10 @@ void Developer::drawLibraryFile(const LibraryFrame& f, const std::string& name) 
     if (fileKind->id == "pictures") {
         const Picture pic = engine.assets().whole(key);
         const bool cuts = slash == npos && pic; // (+ Sub-image: on the row that says what it is)
-        const float subW = ui.buttonWidth("+ Sub-image", layout::buttonText, layout::widerButtonW);
-        const float infoH = ui.text(std::format("{} x {} pixels. Scripts call it {}.{}", pic.w(), pic.h(), called, translation), right.x, y + (cuts ? 6 * k : 0.0f), layout::noteText,
+        const float subW = ui.buttonWidth("+ Sub-image"_tr, layout::buttonText, layout::widerButtonW);
+        const float infoH = ui.text("{} x {} pixels. Scripts call it {}."_tr(pic.w(), pic.h(), called) + translation, right.x, y + (cuts ? 6 * k : 0.0f), layout::noteText,
                                     theme::dim, right.w - (cuts ? subW + 10 * k : 0.0f)).y;
-        if (cuts && ui.button({right.x + right.w - subW, y, subW, buttonH}, "+ Sub-image", false, true, layout::buttonText)) { // (a part of it with a name of its own: all of it, to cut down)
+        if (cuts && ui.button({right.x + right.w - subW, y, subW, buttonH}, "+ Sub-image"_tr, false, true, layout::buttonText)) { // (a part of it with a name of its own: all of it, to cut down)
             const std::string as = uniqueName("new_picture", [&](const std::string& n) { return editor.defines("picture", n) || engine.assets().hasImageFile(n); });
             d.librarySub = editor.addDefinition("picture", {std::format("picture {} image={} x=0 y=0 w={} h={}", as, called, pic.w(), pic.h())});
             f.typeName("picture", *d.librarySub);
@@ -378,7 +416,7 @@ void Developer::drawLibraryFile(const LibraryFrame& f, const std::string& name) 
             pic.draw(r, {right.x, y, pic.w() * s, pic.h() * s}, 1.0f);
         }
     } else if (fileKind->id == "sounds") {
-        const float infoH = ui.text(std::format("Scripts call it {} (music {}, sound {}).{}", called, called, called, translation), right.x, y + 6 * k, layout::noteText, theme::dim, right.w - playW - 10 * k).y;
+        const float infoH = ui.text("Scripts call it {} (music {}, sound {})."_tr(called, called, called) + translation, right.x, y + 6 * k, layout::noteText, theme::dim, right.w - playW - 10 * k).y;
         listenButton(ui, {right.x + right.w - playW, y, playW, buttonH}, engine.assets().audio(key)); // (Play: on the row that says what it is)
         y += std::max(infoH + 6 * k, buttonH) + 10 * k;
         if (slash == npos) drawRecordTitle(ui, "song", called, right.x, right.w, y);
@@ -393,11 +431,10 @@ void Developer::drawLibraryFile(const LibraryFrame& f, const std::string& name) 
         };
         if (d.movieOf != path) still();
         Movie& movie = *d.movie;
-        const std::string about = movie ? std::format(" {} x {} pixels, {:.1f} seconds.", movie.width(), movie.height(), movie.duration())
-                                        : std::string(" It doesn't play: the log says why.");
-        const float infoH = ui.text(std::format("Scripts call it {} (movie {}).{}{}", called, called, about, translation), right.x, y + 6 * k, layout::noteText, theme::dim, right.w - playW - 10 * k).y;
+        const std::string about = movie ? "{} x {} pixels, {:.1f} seconds."_tr(movie.width(), movie.height(), movie.duration()) : "It doesn't play: the log says why."_tr();
+        const float infoH = ui.text("Scripts call it {} (movie {})."_tr(called, called) + " " + about + translation, right.x, y + 6 * k, layout::noteText, theme::dim, right.w - playW - 10 * k).y;
         d.listenShown = d.listenShown || d.moviePlaying;
-        if (ui.button({right.x + right.w - playW, y, playW, buttonH}, d.moviePlaying ? "Stop" : "Play", d.moviePlaying, static_cast<bool>(movie), layout::buttonText)) { // (on the row that says what it is)
+        if (ui.button({right.x + right.w - playW, y, playW, buttonH}, d.moviePlaying ? "Stop"_tr : "Play"_tr, d.moviePlaying, static_cast<bool>(movie), layout::buttonText)) { // (on the row that says what it is)
             if (d.moviePlaying) {
                 engine.audio().stopListening();
                 still();
@@ -426,7 +463,7 @@ void Developer::drawLibraryFile(const LibraryFrame& f, const std::string& name) 
             SDL_RenderTexture(r, picture, nullptr, &shown);
         }
     } else { // a font file: a sample of it, and + Font makes a font from it (a style of it, under a name of its own)
-        if (ui.button({right.x, y, ui.buttonWidth("+ Font", layout::buttonText, layout::widerButtonW), buttonH}, "+ Font", false, true, layout::buttonText)) {
+        if (ui.button({right.x, y, ui.buttonWidth("+ Font"_tr, layout::buttonText, layout::widerButtonW), buttonH}, "+ Font"_tr, false, true, layout::buttonText)) {
             std::string base;
             for (const char c : lower(called)) base += letterOrDigitByte(c) || c == '_' || c == '-' ? c : '_';
             const std::string as = uniqueName(base, [&](const std::string& n) { return editor.defines("font", n); });
@@ -438,8 +475,9 @@ void Developer::drawLibraryFile(const LibraryFrame& f, const std::string& name) 
         if (d.fontSampleOf != path) {
             d.fontSampleOf = path;
             d.fontSample.reset();
+            const std::string sample = "The quick brown fox jumps over the lazy dog."_tr() + "\n0123456789 ?!"; // (every letter, in the tools' language)
             if (const FontPtr font{TTF_OpenFont((engine.gameRoot() + path).c_str(), 30 * k)})
-                if (const SurfacePtr text{TTF_RenderText_Blended_Wrapped(font.get(), "The quick brown fox jumps over the lazy dog.\n0123456789 ?!", 0,
+                if (const SurfacePtr text{TTF_RenderText_Blended_Wrapped(font.get(), sample.c_str(), 0,
                                                                          SDL_Color{240, 240, 245, 255}, static_cast<int>(right.w))})
                     d.fontSample.reset(SDL_CreateTextureFromSurface(r, text.get()));
         }
@@ -467,6 +505,7 @@ void Developer::drawLibraryDefinitions(const LibraryFrame& f) {
     const std::string kind = d.library;
     const auto defs = editor.definitions(kind);
     clampIndex(d.libraryItem, defs.size());
+    const bool picks = kind == "animation"; // (+ New animation: the ones to start from, as + New screen's)
     std::function<void(std::size_t, const SDL_FRect&)> paintColor; // (a colour: as a square before its name, as its box shows it)
     if (kind == "color")
         paintColor = [&](std::size_t i, const SDL_FRect& at) {
@@ -477,7 +516,7 @@ void Developer::drawLibraryDefinitions(const LibraryFrame& f) {
     const auto event = ui.editList("library", listBox, d.libraryScroll,
                                    {.count = defs.size(),
                                     .label = [&](std::size_t i) { return defs[i].name; },
-                                    .chosen = [&](std::size_t i) { return d.libraryItem == i; },
+                                    .chosen = [&](std::size_t i) { return d.libraryItem == i && !(picks && d.pickingAnimation); },
                                     .wrong =
                                         [&](std::size_t i) { return d.problemWithin(defs[i].file, defs[i].line, defs[i].end); },
                                     .faint = {},
@@ -491,13 +530,14 @@ void Developer::drawLibraryDefinitions(const LibraryFrame& f) {
                                     .paint = paintColor});
     switch (event.kind) {
     case ListKind::Chosen:
-        if (d.libraryItem != event.item) d.formScroll = 0.0f;
+        if (d.libraryItem != event.item || d.pickingAnimation) d.formScroll = 0.0f;
         d.libraryItem = event.item;
+        d.pickingAnimation = false;
         d.focus.clear();
         break;
     case ListKind::Renamed:
         if (trim(event.name).empty()) return; // (emptied: it keeps its name)
-        d.saidRenamed(editor.renameDefinition(kind, event.item, event.name, std::format("def-name:{}:{}", kind, d.focusCount)), "A name is one word (letters, numbers, _ and -) that no other one of these has.");
+        d.saidRenamed(editor.renameDefinition(kind, event.item, event.name, std::format("def-name:{}:{}", kind, d.focusCount)), "A name is one word (letters, numbers, _ and -) that no other one of these has."_tr);
         return;
     case ListKind::Deleted:
         editor.removeDefinition(defs[event.item]);
@@ -510,8 +550,16 @@ void Developer::drawLibraryDefinitions(const LibraryFrame& f) {
         break;
     }
     const DefinitionKind& of = *std::ranges::find(kDefinitionKinds, std::string_view(kind), &DefinitionKind::kind);
-    const std::string newLabel = std::format("+ New {}", lower(of.one)); // (as every tab's: + New scene, + New screen...)
-    if (ui.button({middle.x, listBox.y + listBox.h + listGap, middle.w, buttonH}, newLabel, false, true, layout::buttonText)) {
+    const std::string_view one = tr(of.one); // (as every tab's: + New scene, + New screen...)
+    const std::string newLabel = "+ New {}"_tr(one == of.one ? lower(one) : std::string(one));
+    if (ui.button({middle.x, listBox.y + listBox.h + listGap, middle.w, buttonH}, newLabel, picks && d.pickingAnimation, true, layout::buttonText)) {
+        if (picks) {
+            d.pickingAnimation = !d.pickingAnimation;
+            d.startShownAt = engine.toolsTime();
+            d.formScroll = 0.0f;
+            d.focus.clear();
+            return;
+        }
         auto unique = [&](const std::string& base) { // a name none of them has
             return uniqueName(base, [&](const std::string& n) { return std::ranges::any_of(defs, [&](const StoryEditor::Definition& def) { return lower(def.name) == n; }); });
         };
@@ -519,7 +567,6 @@ void Developer::drawLibraryDefinitions(const LibraryFrame& f) {
         if (kind == "color") lines = {std::format("color {} #ffffff", unique("new_color"))};
         else if (kind == "style") lines = {std::format("style {}", unique("new_style"))};
         else if (kind == "atlas") lines = {std::format("atlas {}", unique("new_atlas"))}; // (its image is called the same; its frames' names: typed into the form's)
-        else if (kind == "animation") lines = {std::format("animation {}", unique("new_animation"))}; // (its steps: typed into the form's)
         else if (kind == "ending") lines = {std::format("ending {} \"\"", unique("new_ending"))};
         else if (kind == "achievement") lines = {std::format("achievement {} \"\"", unique("new_achievement"))};
         else if (kind == "tip") lines = {std::format("tip {} \"\"", unique("new_tip"))};
@@ -528,9 +575,9 @@ void Developer::drawLibraryDefinitions(const LibraryFrame& f) {
         f.typeName(kind, *d.libraryItem);
         return;
     }
+    if (picks && d.pickingAnimation) return drawNewAnimationForm(ui, right);
     if (!d.libraryItem) {
-        ui.text(std::format("Click one of the {} to change it, or add one with {}. Double-click one to rename it: where it's used changes too.",
-                            lower(of.label), newLabel),
+        ui.text("Click one of the {} to change it, or add one with {}. Double-click one to rename it: where it's used changes too."_tr(lower(tr(of.label)), newLabel),
                 right.x, right.y, layout::noteText, theme::dim, right.w);
         return;
     }
@@ -545,7 +592,7 @@ void Developer::drawDefinition(DeveloperUi& ui, const std::string& kind, const S
     const float k = ui.k;
     using Field = StoryEditor::Field;
     const auto it = std::ranges::find(kDefinitionKinds, std::string_view(kind), &DefinitionKind::kind);
-    const std::string_view label = it != std::end(kDefinitionKinds) ? it->one : std::string_view(kind);
+    const std::string_view label = it != std::end(kDefinitionKinds) ? tr(it->one) : std::string_view(kind); // (in the tools' language)
     // The form (it scrolls when it's longer than the room it has).
     ui.formTitle(std::format("{}: {}", label, def.name), right.x, right.y);
     asTextButton(ui, right.x + right.w, right.y);
@@ -559,8 +606,8 @@ void Developer::drawDefinition(DeveloperUi& ui, const std::string& kind, const S
         drawAtlas(ui, def, {right.x, top, right.w, std::round(std::min(layout::sampleAtlasH * k, right.w * layout::sampleAtlasPart))});
         top += std::round(std::min(layout::sampleAtlasH * k, right.w * layout::sampleAtlasPart)) + 10 * k;
     }
-    if (kind == "animation") // (a square playing it)
-        top += drawAnimationSample(ui, def, {right.x, top, right.w, std::round(std::min(layout::sampleAnimationH * k, (right.h - layout::titleH * k) * layout::sampleAnimationPart))}) + 10 * k;
+    if (kind == "animation" && !d.asText) // (how it looks, its timeline and the change chosen on it)
+        return drawAnimation(ui, def, {right.x, top, right.w, right.y + right.h - top});
     if (kind == "picture") { // (the image it's cut from, to cut it out on)
         const float h = std::round(std::min(layout::sampleSubPictureH * k, (right.h - layout::titleH * k) * layout::sampleSubPicturePart));
         drawSubPicture(ui, def, {right.x, top, right.w, h});
@@ -584,7 +631,7 @@ void Developer::drawDefinition(DeveloperUi& ui, const std::string& kind, const S
     }
     auto fields = editor.fields(kind, def);
     if (kind == "atlas" || kind == "ending" || kind == "achievement" || kind == "tip") // (an empty Image or Title box: named after it)
-        showConfigValues(fields, engine.config(), engine.palette());
+        showConfigValues(fields, engine.config());
     if (kind == "style" && d.styleView && d.styleOf.second == def.name) // (an empty box: what the style it's based on gives it)
         showStyleValues(fields, d.styleView->def().elements.front().style, engine.palette());
     const std::string id = std::format("def:{}:{}", kind, def.line);
@@ -616,7 +663,7 @@ void Developer::drawRecordTitle(DeveloperUi& ui, std::string_view kind, const st
     const auto def = std::ranges::find_if(defs, [&](const StoryEditor::Definition& one) { return sameName(one.name, name); });
     const std::string title = def != defs.end() ? fieldValue(editor.fields(kind, *def), "Title") : std::string{};
     const bool song = kind == "song";
-    const std::vector<StoryEditor::Field> fields{{.name = "Title", .value = title, .label = song ? "Title in the music room" : "Title in the gallery", .box = Box::Text,
+    const std::vector<StoryEditor::Field> fields{{.name = "Title", .value = title, .label = song ? "Title in the music room"_text : "Title in the gallery"_text, .box = Box::Text,
                                                   .hint = "None"}};
     if (const auto edit = drawForm(ui, std::format("title:{}:{}", kind, name), fields, x, w, std::round(w * 0.3f), y)) {
         if (trim(edit->value).empty()) {
@@ -696,8 +743,9 @@ void Developer::drawVariables(DeveloperUi& ui, const SDL_FRect& area, const SDL_
             d.libraryItem.reset();
             const auto left = editor.uses(names[event.item]).size();
             d.failed = false;
-            d.status = left == 0 ? std::format("{} is gone.", names[event.item])
-                                 : std::format("{}'s variable line is gone; {} line{} still use{} it.", names[event.item], left, left == 1 ? "" : "s", left == 1 ? "s" : "");
+            d.status = left == 0 ? "{} is gone."_tr(names[event.item])
+                     : left == 1 ? "{}'s variable line is gone; 1 line still uses it."_tr(names[event.item])
+                                 : "{}'s variable line is gone; {} lines still use it."_tr(names[event.item], left);
         }
         return;
     default:
@@ -711,16 +759,16 @@ void Developer::drawVariables(DeveloperUi& ui, const SDL_FRect& area, const SDL_
             if (playing) engine.game_->setVariable(to, engine.game_->variable(names[i])); // (the game keeps its value under the new name)
             choose(to);
             d.failed = false;
-            d.status = *uses == 0 ? std::format("Renamed it {}.", to)
-                     : *uses == 1 ? std::format("Renamed it {}, and the line that uses it.", to)
-                                  : std::format("Renamed it {}, and the {} lines that use it.", to, *uses);
+            d.status = *uses == 0 ? "Renamed it {}."_tr(to)
+                     : *uses == 1 ? "Renamed it {}, and the line that uses it."_tr(to)
+                                  : "Renamed it {}, and the {} lines that use it."_tr(to, *uses);
         } else {
             d.failed = true;
-            d.status = "A variable's name is one word (letters, numbers and _), not a word conditions use (and, or, is...), that no other variable has.";
+            d.status = "A variable's name is one word (letters, numbers and _), not a word conditions use (and, or, is...), that no other variable has."_tr;
         }
         return;
     }
-    if (ui.button({area.x, list.y + list.h + layout::gap * k, area.w, buttonH}, "+ New variable", false, true, layout::buttonText)) { // (its name, ready to type over)
+    if (ui.button({area.x, list.y + list.h + layout::gap * k, area.w, buttonH}, "+ New variable"_tr, false, true, layout::buttonText)) { // (its name, ready to type over)
         const std::string name = uniqueName("new_variable", [&](const std::string& n) { return std::ranges::contains(names, n); });
         editor.addDefinition("variable", {std::format("variable {}", name)}); // (it starts at 0: typed into the form when it's something else)
         choose(name);
@@ -730,15 +778,14 @@ void Developer::drawVariables(DeveloperUi& ui, const SDL_FRect& area, const SDL_
         return;
     }
     if (!d.libraryItem) {
-        ui.text(names.empty() ? "Variables keep what happens in the story: a Set line changes one, and If lines and options ask about it. + New variable "
-                                "lists one with the value it starts at."
-                              : "Click a variable to see the lines that use it" + std::string(playing ? " and change its value" : "") +
-                                    ". Double-click one to rename it (Enter): every line that uses it changes too.",
+        ui.text(names.empty() ? "Variables keep what happens in the story: a Set line changes one, and If lines and options ask about it. + New variable lists one with the value it starts at."_tr
+                : playing     ? "Click a variable to see the lines that use it and change its value. Double-click one to rename it (Enter): every line that uses it changes too."_tr
+                              : "Click a variable to see the lines that use it. Double-click one to rename it (Enter): every line that uses it changes too."_tr,
                 form.x, form.y, layout::noteText, theme::dim, form.w);
         return;
     }
     const std::string& name = names[*d.libraryItem];
-    ui.formTitle("Variable: " + name, form.x, form.y);
+    ui.formTitle("Variable: {}"_tr(name), form.x, form.y);
     const float boxH = layout::boxH * k, labelW = std::round(form.w * layout::labelPart), gap = layout::rowGap * k;
     float y = form.y + layout::titleH * k;
     const auto def = definition(name);
@@ -753,19 +800,19 @@ void Developer::drawVariables(DeveloperUi& ui, const SDL_FRect& area, const SDL_
     }
     // (kept between games: a persistent. name; Yes or No renames it so, and every line that uses it)
     const bool kept = name.starts_with("persistent.");
-    const std::vector<StoryEditor::Field> fields{{.name = "Starts at", .value = start, .label = "Starting value", .box = Box::VariableValue, .hint = "0"},
-                                                 {.name = "What it's for", .value = about, .label = "Description", .box = Box::Text},
-                                                 {.name = "Kept between games", .value = kept ? "yes" : "no", .box = Box::YesNo, .choices = "no yes"}};
+    const std::vector<StoryEditor::Field> fields{{.name = "Starts at", .value = start, .label = "Starting value"_text, .box = Box::VariableValue, .hint = "0"},
+                                                 {.name = "What it's for", .value = about, .label = "Description"_text, .box = Box::Text},
+                                                 {.name = "Kept between games"_text, .value = kept ? "yes" : "no", .box = Box::YesNo, .choices = "no yes"}};
     if (const auto edit = drawForm(ui, "variable:" + name + ":def", fields, form.x, form.w, labelW, y)) {
         if (edit->name == "Kept between games") {
             const std::string bare = kept ? name.substr(11) : name, to = edit->value == "yes" ? "persistent." + bare : bare;
             if (const auto uses = editor.renameVariable(name, to)) {
                 choose(to);
                 d.failed = false;
-                d.status = std::format("{} now, as {}: the {} lines that use it follow.", edit->value == "yes" ? "Kept between games" : "Kept in a game only", to, *uses);
+                d.status = (edit->value == "yes" ? "Kept between games now, as {}: the {} lines that use it follow."_tr : "Kept in a game only now, as {}: the {} lines that use it follow."_tr)(to, *uses);
             } else {
                 d.failed = true;
-                d.status = std::format("There's a variable called {} already.", to);
+                d.status = "There's a variable called {} already."_tr(to);
             }
             return;
         }
@@ -776,7 +823,7 @@ void Developer::drawVariables(DeveloperUi& ui, const SDL_FRect& area, const SDL_
         if (def) editor.setDefinition(*def, {line}, std::format("variable:{}:{}{}", name, edit->name, d.focusCount));
         else editor.addDefinition("variable", {line});
     }
-    ui.textAround("Now", form.x, y + boxH / 2, layout::smallText, theme::dim, labelW - 8 * k);
+    ui.textAround("Now"_tr, form.x, y + boxH / 2, layout::smallText, theme::dim, labelW - 8 * k);
     if (playing) { // (a number, yes or no, or words)
         const StoryEditor::Field now{.name = "now", .value = valueOf(name), .box = Box::VariableValue}; // (as every value's box)
         if (const auto typed = ui.pickField("variable:" + name, {form.x + labelW, y, form.w - labelW, boxH}, now, layout::boxText)) {
@@ -785,13 +832,13 @@ void Developer::drawVariables(DeveloperUi& ui, const SDL_FRect& area, const SDL_
             engine.game_->setVariable(name, t == "yes" ? Value(1) : t == "no" ? Value(0) : n ? number(*n) : Value(t));
         }
     } else {
-        ui.textAround("Shown while a game is going on: Play, then F10.", form.x + labelW, y + boxH / 2, layout::noteText, theme::dim, form.w - labelW);
+        ui.textAround("Shown while a game is going on: Play, then F10."_tr, form.x + labelW, y + boxH / 2, layout::noteText, theme::dim, form.w - labelW);
     }
     y += boxH + gap + layout::gap * k;
     if (d.lookedUses.what != name || d.lookedUses.version != editor.version()) // (looked for again when the variable or the scripts change)
         d.lookedUses = {.what = name, .version = editor.version(), .found = editor.uses(name)};
     const auto& found = d.lookedUses.found;
-    ui.heading(found.size() == 1 ? std::string("Used in 1 line") : std::format("Used in {} lines", found.size()), form.x, y); // (over its list, as every list has)
+    ui.heading(found.size() == 1 ? "Used in 1 line"_tr() : "Used in {} lines"_tr(found.size()), form.x, y); // (over its list, as every list has)
     y += layout::headingH * k;
     if (const auto clicked = ui.list({form.x, y, form.w, std::max(0.0f, form.y + form.h - y)}, d.findScroll, found.size(),
                                      [&](std::size_t i) { return std::format("{}:  {}", editor.placeOf(found[i].file, found[i].line), found[i].text); },
@@ -815,16 +862,8 @@ void Developer::drawVoices(DeveloperUi& ui, const SDL_FRect& list, const SDL_FRe
                         d.voiced.push_back({def->voices + "/" + say->voiceId, def->name, say->text, d.script->files[ins.file], ins.line});
     }
     const std::vector<Voiced>& lines = d.voiced;
-    if (d.voiceThereGeneration != d.filesGeneration) { // (the files looked at again)
-        d.voiceThereGeneration = d.filesGeneration;
-        d.voiceThere.clear();
-    }
     auto there = [&](const std::string& file, const std::string& language) { // (in the language's folder, if one's given)
-        const std::string key = language + file;
-        if (const auto known = d.voiceThere.find(key); known != d.voiceThere.end()) return known->second;
-        const bool found = std::ranges::any_of(kAudioTypes, [&](std::string_view ext) { return fileExists(engine.gameRoot() + "audio/" + language + file + std::string(ext)); });
-        d.voiceThere.emplace(key, found);
-        return found;
+        return std::ranges::any_of(kAudioTypes, [&](std::string_view ext) { return d.cachedExists(engine.gameRoot() + "audio/" + language + file + std::string(ext)); });
     };
     clampIndex(d.libraryItem, lines.size());
     if (const auto clicked = ui.list(list, d.libraryScroll, lines.size(),
@@ -834,43 +873,40 @@ void Developer::drawVoices(DeveloperUi& ui, const SDL_FRect& list, const SDL_FRe
         d.libraryItem = *clicked;
     if (!d.libraryItem) {
         const auto recorded = std::ranges::count_if(lines, [&](const Voiced& v) { return there(v.file, ""); });
-        ui.text(lines.empty() ? "A character with Voices (in their form) says each line with a file of its own: audio/voices/NAME/SCENE_N. Their lines are listed "
-                                "here, with the file each one plays."
-                              : std::format("{} lines with voices, {} of them recorded (the ones not recorded yet are dim). Click one to hear it, or to see "
-                                            "which file it needs.",
-                                            lines.size(), recorded),
+        ui.text(lines.empty() ? "A character with Voices (in their form) says each line with a file of its own: audio/voices/NAME/SCENE_N. Their lines are listed here, with the file each one plays."_tr()
+                              : "{} lines with voices, {} of them recorded (the ones not recorded yet are dim). Click one to hear it, or to see which file it needs."_tr(lines.size(), recorded),
                 form.x, form.y, layout::noteText, theme::dim, form.w);
         return;
     }
     const Voiced& v = lines[*d.libraryItem];
-    ui.formTitle("Voice: audio/" + v.file, form.x, form.y);
+    ui.formTitle("Voice: {}"_tr("audio/" + v.file), form.x, form.y);
     float y = form.y + layout::titleH * k;
     y += ui.text(std::format("{}: {}", v.who, v.text), form.x, y, layout::listText, theme::text, form.w).y + 10 * k;
     const float buttonH = layout::buttonH * k;
     const bool here = there(v.file, "");
-    const float importW = ui.buttonWidth(here ? "Replace..." : "Import...", layout::buttonText, layout::wideButtonW);
-    ui.textAround(here ? "It's there." : "It isn't recorded yet: the line plays without a voice.", form.x, y + buttonH / 2, layout::noteText, here ? kGood : theme::dim,
+    const float importW = ui.buttonWidth(here ? "Replace..."_tr : "Import..."_tr, layout::buttonText, layout::wideButtonW);
+    ui.textAround(here ? "It's there."_tr : "It isn't recorded yet: the line plays without a voice."_tr, form.x, y + buttonH / 2, layout::noteText, here ? kGood : theme::dim,
                   form.w - importW - 10 * k);
-    if (ui.button({form.x + form.w - importW, y, importW, buttonH}, here ? "Replace..." : "Import...", false, true, layout::buttonText))
-        chooseFiles("Audio", kAudioTypes, "audio/" + v.file);
+    if (ui.button({form.x + form.w - importW, y, importW, buttonH}, here ? "Replace..."_tr : "Import..."_tr, false, true, layout::buttonText))
+        chooseFiles("Audio"_tr, kAudioTypes, "audio/" + v.file);
     y += buttonH + layout::gap * k;
     const std::string translations = engine.gameRoot() + "translations/";
     const std::vector<std::string>& languages = d.cachedFiles(translations, ".vnscript"); // (each translation's own)
-    if (!languages.empty()) y += ui.text("What each translation plays: this one, or a voice of its own in its language.", form.x, y, layout::smallText, theme::dim, form.w).y + 4 * k;
+    if (!languages.empty()) y += ui.text("What each translation plays: this one, or a voice of its own in its language."_tr, form.x, y, layout::smallText, theme::dim, form.w).y + 4 * k;
     for (const std::string& language : languages) {
         const std::string id = stemOf(language);
         const bool translated = there(v.file, id + "/");
-        const float ownW = ui.buttonWidth(translated ? "Replace..." : "Its own file...", layout::buttonText, layout::wideButtonW);
-        ui.textAround(std::format("{} plays {}", id, translated ? "audio/" + id + "/" + v.file : "this one"), form.x, y + buttonH / 2, layout::noteText,
+        const float ownW = ui.buttonWidth(translated ? "Replace..."_tr : "Its own file..."_tr, layout::buttonText, layout::wideButtonW);
+        ui.textAround(translated ? "{} plays {}"_tr(id, "audio/" + id + "/" + v.file) : "{} plays this one"_tr(id), form.x, y + buttonH / 2, layout::noteText,
                       theme::dim, form.w - ownW - 10 * k);
-        if (ui.button({form.x + form.w - ownW, y, ownW, buttonH}, translated ? "Replace..." : "Its own file...", false, true, layout::buttonText))
-            chooseFiles("Audio", kAudioTypes, "audio/" + id + "/" + v.file);
+        if (ui.button({form.x + form.w - ownW, y, ownW, buttonH}, translated ? "Replace..."_tr : "Its own file..."_tr, false, true, layout::buttonText))
+            chooseFiles("Audio"_tr, kAudioTypes, "audio/" + id + "/" + v.file);
         y += buttonH + layout::gap * k;
     }
     y += 8 * k;
-    const float playW = std::max(ui.buttonWidth("Play", layout::buttonText, layout::wideButtonW), ui.buttonWidth("Stop", layout::buttonText, layout::wideButtonW));
+    const float playW = std::max(ui.buttonWidth("Play"_tr, layout::buttonText, layout::wideButtonW), ui.buttonWidth("Stop"_tr, layout::buttonText, layout::wideButtonW));
     if (here) listenButton(ui, {form.x, y, playW, buttonH}, engine.assets().audio(v.file));
-    if (ui.button({form.x + (here ? playW + layout::gap * k : 0.0f), y, ui.buttonWidth("Go to the line", layout::buttonText, layout::widerButtonW), buttonH}, "Go to the line", false, true, layout::buttonText))
+    if (ui.button({form.x + (here ? playW + layout::gap * k : 0.0f), y, ui.buttonWidth("Go to the line"_tr, layout::buttonText, layout::widerButtonW), buttonH}, "Go to the line"_tr, false, true, layout::buttonText))
         goTo(v.path, static_cast<std::size_t>(std::max(v.line - 1, 0)));
 }
 
@@ -888,7 +924,7 @@ void Developer::drawAtlas(DeveloperUi& ui, const StoryEditor::Definition& def, c
             if (each.name == lower(def.name)) a = &each;
     const Picture sheet = a ? engine.assets().picture(a->image) : Picture{};
     if (!a || !sheet) {
-        ui.textAround(a ? std::format("There's no image called '{}'.", a->image) : "Its image shows once the scripts' mistakes are fixed.", box.x + 10 * k,
+        ui.textAround(a ? "There's no image called '{}'."_tr(a->image) : "Its image shows once the scripts' mistakes are fixed."_tr(), box.x + 10 * k,
                       box.y + box.h / 2, layout::noteText, theme::dim, box.w - 20 * k);
         draw::outline(r, box, kEdge);
         return;
@@ -966,7 +1002,7 @@ void Developer::drawAtlas(DeveloperUi& ui, const StoryEditor::Definition& def, c
         }
     }
     if (parts.empty()) ui.textAround(a->expressions.empty() ? "" : a->expressions[d.atlasExpression], right.x + 6 * k, right.y + 12 * k, layout::sampleText, theme::text);
-    else ui.textAround("Drag the eyes or the mouth into place", box.x + 2 * pad + half, box.y + box.h - pad - 9 * k, layout::sampleText, theme::dim);
+    else ui.textAround("Drag the eyes or the mouth into place"_tr, box.x + 2 * pad + half, box.y + box.h - pad - 9 * k, layout::sampleText, theme::dim);
     draw::outline(r, box, kEdge);
 }
 
@@ -1014,48 +1050,523 @@ std::optional<SDL_FRect> pieceAt(SDL_Surface* pixels, SDL_FPoint at) {
 
 } // namespace
 
-// An animation over its form: a square (100 pixels of the game wide) playing it, in a window as big as
-// everywhere it goes (its size in the game's pixels is said under it), as big as fits in `room`. One
-// that doesn't loop starts again a second after it ends. Gives how tall it is.
-float Developer::drawAnimationSample(DeveloperUi& ui, const StoryEditor::Definition& def, const SDL_FRect& room) {
+namespace {
+
+constexpr std::pair<std::string_view, Ease> kEaseNames[]{{"linear", Ease::Linear}, {"in", Ease::In},         {"out", Ease::Out},
+                                                         {"inout", Ease::InOut},   {"bounce", Ease::Bounce}, {"spring", Ease::Spring},
+                                                         {"overshoot", Ease::Overshoot}};
+
+bool byAmount(std::string_view key) { return key == "left" || key == "right" || key == "up" || key == "down"; }
+
+// A new change's easing on the timeline's row `row`: a fade's is even (as the scripts have it), the rest smooth.
+std::string_view usualEase(std::size_t row) { return wordsOf(kTimelineRows[row].keys).front() == "fade" ? "linear" : "inout"; }
+
+// A timeline's changes as the game plays them, `times` times (0: again and again). (A value that
+// doesn't read: as if it didn't change.)
+Animation animationOf(const StoryEditor::Timeline& t, int times, const Palette& palette) {
+    using V = Animation::Value;
+    Animation a{.length = t.length, .times = times};
+    for (const StoryEditor::Bar& b : t.bars) {
+        const auto ease = std::ranges::find(kEaseNames, b.ease, &std::pair<std::string_view, Ease>::first);
+        Animation::Change c{.start = b.start, .seconds = b.seconds, .ease = ease != std::end(kEaseNames) ? ease->second : Ease::InOut};
+        const auto n = parseNumber(b.value);
+        if (b.key == "x" || b.key == "y") {
+            c.what = b.key == "x" ? V::X : V::Y;
+            c.to = n && lower(b.value) != "home" ? *n : std::numeric_limits<float>::quiet_NaN();
+        } else if (byAmount(b.key)) {
+            c.what = b.key == "left" || b.key == "right" ? V::X : V::Y;
+            c.by = true;
+            c.to = (b.key == "left" || b.key == "down" ? -1.0f : 1.0f) * n.value_or(0.0f);
+        } else if (b.key == "wipe") {
+            c.what = V::Wipe;
+            c.to = std::clamp(n.value_or(1.0f), 0.0f, 1.0f);
+            c.shape = b.shape;
+        } else if (b.key == "color" || b.key == "fade") {
+            c.what = b.key == "color" ? V::Color : V::Fade;
+            const SDL_Color usual = b.key == "fade" ? SDL_Color{0, 0, 0, 255} : SDL_Color{255, 255, 255, 255};
+            c.color = b.key == "fade" && lower(b.value) == "none" ? SDL_Color{0, 0, 0, 0} : parseColor(b.value, &palette).value_or(usual);
+        } else {
+            c.what = b.key == "opacity" ? V::Opacity : b.key == "zoom" ? V::Zoom : V::Rotate;
+            c.to = n.value_or(b.key == "rotate" ? 0.0f : 1.0f);
+        }
+        a.changes.push_back(c);
+    }
+    std::ranges::stable_sort(a.changes, {}, &Animation::Change::start);
+    return a;
+}
+
+// What a change goes to as its box shows it: an amount with its way (5% left), a percent as one.
+std::string barShown(const StoryEditor::Bar& b) {
+    if (byAmount(b.key)) return percentText(b.value) + " " + b.key;
+    if (b.key == "opacity" || b.key == "zoom" || b.key == "wipe") return percentText(b.value);
+    return b.value;
+}
+
+// ...and back: what's written for a value typed into it, on the timeline's row `row` ("5% left" across: left=5%).
+StoryEditor::Bar barWritten(StoryEditor::Bar b, std::size_t row, std::string_view typed) {
+    const auto keys = wordsOf(kTimelineRows[row].keys);
+    b.key = std::string(keys.front());
+    b.value = std::string(trim(typed));
+    if (const auto w = rawWords(b.value); w.size() > 1)
+        for (const std::string_view way : std::span(keys).subspan(1))
+            if (lower(w.back()) == way) {
+                b.key = std::string(way);
+                b.value = percentText(joined(std::vector<std::string>(w.begin(), w.end() - 1)));
+            }
+    if (b.key == "opacity" || b.key == "zoom" || b.key == "wipe") b.value = percentText(b.value);
+    if (b.key != "wipe") b.shape.clear();
+    return b;
+}
+
+
+float lastEnd(const std::vector<StoryEditor::Bar>& bars) {
+    float last = 0.0f;
+    for (const StoryEditor::Bar& b : bars) last = std::max(last, b.start + b.seconds);
+    return last;
+}
+
+// How many seconds the timeline shows across: a round number, a little past `seconds`.
+float roundSpan(float seconds) {
+    for (const float step : {0.5f, 1.0f, 2.0f, 5.0f, 10.0f})
+        if (seconds <= step * 10.0f) return std::ceil(seconds / step) * step;
+    return std::ceil(seconds / 30.0f) * 30.0f;
+}
+
+// The animation written again with `t` (its own line as it is; one time through as long as it was after
+// its last change, or as `t` says when that's longer), and the change `chosen` still chosen.
+void writeTimeline(DeveloperTools& d, const StoryEditor::Definition& def, StoryEditor::Timeline t, const std::optional<StoryEditor::Bar>& chosen,
+                   const std::string& key) {
+    t.length = std::max(t.length, lastEnd(t.bars));
+    const std::vector<std::string> now = d.editor.linesOf(def);
+    std::vector<std::string> lines{now.front()}; // (its own line; the notes under it, on lines of their own or after one, under that)
+    for (std::size_t i = 1; i < now.size(); ++i)
+        if (const std::string_view note = trim(splitNote(now[i]).second); !note.empty()) lines.emplace_back(note);
+    const std::vector<std::string> steps = StoryEditor::stepsOf(t);
+    lines.insert(lines.end(), steps.begin(), steps.end());
+    d.animation.bar.reset();
+    if (chosen) { // (where it is in the order they're in now)
+        const auto again = StoryEditor::timelineOf(steps).bars;
+        for (std::size_t i = 0; i < again.size(); ++i)
+            if (again[i].key == chosen->key && again[i].value == chosen->value && sameMoment(again[i].start, chosen->start) && sameMoment(again[i].seconds, chosen->seconds))
+                d.animation.bar = i;
+    }
+    d.editor.setDefinition(def, lines, key);
+}
+
+} // namespace
+
+void Developer::drawAnimation(DeveloperUi& ui, const StoryEditor::Definition& given, const SDL_FRect& room) {
+    DeveloperTools& d = tools;
+    StoryEditor& editor = d.editor;
+    using Played = DeveloperTools::AnimationView;
+    using Field = StoryEditor::Field;
+    const StoryEditor::Definition def = given; // (a copy: writing it makes the Library's list again)
+    Played& v = d.animation;
+    const float k = ui.k, buttonH = layout::buttonH * k, boxH = layout::boxH * k, rowGap = layout::rowGap * k, gap = layout::gap * k;
+    const std::vector<std::string> lines = editor.linesOf(def);
+    const StoryEditor::Timeline timeline = StoryEditor::timelineOf(std::span(lines).subspan(1));
+    auto fields = editor.fields("animation", def);
+    const std::string plays = fieldValue(fields, "Plays");
+    if (v.name != def.name) v = Played{.name = def.name, .playedAt = engine.toolsTime()};
+    if (v.bar && *v.bar >= timeline.bars.size()) v.bar.reset();
+    // The playhead goes on while it plays: round again after the end (a moment after, unless it plays again and again).
+    const float now = engine.toolsTime();
+    if (v.playing && v.drag != Played::Drag::Playhead) {
+        v.playhead += now - v.playedAt;
+        if (v.playhead > timeline.length + (plays == "loop" ? 0.0f : 0.6f)) v.playhead = 0.0f;
+    }
+    v.playedAt = now;
+
+    // Its preview, under a heading with Play or Pause (as every preview has its buttons), then the rest
+    // under it (that scrolls).
+    const float sampleH = std::round(std::min(layout::sampleAnimationH * k, room.h * layout::sampleAnimationPart));
+    const SDL_FRect headRow{room.x, room.y, room.w, layout::headingH * k};
+    PreviewHead head(ui, headRow);
+    if (head.button(v.playing ? "Pause"_tr : "Play"_tr, false, timeline.length > 0.0f)) {
+        v.playing = !v.playing;
+        if (v.playing && v.playhead >= timeline.length) v.playhead = 0.0f;
+    }
+    const std::string at = secondsText(std::min(v.playhead, timeline.length)), of = secondsText(timeline.length);
+    head.title(of == "1" ? "Preview ({} of 1 second)"_tr(at) : "Preview ({} of {} seconds)"_tr(at, of));
+    const SDL_FRect shown = drawAnimationSample(ui, animationOf(timeline, 1, engine.palette()), std::min(v.playhead, timeline.length),
+                                                {room.x, room.y + layout::previewHeadH * k, room.w, sampleH});
+    const float top = shown.y + shown.h + rowGap;
+    const SDL_FRect formBox{room.x, top, room.w, room.y + room.h - top};
+    ui.scrollForm(formBox, boxH + rowGap);
+    float y = formBox.y - d.formScroll;
+    const DeveloperUi::Clip clipped(ui, formBox, true);
+    const float labelW = std::round(room.w * layout::labelPart);
+    for (std::size_t l = def.line; l < def.end; ++l)
+        if (const ScriptError* problem = d.problemAt(def.file, l)) y += ui.text(problem->message, room.x, y, layout::noteText, kBad, room.w).y + rowGap;
+
+    // Its name and how often it plays.
+    const std::string id = std::format("def:animation:{}", def.line);
+    if (const auto edit = drawForm(ui, id, fields, room.x, room.w, labelW, y)) {
+        auto changed = fields;
+        std::ranges::find(changed, edit->name, &Field::name)->value = edit->value;
+        std::vector<std::string> written = editor.linesOf("animation", changed);
+        written.insert(written.end(), lines.begin() + 1, lines.end()); // (the lines under it as they are)
+        editor.setDefinition(def, written, edit->typed ? std::format("{}:{}{}", id, edit->name, d.focusCount) : std::string{});
+        if (!edit->typed) d.focus.clear();
+        return; // (written: drawn again from it next frame, as tall as it was)
+    }
+    y += rowGap;
+
+    // Its timeline (a panel of its own, as a list is), with + New change under it (at the playhead: on the
+    // chosen change's row, else Opacity's).
+    ui.heading("Timeline"_tr, room.x, y);
+    y += layout::headingH * k;
+    if (!timeline.ok) // (a line it can't show: the timeline only shows it, until that's fixed as text)
+        y += ui.text("The timeline can't change it while a line under it has a mistake."_tr, room.x, y, layout::noteText, kBad, room.w).y + gap;
+    const float drawn = drawTimeline(ui, def, timeline, room.x, y, room.w);
+    if (drawn < 0.0f) return; // (written: drawn again from it next frame, as tall as it was)
+    y += drawn + gap;
+    const float after = std::max(0.0f, timeline.length - lastEnd(timeline.bars)); // (time after its last change: kept as changes move)
+    if (ui.button({room.x, y, room.w, buttonH}, "+ New change"_tr, false, timeline.ok, layout::buttonText)) {
+        const std::size_t row = v.bar ? StoryEditor::timelineRow(timeline.bars[*v.bar].key) : 2;
+        StoryEditor::Bar bar{.key = std::string(wordsOf(kTimelineRows[row].keys).front()), .value = std::string(kTimelineRows[row].start),
+                             .start = std::round(std::min(v.playhead, timeline.length) * 20.0f) / 20.0f, .seconds = 0.5f, .ease = std::string(usualEase(row))};
+        StoryEditor::Timeline added = timeline;
+        added.bars.push_back(bar);
+        added.length = lastEnd(added.bars) + after;
+        writeTimeline(d, def, added, bar, {});
+        return;
+    }
+    y += buttonH + rowGap;
+
+    // The change chosen on it, as a group of the form (what it changes is its heading); else how the timeline works.
+    if (!v.bar || !timeline.ok) {
+        y += ui.text("Click a change to change it, or add one with + New change or by double-clicking a row. Drag a change to move it, or its ends to change how long it takes; drag the orange line to leave time at the end."_tr,
+                     room.x, y, layout::noteText, theme::dim, room.w).y;
+        ui.formDrawn(formBox, y);
+        return;
+    }
+    const StoryEditor::Bar& b = timeline.bars[*v.bar];
+    const std::size_t row = StoryEditor::timelineRow(b.key);
+    std::vector<Field> change{
+        {.name = "To"_text, .value = barShown(b), .box = kTimelineRows[row].box, .suggest = std::string(kTimelineRows[row].more), .group = std::string(kTimelineRows[row].label)},
+        {.name = "Starts at"_text, .value = secondsText(b.start), .label = "Starts at (seconds)"_text, .box = StoryEditor::Box::Seconds, .hint = "0"},
+        {.name = "Duration"_text, .value = b.seconds > 0.0f ? secondsText(b.seconds) : std::string{}, .label = "Duration (seconds)"_text, .box = StoryEditor::Box::Seconds,
+         .hint = "At once"_hint, .beside = true},
+        {.name = "Easing"_text, .value = b.ease, .box = StoryEditor::Box::Easing}};
+    if (b.key == "wipe") // (where it shows first: the picture's darkest parts)
+        change.insert(change.begin() + 1, {.name = "Shape"_text, .value = b.shape, .box = StoryEditor::Box::Shape, .hint = "None"_hint});
+    const std::string changeId = std::format("{}:change", id);
+    if (const auto edit = drawForm(ui, changeId, change, room.x, room.w, labelW, y)) {
+        StoryEditor::Bar changed = b;
+        if (edit->name == "To") changed = barWritten(changed, row, edit->value);
+        else if (edit->name == "Shape") changed.shape = std::string(trim(edit->value));
+        else if (edit->name == "Starts at") changed.start = std::max(0.0f, parseNumber(edit->value).value_or(0.0f));
+        else if (edit->name == "Duration") changed.seconds = std::max(0.0f, parseNumber(edit->value).value_or(0.0f));
+        else if (edit->name == "Easing") changed.ease = edit->value;
+        StoryEditor::Timeline t = timeline;
+        t.bars[*v.bar] = changed;
+        t.length = lastEnd(t.bars) + after;
+        writeTimeline(d, def, t, changed, edit->typed ? std::format("{}:{}{}", changeId, edit->name, d.focusCount) : std::string{});
+        if (!edit->typed) d.focus.clear();
+        return;
+    }
+    ui.formDrawn(formBox, y);
+}
+
+float Developer::drawTimeline(DeveloperUi& ui, const StoryEditor::Definition& def, const StoryEditor::Timeline& timeline, float x, float y, float w) {
     DeveloperTools& d = tools;
     SDL_Renderer* r = ui.r;
+    using Played = DeveloperTools::AnimationView;
+    Played& v = d.animation;
     const float k = ui.k;
-    const auto it = d.script ? d.script->animations.find(lower(def.name)) : decltype(d.script->animations.end()){};
-    if (!d.script || it == d.script->animations.end()) {
-        const SDL_FRect box{room.x, room.y, room.w, std::min(room.h, std::round(110 * k))};
-        draw::rect(r, box, kBox);
-        ui.textAround("It plays once the scripts' mistakes are fixed.", box.x + 10 * k, box.y + box.h / 2, layout::noteText, theme::dim, box.w - 20 * k);
-        draw::outline(r, box, kEdge);
-        return box.h;
+    const float labelW = layout::timelineLabelW * k, rulerH = layout::timelineRulerH * k, rowH = layout::timelineRowH * k;
+    const SDL_FRect grid{x, y, w, rulerH + rowH * static_cast<float>(StoryEditor::kTimelineRowCount)};
+    const float trackX = x + labelW, trackW = std::max(1.0f, w - labelW);
+    // How many seconds it shows across: all of it and a little more, in a round number (kept while something's dragged).
+    if (v.drag == Played::Drag::None || v.span <= 0.0f) v.span = roundSpan(std::max(1.0f, std::max(timeline.length, lastEnd(timeline.bars)) * 1.15f));
+    const float span = v.span, perSecond = trackW / span;
+    auto xOf = [&](float t) { return trackX + t * perSecond; };
+    const float pointer = std::max(0.0f, (d.mouseX - trackX) / perSecond);
+    // Where a dragged moment goes: onto one near it (the start, the end, the playhead, another change's
+    // ends), else to a twentieth of a second.
+    auto snap = [&](float t, std::optional<std::size_t> skip) {
+        float best = std::round(t * 20.0f) / 20.0f, within = layout::timelineSnap * k / perSecond;
+        auto near = [&](float m) {
+            if (std::abs(m - t) < within) best = m, within = std::abs(m - t);
+        };
+        near(0.0f);
+        near(v.playhead);
+        near(timeline.length);
+        for (std::size_t i = 0; i < timeline.bars.size(); ++i)
+            if (i != skip) near(timeline.bars[i].start), near(timeline.bars[i].start + timeline.bars[i].seconds);
+        return std::max(0.0f, best);
+    };
+    // The changes, and the end, as they are dragged.
+    std::vector<StoryEditor::Bar> bars = timeline.bars;
+    float length = timeline.length;
+    const bool barDrag = v.drag == Played::Drag::Bar || v.drag == Played::Drag::Start || v.drag == Played::Drag::End;
+    if (barDrag && v.bar && *v.bar < bars.size()) {
+        StoryEditor::Bar& b = bars[*v.bar];
+        const float moved = pointer - v.grab, end = v.was.start + v.was.seconds;
+        if (v.drag == Played::Drag::Bar) b.start = snap(v.was.start + moved, v.bar);
+        else if (v.drag == Played::Drag::End) b.seconds = std::max(0.0f, snap(end + moved, v.bar) - b.start);
+        else b.start = std::min(end, snap(v.was.start + moved, v.bar)), b.seconds = end - b.start;
+        length = lastEnd(bars) + std::max(0.0f, timeline.length - lastEnd(timeline.bars));
     }
-    const Animation& a = it->second;
-    if (d.animationSince.first != a.name) d.animationSince = {a.name, engine.toolsTime()};
-    float total = 0.0f;
-    for (const Animation::Step& s : a.steps) total += s.seconds;
-    // A small screen of the game's size, with a square in its middle playing it (as a part there would).
+    if (v.drag == Played::Drag::Length) length = std::max(lastEnd(bars), snap(v.wasLength + pointer - v.grab, std::nullopt));
+    if (v.drag == Played::Drag::Playhead) v.playhead = std::clamp(pointer, 0.0f, span);
+
+    // The rows, the seconds over them, and what's past the end of one time through (darker).
+    draw::rect(r, grid, kBox);
+    for (std::size_t row = 0; row < StoryEditor::kTimelineRowCount; ++row) {
+        const float top = y + rulerH + rowH * static_cast<float>(row);
+        if (row % 2 == 1) draw::rect(r, {trackX, top, trackW, rowH}, {255, 255, 255, 8});
+        const std::string label(tr(kTimelineRows[row].label));
+        ui.textAround(ui.fitted(label, layout::smallText, labelW - 14 * k), x + 8 * k, top + rowH / 2, layout::smallText, theme::dim);
+    }
+    if (xOf(length) < trackX + trackW) draw::rect(r, {xOf(length), y + rulerH, trackX + trackW - xOf(length), grid.h - rulerH}, {0, 0, 0, 110});
+    float step = 30.0f;
+    for (const float s : {0.05f, 0.1f, 0.25f, 0.5f, 1.0f, 2.0f, 5.0f, 10.0f, 30.0f})
+        if (s * perSecond >= layout::timelineTickW * k) {
+            step = s;
+            break;
+        }
+    for (int i = 0; static_cast<float>(i) * step <= span + 0.0001f; ++i) {
+        const float tx = xOf(static_cast<float>(i) * step);
+        draw::rect(r, {tx, y + rulerH - 6 * k, 1.0f, 6 * k}, kEdge);
+        draw::rect(r, {tx, y + rulerH, 1.0f, grid.h - rulerH}, {255, 255, 255, 10});
+        ui.textAround(secondsText(static_cast<float>(i) * step), tx + 6 * k, y + rulerH / 2 + 1 * k, layout::sampleText, theme::dim);
+    }
+    draw::rect(r, {trackX, y + rulerH, trackW, 1.0f}, kEdge);
+    draw::rect(r, {trackX - 1.0f, y, 1.0f, grid.h}, kEdge);
+
+    // The changes: a bar from when one begins to when it ends, saying what it goes to; a diamond (over
+    // the bars) for one at once, saying it too where there's room before the next on its row.
+    const float edge = layout::timelineEdge * k, diamond = layout::timelineDiamond * k;
+    std::vector<SDL_FRect> boxes(bars.size());
+    auto rowTop = [&](const StoryEditor::Bar& b) {
+        return y + rulerH + rowH * static_cast<float>(std::min(StoryEditor::timelineRow(b.key), StoryEditor::kTimelineRowCount - 1));
+    };
+    auto atOnce = [&](const StoryEditor::Bar& b) { return b.seconds <= 0.0f; };
+    auto say = [&](const StoryEditor::Bar& b, float at, float mid, float room, SDL_Color color) { // (a colour: its square and its name, as a colour box shows it)
+        const bool colour = (b.key == "color" || b.key == "fade") && lower(b.value) != "none";
+        if (const auto c = colour ? parseColor(b.value, &engine.palette()) : std::nullopt; c && room > layout::timelineSwatch * k + 16 * k) {
+            const float after = ui.swatch(at, mid, *c, false, std::nullopt, layout::timelineSwatch);
+            room -= after - at;
+            at = after;
+        }
+        if (room > 16 * k) ui.textAround(ui.fitted(colour ? colorWords(b.value, &engine.palette()) : barShown(b), layout::sampleText, room), at, mid, layout::sampleText, color);
+    };
+    for (const bool instant : {false, true})
+        for (std::size_t i = 0; i < bars.size(); ++i) {
+            const StoryEditor::Bar& b = bars[i];
+            if (atOnce(b) != instant) continue;
+            const float top = rowTop(b), mid = top + rowH / 2;
+            const bool chosen = v.bar == i;
+            const SDL_Color fill = withAlpha(kAccent, chosen ? 0.9f : 0.45f);
+            std::optional<float> next; // (where the next change on its row begins, after this one)
+            for (const StoryEditor::Bar& o : bars)
+                if (&o != &b && rowTop(o) == top && o.start > b.start + 0.001f) next = std::min(next.value_or(o.start), o.start);
+            const float room = (next ? xOf(*next) : trackX + trackW) - 6 * k;
+            if (!instant) {
+                boxes[i] = {xOf(b.start), top + 4 * k, std::max(2 * k, b.seconds * perSecond), rowH - 8 * k};
+                draw::rect(r, boxes[i], fill);
+                draw::outline(r, boxes[i], chosen ? theme::text : kEdge);
+                const bool marked = std::ranges::any_of(bars, [&](const StoryEditor::Bar& o) { return atOnce(o) && rowTop(o) == top && sameMoment(o.start, b.start); });
+                const float textX = boxes[i].x + (marked ? diamond / 2 + 4 * k : 4 * k);
+                say(b, textX, mid, boxes[i].x + boxes[i].w - 4 * k - textX, chosen ? kBox : theme::text);
+            } else {
+                const float cx = xOf(b.start), h = diamond / 2;
+                boxes[i] = {cx - h, mid - h, diamond, diamond};
+                draw::quad(r, {cx, mid - h - 1.0f}, {cx + h + 1.0f, mid}, {cx, mid + h + 1.0f}, {cx - h - 1.0f, mid}, kBox); // (an edge around it, over a bar)
+                draw::quad(r, {cx, mid - h}, {cx + h, mid}, {cx, mid + h}, {cx - h, mid}, chosen ? theme::text : withAlpha(kAccent, 0.8f));
+                const bool covered = std::ranges::any_of(bars, [&](const StoryEditor::Bar& o) {
+                    return !atOnce(o) && rowTop(o) == top && o.start <= b.start + 0.001f && o.start + o.seconds > b.start + 0.001f;
+                });
+                if (!covered) say(b, cx + h + 4 * k, mid, room - (cx + h + 4 * k), theme::dim);
+            }
+        }
+    // The chosen change: an x after it (before it, at the end of the row), as a list's chosen item has;
+    // clicked, it says Delete, and clicked again the change goes.
+    const std::string armId = v.bar ? std::format("timeline:{}:{}", def.line, *v.bar) : std::string{};
+    std::optional<SDL_FRect> cross;
+    if (v.bar && *v.bar < bars.size() && timeline.ok && v.drag == Played::Drag::None) {
+        const bool armed = d.armed == armId;
+        const SDL_FRect& at = boxes[*v.bar];
+        const float xw = (armed ? layout::crossArmedW : layout::crossW) * k, h = rowH - 6 * k, mid = at.y + at.h / 2;
+        cross = SDL_FRect{at.x + at.w + 3 * k, mid - h / 2, xw, h};
+        if (cross->x + xw > trackX + trackW) cross->x = at.x - 3 * k - xw;
+        draw::rect(r, *cross, armed ? SDL_Color{150, 50, 64, 255} : ui.over(*cross) ? kButtonHover : kButton);
+        draw::outline(r, *cross, armed ? kBad : kEdge);
+        ui.textIn(armed ? std::string_view("Delete"_tr) : std::string_view("x"), *cross, layout::smallButtonText, theme::text);
+    }
+
+    // The end of one time through (its handle on the seconds, to drag), and the playhead.
+    const float endX = xOf(length), playX = xOf(std::clamp(v.playhead, 0.0f, span));
+    draw::rect(r, {endX - 1.0f, y, 2.0f, grid.h}, withAlpha(kWarn, 0.7f));
+    const SDL_FRect endHandle{endX - edge, y, 2 * edge, rulerH};
+    draw::quad(r, {endX - 5 * k, y}, {endX + 5 * k, y}, {endX + 1.0f, y + 8 * k}, {endX - 1.0f, y + 8 * k}, kWarn);
+    draw::rect(r, {playX - 1.0f, y, 2.0f, grid.h}, theme::text);
+    draw::quad(r, {playX - 5 * k, y}, {playX + 5 * k, y}, {playX + 1.0f, y + 7 * k}, {playX - 1.0f, y + 7 * k}, theme::text);
+    draw::outline(r, grid, kEdge);
+
+    // What the pointer takes: the end's handle, the seconds (the playhead), a change (or one of its ends),
+    // or a row: once to put the playhead there, twice to add a change there.
+    if (v.drag == Played::Drag::None && timeline.ok) {
+        if (cross && ui.over(*cross) && ui.click(*cross)) {
+            if (d.armed != armId) {
+                d.armed = armId;
+                return grid.h;
+            }
+            d.armed.clear();
+            StoryEditor::Timeline t = timeline;
+            t.bars.erase(t.bars.begin() + static_cast<std::ptrdiff_t>(*v.bar));
+            t.length = lastEnd(t.bars) + std::max(0.0f, timeline.length - lastEnd(timeline.bars));
+            writeTimeline(d, def, t, std::nullopt, {});
+            return -1.0f;
+        }
+        if (d.clicked && ui.over(grid) && d.armed.starts_with("timeline:")) d.armed.clear(); // (a click anywhere else on it: the x again)
+        if (ui.over(endHandle) && ui.click(endHandle)) {
+            v.drag = Played::Drag::Length;
+            v.grab = pointer;
+            v.wasLength = length;
+        } else if (const SDL_FRect ruler{trackX, y, trackW, rulerH}; ui.click(ruler)) {
+            v.drag = Played::Drag::Playhead;
+            v.playing = false;
+            v.playhead = std::clamp(pointer, 0.0f, span);
+        } else {
+            for (std::size_t i = bars.size(); i-- > 0;) {
+                const SDL_FRect hit{boxes[i].x - 2 * k, boxes[i].y - 3 * k, boxes[i].w + 4 * k, boxes[i].h + 6 * k};
+                if (!ui.over(hit) || !ui.click(hit)) continue;
+                const bool timed = bars[i].seconds > 0.0f && boxes[i].w > 3 * edge;
+                v.drag = timed && d.mouseX > boxes[i].x + boxes[i].w - edge ? Played::Drag::End : timed && d.mouseX < boxes[i].x + edge ? Played::Drag::Start : Played::Drag::Bar;
+                v.bar = i;
+                v.was = bars[i];
+                v.grab = pointer;
+                d.focus.clear();
+                break;
+            }
+            for (std::size_t row = 0; v.drag == Played::Drag::None && row < StoryEditor::kTimelineRowCount; ++row) {
+                const SDL_FRect lane{trackX, y + rulerH + rowH * static_cast<float>(row), trackW, rowH};
+                if (!ui.click(lane)) continue;
+                if (d.doubleClick) { // (a change there, going to what a new one on the row does, for half a second)
+                    StoryEditor::Bar bar{.key = std::string(wordsOf(kTimelineRows[row].keys).front()), .value = std::string(kTimelineRows[row].start),
+                                         .start = snap(pointer, std::nullopt), .seconds = 0.5f, .ease = std::string(usualEase(row))};
+                    StoryEditor::Timeline t = timeline;
+                    t.bars.push_back(bar);
+                    t.length = lastEnd(t.bars) + std::max(0.0f, timeline.length - lastEnd(timeline.bars));
+                    writeTimeline(d, def, t, bar, {});
+                    return -1.0f;
+                }
+                v.bar.reset();
+                v.drag = Played::Drag::Playhead;
+                v.playing = false;
+                v.playhead = std::clamp(pointer, 0.0f, span);
+            }
+        }
+    }
+    // Let go: a change written where it was taken to, or the end.
+    if (v.drag != Played::Drag::None && !d.held) {
+        const Played::Drag was = std::exchange(v.drag, Played::Drag::None);
+        StoryEditor::Timeline t = timeline;
+        t.bars = bars;
+        t.length = length;
+        const bool moved = barDrag && v.bar && *v.bar < bars.size() && (!sameMoment(bars[*v.bar].start, v.was.start) || !sameMoment(bars[*v.bar].seconds, v.was.seconds));
+        if (moved || (was == Played::Drag::Length && !sameMoment(length, timeline.length))) {
+            writeTimeline(d, def, t, v.bar ? std::optional(bars[*v.bar]) : std::nullopt, {});
+            return -1.0f;
+        }
+    }
+    // The keys: Delete takes the chosen change away, Esc lets it go.
+    if (v.bar && *v.bar < bars.size() && d.focus.empty() && timeline.ok) {
+        bool removed = false;
+        std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) {
+            if (key.key == SDLK_ESCAPE) {
+                v.bar.reset();
+                return true;
+            }
+            if ((key.key == SDLK_DELETE || key.key == SDLK_BACKSPACE) && !removed && v.bar) {
+                removed = true;
+                return true;
+            }
+            return false;
+        });
+        if (removed) {
+            StoryEditor::Timeline t = timeline;
+            t.bars.erase(t.bars.begin() + static_cast<std::ptrdiff_t>(*v.bar));
+            t.length = lastEnd(t.bars) + std::max(0.0f, timeline.length - lastEnd(timeline.bars));
+            writeTimeline(d, def, t, std::nullopt, {});
+            return -1.0f;
+        }
+    }
+    return grid.h;
+}
+
+// How an animation looks `seconds` into it: a square (a fifth of the game's screen high) in the middle
+// of a small screen of the game's size, as a part there would. Gives where it's drawn.
+SDL_FRect Developer::drawAnimationSample(DeveloperUi& ui, const Animation& a, float seconds, const SDL_FRect& room) {
+    SDL_Renderer* r = ui.r;
     const float side = std::round(engine.canvas().h / 5); // (in the game's pixels)
     const SDL_FRect part{(engine.canvas().w - side) / 2, (engine.canvas().h - side) / 2, side, side};
-    const float textH = 20 * k, scale = std::min(room.w / engine.canvas().w, (room.h - textH) / engine.canvas().h);
+    const float scale = std::min(room.w / engine.canvas().w, room.h / engine.canvas().h);
     const SDL_FRect box{room.x, room.y, std::round(engine.canvas().w * scale), std::round(engine.canvas().h * scale)};
     draw::rect(r, box, kBox);
-    float t = engine.toolsTime() - d.animationSince.second;
-    if (!a.loop && t > total + 1.0f) d.animationSince.second = engine.toolsTime(), t = 0.0f;
-    const Animation::Look look = a.at(t, kAccent, [&](bool across, float place) {
+    const Animation::Look look = a.at(seconds, kAccent, [&](bool across, float place) {
         return across ? placeEdge(place, side, engine.canvas().w) - part.x : placeEdge(-place, side, engine.canvas().h) - part.y;
-    });
+    }, {engine.canvas().w, engine.canvas().h});
     std::optional<DeveloperUi::Clip> clipped(std::in_place, ui, box);
     const float size = side * scale * look.zoom, cx = box.x + (part.x + side / 2 + look.x) * scale, cy = box.y + (part.y + side / 2 + look.y) * scale;
     const float turn = look.rotate * std::numbers::pi_v<float> / 180.0f, c = std::cos(turn), sn = std::sin(turn);
     auto corner = [&](float x, float y) { return SDL_FPoint{cx + (x * c - y * sn) * size / 2, cy + (x * sn + y * c) * size / 2}; };
     SDL_Color color = look.color.value_or(kAccent);
     color.a = static_cast<Uint8>(std::lround(color.a * std::clamp(look.opacity, 0.0f, 1.0f)));
-    draw::quad(r, corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1), color);
-    if (look.fade > 0.0f) draw::rect(r, box, withAlpha(look.fadeColor, std::clamp(look.fade, 0.0f, 1.0f))); // (fade=: the whole screen covered)
+    int viewW = 0, viewH = 0; // (what the tools' places are in)
+    SDL_RendererLogicalPresentation mode{};
+    SDL_GetRenderLogicalPresentation(r, &viewW, &viewH, &mode);
+    tools.sampleWiper.draw(r, engine.assets(), {static_cast<float>(viewW), static_cast<float>(viewH)}, {cx - size / 2, cy - size / 2, size, size}, look.wipe,
+                           look.wipeShape, [&] { draw::quad(r, corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1), color); });
+    if (look.fade > 0.0f) // (fade=: the whole screen covered, as much as it's seen, as a screen's is)
+        draw::rect(r, box, withAlpha(look.fadeColor, std::clamp(look.fade, 0.0f, 1.0f) * std::clamp(look.opacity, 0.0f, 1.0f)));
     clipped.reset(); // (its outline: over the edge)
     draw::outline(r, box, kEdge);
-    ui.textAround("The game's screen, with a part in its middle", box.x, box.y + box.h + textH / 2, layout::smallText, theme::dim);
-    return box.h + textH;
+    return box;
+}
+
+// + New animation: the animations to start from, as + New screen's screens are listed, with the one pointed
+// at (else the last one pointed at) playing over them, and what it does. A click adds it, named as it is
+// (fade_in_2 when there's one already), and opens it.
+void Developer::drawNewAnimationForm(DeveloperUi& ui, const SDL_FRect& right) {
+    DeveloperTools& d = tools;
+    StoryEditor& editor = d.editor;
+    const float k = ui.k, buttonH = layout::buttonH * k, gap = layout::gap * k;
+    ui.formTitle("New animation"_tr, right.x, right.y);
+    float y = right.y + layout::titleH * k;
+    const AnimationStart& shown = kAnimationStarts[std::min(d.startShown, kAnimationStarts.size() - 1)];
+    const StoryEditor::Timeline timeline = StoryEditor::timelineOf(startLines(shown));
+    const float now = engine.toolsTime(), round = timeline.length + (shown.loops ? 0.0f : 0.6f); // (a moment after its end, then again)
+    const float at = round > 0.0f ? std::fmod(std::max(0.0f, now - d.startShownAt), round) : 0.0f;
+    const float sampleH = std::round(std::min(layout::sampleAnimationH * k, right.h * layout::sampleAnimationPart));
+    const SDL_FRect sample = drawAnimationSample(ui, animationOf(timeline, 1, engine.palette()), std::min(at, timeline.length), {right.x, y, right.w, sampleH});
+    y = sample.y + sample.h + layout::rowGap * k;
+    ui.text(tr(shown.help), right.x, y, layout::noteText, theme::dim, right.w);
+    y += ui.measure("A\nA", layout::noteText).y + gap; // (room for two lines, whichever it says: the list stays where it is)
+    const SDL_FRect list{right.x, y, right.w, right.y + right.h - y};
+    ui.scrollForm(list, buttonH + gap);
+    y = list.y - d.formScroll;
+    const DeveloperUi::Clip clipped(ui, list, true);
+    auto has = [&](const std::string& n) { return editor.defines("animation", n); };
+    for (std::size_t i = 0; i < kAnimationStarts.size(); ++i) {
+        const AnimationStart& start = kAnimationStarts[i];
+        const SDL_FRect button{right.x, y, right.w, buttonH};
+        if (ui.over(button) && ui.over(list) && d.startShown != i) d.startShown = i, d.startShownAt = now;
+        if (ui.button(button, tr(start.label), false, true, layout::buttonText)) {
+            const std::string name = uniqueName(start.name.empty() ? std::string("new_animation") : std::string(start.name), has);
+            std::vector<std::string> lines{std::format("animation {}{}", name, start.loops ? " loop" : "")};
+            std::ranges::copy(StoryEditor::stepsOf(StoryEditor::timelineOf(startLines(start))), std::back_inserter(lines)); // (as the timeline writes them)
+            d.libraryItem = editor.addDefinition("animation", lines);
+            d.pickingAnimation = false;
+            d.formScroll = 0.0f;
+            return;
+        }
+        y += buttonH + gap;
+    }
+    ui.formDrawn(list, y);
 }
 
 // A sub-picture over its form: on the left the picture it's cut from, with the part marked (drag a
@@ -1071,7 +1582,7 @@ void Developer::drawSubPicture(DeveloperUi& ui, const StoryEditor::Definition& d
             if (each.name == lower(def.name)) p = &each;
     const Picture sheet = p ? engine.assets().whole(p->image) : Picture{};
     if (!p || !sheet) {
-        ui.textAround(p ? std::format("There's no image called '{}'.", p->image) : "It shows once the scripts' mistakes are fixed.", box.x + 10 * k,
+        ui.textAround(p ? "There's no image called '{}'."_tr(p->image) : "It shows once the scripts' mistakes are fixed."_tr(), box.x + 10 * k,
                       box.y + box.h / 2, layout::noteText, theme::dim, box.w - 20 * k);
         draw::outline(r, box, kEdge);
         return;
@@ -1109,7 +1620,7 @@ void Developer::drawSubPicture(DeveloperUi& ui, const StoryEditor::Definition& d
         if (std::abs(d.mouseX - g.x) + std::abs(d.mouseY - g.y) < 4 * k) {
             const SurfacePtr pixels = engine.assets().pixels(p->image);
             cut = pieceAt(pixels.get(), g.from);
-            if (!cut) d.status = "That's the image's background: click a piece of it, or drag a box around what to cut out.";
+            if (!cut) d.status = "That's the image's background: click a piece of it, or drag a box around what to cut out."_tr;
         }
         if (cut && cut->w >= 1.0f && cut->h >= 1.0f) {
             auto fields = d.editor.fields("picture", def);
@@ -1131,7 +1642,7 @@ void Developer::drawSubPicture(DeveloperUi& ui, const StoryEditor::Definition& d
         sheet.crop(part).draw(r, drawn, 1.0f);
         draw::outline(r, drawn, kEdge);
     }
-    ui.textAround(std::format("Drag a box on the image, or click a piece of it to cut out just that piece. {} x {} pixels.", std::lround(part.w),
+    ui.textAround("Drag a box on the image, or click a piece of it to cut out just that piece. {} x {} pixels."_tr(std::lround(part.w),
                               std::lround(part.h)),
                   box.x + pad, box.y + box.h - pad - hintH / 2, layout::sampleText, theme::dim, box.w - 2 * pad);
     draw::outline(r, box, kEdge);
@@ -1147,10 +1658,13 @@ void Developer::drawStyleSample(DeveloperUi& ui, const std::string& style, const
         d.styleScript.reset();
         d.styleOf = {d.editor.version(), style};
         const float bh = std::min(h * 0.7f, 90.0f);
-        const std::string sample = std::format("\nscreen vnext_style_sample\n    button \"A button\" style={0} x={1} y={2} w={3} h={4}\n"
-                                               "    text \"Some words\" style={0} x={5} y={6}\n",
-                                               style, std::lround(engine.canvas().w * 0.04f), std::lround((h - bh) / 2), std::lround(engine.canvas().w * 0.4f), std::lround(bh),
-                                               std::lround(engine.canvas().w * 0.5f), std::lround(h / 2 - 16));
+        const std::vector<std::string> pixels{ // (laid out in the game's pixels, in the band the box shows; written in places, as screens are)
+            "screen vnext_style_sample",
+            std::format("    button \"A button\" style={} x={} y={} w={} h={}", style, std::lround(engine.canvas().w * 0.04f), std::lround((h - bh) / 2),
+                        std::lround(engine.canvas().w * 0.4f), std::lround(bh)),
+            std::format("    text \"Some words\" style={} x={} y={}", style, std::lround(engine.canvas().w * 0.5f), std::lround(h / 2 - 16))};
+        std::string sample = "\n";
+        for (const std::string& line : placesFromPixels(pixels, engine.canvas().w, engine.canvas().h)) sample += line + "\n";
         auto script = std::make_unique<Script>(Script::load(
             "scripts/main.vnscript",
             [&](const std::string& p) {
@@ -1166,7 +1680,7 @@ void Developer::drawStyleSample(DeveloperUi& ui, const std::string& style, const
     }
     draw::rect(ui.r, box, kBox);
     if (!d.styleView) {
-        ui.textAround("The sample shows once the scripts' mistakes are fixed.", box.x + 10 * k, box.y + box.h / 2, layout::noteText, theme::dim, box.w - 20 * k);
+        ui.textAround("The sample shows once the scripts' mistakes are fixed."_tr, box.x + 10 * k, box.y + box.h / 2, layout::noteText, theme::dim, box.w - 20 * k);
         return;
     }
     const float scale = box.w / engine.canvas().w;

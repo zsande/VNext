@@ -11,6 +11,7 @@
 #include <limits>
 #include <cstdlib>
 #include <expected>
+#include <numbers>
 #include <optional>
 #include <random>
 #include <ranges>
@@ -186,51 +187,92 @@ float eased(Ease e, float t) {
     case Ease::In: return t * t;
     case Ease::Out: return 1.0f - (1.0f - t) * (1.0f - t);
     case Ease::InOut: return easeInOut(t);
+    case Ease::Bounce: { // (it lands, and bounces lower each time)
+        constexpr float n = 7.5625f, d = 2.75f;
+        if (t < 1.0f / d) return n * t * t;
+        if (t < 2.0f / d) return n * (t - 1.5f / d) * (t - 1.5f / d) + 0.75f;
+        if (t < 2.5f / d) return n * (t - 2.25f / d) * (t - 2.25f / d) + 0.9375f;
+        return n * (t - 2.625f / d) * (t - 2.625f / d) + 0.984375f;
+    }
+    case Ease::Spring: // (past it and back, less each time, till it settles)
+        if (t <= 0.0f || t >= 1.0f) return t;
+        return std::pow(2.0f, -10.0f * t) * std::sin((t * 10.0f - 0.75f) * (2.0f * std::numbers::pi_v<float> / 3.0f)) + 1.0f;
+    case Ease::Overshoot: { // (a little past it, then back)
+        constexpr float c1 = 1.70158f, c3 = c1 + 1.0f;
+        const float u = t - 1.0f;
+        return 1.0f + c3 * u * u * u + c1 * u * u;
+    }
     }
     return t;
 }
 
-float Animation::length() const {
-    float total = 0.0f;
-    for (const Step& s : steps) total += s.seconds;
-    return total;
+Animation::Look Animation::Look::with(const Look& other) const {
+    Look out = *this;
+    out.x += other.x;
+    out.y += other.y;
+    out.opacity *= other.opacity;
+    out.zoom *= other.zoom;
+    out.rotate += other.rotate;
+    if (other.color) out.color = other.color;
+    if (other.fade > out.fade) {
+        out.fade = other.fade;
+        out.fadeColor = other.fadeColor;
+    }
+    if (other.wipe < out.wipe) {
+        out.wipe = other.wipe;
+        out.wipeShape = other.wipeShape;
+    }
+    return out;
 }
 
-Animation::Look Animation::at(float seconds, SDL_Color own, const Offset& offset) const {
-    float total = 0.0f;
-    for (const Step& s : steps) total += s.seconds;
-    if (loop && total > 0.0f) seconds = std::fmod(std::max(0.0f, seconds), total);
-    Look now;
-    SDL_Color color = own;
-    for (const Step& s : steps) {
-        const float t = s.seconds > 0.0f ? std::clamp(seconds / s.seconds, 0.0f, 1.0f) : 1.0f, e = eased(s.ease, t);
-        auto toward = [&](float& v, const std::optional<float>& to) {
-            if (to) v += (*to - v) * e;
-        };
-        auto place = [&](bool across, const std::optional<float>& p) -> std::optional<float> {
-            if (!p) return std::nullopt;
-            return std::isnan(*p) ? 0.0f : offset(across, *p); // (home: its own place)
-        };
-        toward(now.x, place(true, s.x));
-        toward(now.y, place(false, s.y));
-        toward(now.opacity, s.opacity);
-        toward(now.zoom, s.zoom);
-        toward(now.rotate, s.rotate);
-        if (s.fade) { // (to the colour, or away from the one it had)
-            if (s.fade->a == 0) now.fade += (0.0f - now.fade) * e;
-            else {
-                now.fadeColor = {s.fade->r, s.fade->g, s.fade->b, 255};
-                now.fade += (1.0f - now.fade) * e;
-            }
+Animation::Look Animation::at(float seconds, SDL_Color own, const Offset& offset, SDL_FPoint screen, const Look& start) const {
+    // Where it is in one time through: again and again, a few times (then as its end left it), or once.
+    float t = std::max(0.0f, seconds);
+    if (length <= 0.0f) t = 0.0f;
+    else if (!loops() && t >= total()) t = length;
+    else t = std::fmod(t, length);
+    // A change's value as it goes: from where it began towards its own, as its easing has it by then.
+    auto progress = [](const Change& c, float when) { return eased(c.ease, c.seconds > 0.0f ? (when - c.start) / c.seconds : 1.0f); };
+    auto target = [&](const Change& c) {
+        switch (c.what) {
+        case Value::X: return c.by ? c.to * screen.x : std::isnan(c.to) ? 0.0f : offset(true, c.to); // (home: its own place)
+        case Value::Y: return c.by ? -c.to * screen.y : std::isnan(c.to) ? 0.0f : offset(false, c.to);
+        case Value::Fade: return c.color.a == 0 ? 0.0f : 1.0f; // (covered, or uncovered again)
+        default: return c.to;
         }
-        if (s.color) {
-            auto mix = [&](Uint8 a, Uint8 b) { return static_cast<Uint8>(std::lround(a + (b - a) * e)); };
-            color = {mix(color.r, s.color->r), mix(color.g, s.color->g), mix(color.b, s.color->b), mix(color.a, s.color->a)};
-            now.color = color;
+    };
+    auto mix = [](SDL_Color a, SDL_Color b, float e) {
+        auto channel = [e](Uint8 x, Uint8 y) { return static_cast<Uint8>(std::clamp(std::lround(x + (y - x) * e), 0L, 255L)); };
+        return SDL_Color{channel(a.r, b.r), channel(a.g, b.g), channel(a.b, b.b), channel(a.a, b.a)};
+    };
+    // Each value: the latest change of it begun by now, from where the ones before it had taken it.
+    auto number = [&](Value what, float initial) {
+        const Change* last = nullptr;
+        float from = initial;
+        for (const Change& c : changes) {
+            if (c.what != what) continue;
+            if (t < c.start) break;
+            from = last ? std::lerp(from, target(*last), progress(*last, c.start)) : initial;
+            last = &c;
         }
-        if (seconds < s.seconds) break; // (this step is going on)
-        seconds -= s.seconds;
+        return last ? std::lerp(from, target(*last), progress(*last, t)) : initial;
+    };
+    Look now{.x = number(Value::X, start.x), .y = number(Value::Y, start.y), .opacity = number(Value::Opacity, start.opacity),
+             .zoom = number(Value::Zoom, start.zoom), .rotate = number(Value::Rotate, start.rotate), .color = start.color,
+             .fade = number(Value::Fade, start.fade), .fadeColor = start.fadeColor, .wipe = std::clamp(number(Value::Wipe, start.wipe), 0.0f, 1.0f),
+             .wipeShape = start.wipeShape};
+    const Change* last = nullptr;
+    const SDL_Color first = start.color.value_or(own);
+    SDL_Color from = first;
+    for (const Change& c : changes) {
+        if (t < c.start) break;
+        if (c.what == Value::Fade && c.color.a != 0) now.fadeColor = {c.color.r, c.color.g, c.color.b, 255}; // (going away again: from the one it had)
+        if (c.what == Value::Wipe) now.wipeShape = c.shape;
+        if (c.what != Value::Color) continue;
+        from = last ? mix(from, last->color, progress(*last, c.start)) : first;
+        last = &c;
     }
+    if (last) now.color = mix(from, last->color, progress(*last, t));
     return now;
 }
 

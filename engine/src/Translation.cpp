@@ -79,8 +79,8 @@ Translation Translation::parse(std::string id, std::string_view source, std::vec
         if (!original || translated) return;
         const std::string head = lower(firstWord(*original));
         error(originalLine, head == "language" || head == "font"
-                                ? "language and font lines go at the top, before the texts."
-                                : "This text has no translation under it.");
+                                ? "language and font lines go at the top, before the texts."_tr()
+                                : "This text has no translation under it."_tr());
     };
     int number = 0;
     for (auto&& part : std::views::split(source, '\n')) {
@@ -93,9 +93,9 @@ Translation Translation::parse(std::string id, std::string_view source, std::vec
 
         if (indentOf(raw) > 0) {
             if (!original) {
-                error(number, "This line is indented, but there's no text above it to translate.");
+                error(number, "This line is indented, but there's no text above it to translate."_tr());
             } else if (translated) {
-                error(number, "A text has one line of translation.");
+                error(number, "A text has one line of translation."_tr());
             } else {
                 t.texts.insert_or_assign(*original, unquote(text));
                 translated = true;
@@ -106,24 +106,24 @@ Translation Translation::parse(std::string id, std::string_view source, std::vec
         if (!started && !isQuoted(text) && (head == "language" || head == "font")) {
             const auto split = splitWords(trim(text.substr(head.size())));
             if (!split) {
-                error(number, std::format("In this line {}.", split.error()));
+                error(number, "In this line {}."_tr(split.error()));
                 continue;
             }
             std::vector<std::string> w;
             for (const ScriptWord& word : *split) w.push_back(word.text);
             if (head == "language") { // language "Name" [code=xx]
                 if (w.empty() || w[0].find('=') != std::string::npos) {
-                    error(number, "A language line needs the language's name.");
+                    error(number, "A language line needs the language's name."_tr());
                     continue;
                 }
                 t.name = w[0];
                 for (std::size_t i = 1; i < w.size(); ++i) {
                     if (w[i].starts_with("code=") && w[i].size() > 5) t.code = lower(w[i].substr(5));
-                    else error(number, std::format("'{}' doesn't belong in a language line.", w[i]));
+                    else error(number, "'{}' doesn't belong in a language line."_tr(w[i]));
                 }
             } else { // font [NAME] FILE [STYLE], like in scripts
                 if (w.empty() || w.size() > 3) {
-                    error(number, "A font line needs a font file.");
+                    error(number, "A font line needs a font file."_tr());
                     continue;
                 }
                 if (w.size() == 1) t.fonts.insert_or_assign("default", Script::FontFile{w[0], ""});

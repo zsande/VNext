@@ -70,6 +70,7 @@ public:
     [[nodiscard]] Assets& assets() { return *assets_; }
     [[nodiscard]] Audio& audio() { return audio_; }
     [[nodiscard]] std::uint64_t frameNumber() const { return frameNumber_; }
+    [[nodiscard]] std::uint64_t pointerMoves() const { return pointerMoves_; } // (how many times the pointer has moved: screens tell whether the last move came to them)
     [[nodiscard]] float time() const { return time_; } // the game's clock: it stands still while the developer tools are open over it
     [[nodiscard]] float toolsTime() const { return toolsTime_; }
     [[nodiscard]] Settings& settings() { return settings_; }
@@ -237,12 +238,14 @@ private:
     [[nodiscard]] ScreenView* view(std::string_view name);
     [[nodiscard]] ScreenView* topView(); // the screen on top: the top overlay, else the title on the title screen
     [[nodiscard]] ScreenView* textbox();
-    bool open(const std::string& name);
-    bool openNow(const std::string& name); // (open(), once the screen under it has faded out, when it must first)
-    // The top screen: its hide_animation= first and its "and close with fade" (unless `fade` is false),
-    // then it's gone (and the story goes on, if it waited for it).
+    // A screen opened over the rest, playing `opening` and later `closing` this time (with NAME and close
+    // with NAME; none: its own show_animation= and hide_animation=).
+    bool open(const std::string& name, ScreenView::Played opening = std::nullopt, ScreenView::Played closing = std::nullopt);
+    bool openNow(const std::string& name, ScreenView::Played opening = std::nullopt,
+                 ScreenView::Played closing = std::nullopt); // (open(), once the screen under it has faded out, when it must first)
+    // The top screen: its hide animation first (unless `fade` is false), then it's gone (and the story
+    // goes on, if it waited for it).
     void close(bool fade = true);
-    void closeFaded(); // (after its hide_animation=)
     void closeNow();
     void left(const std::string& name); // a "show screen" one hidden: its hide_animation= plays (the story goes on)
     void closeAll();
@@ -316,6 +319,7 @@ private:
     Script script_;
     std::vector<Translation> translations_;
     std::uint64_t frameNumber_ = 0;
+    std::uint64_t pointerMoves_ = 0;
     bool covered_ = false; // a menu covers the game (its voice and video wait)
     std::unique_ptr<Game> game_;                          // idle (not started) on the title screen
     std::map<std::string, ScreenView, std::less<>> views_; // every screen of the script
@@ -323,8 +327,6 @@ private:
     std::vector<std::string> overlays_;                   // open menus, the top one last
     std::vector<std::string> shown_;                      // "show screen" screens last frame (on_show / on_hide)
     std::size_t calledDepth_ = 0;                         // overlays_ size while a screen the story waits for is open
-    std::map<std::string, Transition, std::less<>> closingFades_; // open screens that go with a fade ("and close with fade")
-    std::optional<Transition> titleClosing_;              // ...the title screen's, when the story opened it so
     struct Leaving {
         std::string name;
         std::function<void()> then; // (once its animation is over; none: a "show screen" one, drawn on top until then)
@@ -356,19 +358,8 @@ private:
     bool splash_ = false;                                 // running "label splashscreen"
     bool opening_ = false;                                // label start before it opens the title screen (nothing's saved then)
     bool titleShown_ = false;                             // (its on_hide runs when a game starts)
-    // A screen opened with fade: to each fade's colour in half its time (from the one before), the
-    // screen opens (`then`), then away from the last one's colour in the other half of its time.
-    // Clicks and keys wait meanwhile.
-    struct Veil {
-        std::vector<std::pair<SDL_Color, float>> fades; // colour, seconds
-        float time = 0.0f;
-        std::function<void()> then;
-        [[nodiscard]] float opensAt() const;
-        [[nodiscard]] float length() const { return fades.empty() ? 0.0f : opensAt() + fades.back().second / 2; }
-        [[nodiscard]] SDL_Color color() const; // over everything, now
-    };
-    std::optional<Veil> veil_;
-    void veiled(const Transition& t, std::function<void()> then); // `then` at once, or behind a fade
+    // The scripts' animation a line names for a screen to open or close with: none said (its own), "none"
+    // (null), or that one.
     std::optional<std::size_t> storyStart_;               // where New Game starts: the line after the one that opened the title screen
     Variables beforeTitle_; // what the story set before it opened the title screen (a language picked...): the title screen and New Game keep it
     // While the Screens tab's screen is tried: its buttons do nothing (no saving, loading or leaving),

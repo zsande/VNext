@@ -1012,7 +1012,7 @@ constexpr Field kFields[]{
     {"auto_delay", &Settings::autoDelay, 100, 20000},
     {"textbox_opacity", &Settings::textboxOpacity, 0, 100},
     {"text_size", &Settings::textSize, 50, 200},
-    {"transitions", &Settings::transitions},
+    {"animations", &Settings::animations},
     {"skip_unread", &Settings::skipUnread},
     {"skip_after_choices", &Settings::skipAfterChoices},
     {"rollback", &Settings::rollback},

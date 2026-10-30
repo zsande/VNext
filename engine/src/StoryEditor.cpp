@@ -59,7 +59,7 @@ StoryEditor::Kind classify(std::string_view t, StoryEditor::Kind parent) {
         {"choice", Kind::Choice}, {"if", Kind::If},         {"else", Kind::Else},        {"elif", Kind::Else},      {"set", Kind::Set},
         {"add", Kind::Set},       {"subtract", Kind::Set},  {"toggle", Kind::Set},       {"jump", Kind::Jump},      {"call", Kind::Jump},
         {"return", Kind::End},    {"end", Kind::End},       {"music", Kind::Music},      {"sound", Kind::Sound},    {"voice", Kind::Voice},
-        {"stop", Kind::Stop},     {"wait", Kind::Wait},     {"move", Kind::Move},        {"shake", Kind::Shake},    {"flash", Kind::Shake},
+        {"stop", Kind::Stop},     {"wait", Kind::Wait},
         {"effect", Kind::Effect}, {"weather", Kind::Weather}, {"camera", Kind::Camera},  {"movie", Kind::Movie},    {"open", Kind::Screen},
         {"notify", Kind::Notify}, {"textbox", Kind::Textbox}, {"new page", Kind::NewPage}, {"together", Kind::Together},
         {"chapter", Kind::Chapter}, {"chart", Kind::Chapter}, {"message", Kind::Message}, {"phone", Kind::Phone},   {"ask", Kind::Ask},
@@ -73,90 +73,68 @@ StoryEditor::Kind classify(std::string_view t, StoryEditor::Kind parent) {
     return Kind::Line; // someone speaking, or narration
 }
 
-constexpr std::string_view kEases = "inout linear in out";
 // Values a box often has, that say what they are (plain numbers are typed: no list for those).
-constexpr std::string_view kAcross = "-1:the left edge|-0.5|0:the middle|0.5|1:the right edge", kDown = "-1:the bottom|-0.5|0:the middle|0.5|1:the top",
+const ToolsSuggestions kAcross = "-1:the left edge|-0.5|0:the middle|0.5|1:the right edge", kDown = "-1:the bottom|-0.5|0:the middle|0.5|1:the top",
                            kLayers = "-1:behind the others|1:in front of the others|2", kSpeeds = "0.5:slower|0.75|1.5|2:faster";
 
-constexpr std::string_view kStepKindList = "Opacity|Move across|Move up or down|Zoom|Rotation|Colour|Fade to a colour"; // (what an animation's step changes: kStepKinds' labels)
-constexpr Slot kJumpSlots[]{{.type = Type::Word, .name = "Scene", .box = Box::Scene}};
-constexpr Slot kMusicSlots[]{{.type = Type::Word, .name = "Song", .box = Box::Sound},
-                             {.type = Type::After, .name = "Fade in", .key = "fade", .box = Box::Seconds, .hint = "At once", .label = "Fade in (seconds)"},
-                             {.type = Type::After, .name = "Volume", .key = "volume", .box = Box::Volume, .hint = "100%"},
-                             {.type = Type::Flag, .name = "Once", .key = "once", .box = Box::YesNo, .choices = "no yes", .label = "Play once"}};
+const Slot kJumpSlots[]{{.type = Type::Word, .name = "Scene"_text, .box = Box::Scene}};
+const Slot kMusicSlots[]{{.type = Type::Word, .name = "Song"_text, .box = Box::Sound},
+                             {.type = Type::After, .name = "Fade in"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade in (seconds)"_text},
+                             {.type = Type::After, .name = "Volume"_text, .key = "volume", .box = Box::Volume, .hint = "100%"},
+                             {.type = Type::Flag, .name = "Once"_text, .key = "once", .box = Box::YesNo, .choices = "no yes"_choices, .label = "Play once"_text}};
 
-constexpr Slot kSoundSlots[]{{.type = Type::Word, .name = "Sound", .box = Box::Sound},
-                             {.type = Type::Flag, .name = "Loop", .key = "loop", .box = Box::YesNo, .choices = "no yes"},
-                             {.type = Type::After, .name = "Called", .key = "as", .box = Box::Channel, .label = "Name to stop it by"},
-                             {.type = Type::After, .name = "Fade in", .key = "fade", .box = Box::Seconds, .hint = "At once", .label = "Fade in (seconds)"},
-                             {.type = Type::After, .name = "Volume", .key = "volume", .box = Box::Volume, .hint = "100%"}};
+const Slot kSoundSlots[]{{.type = Type::Word, .name = "Sound"_text, .box = Box::Sound},
+                             {.type = Type::Flag, .name = "Loop"_text, .key = "loop", .box = Box::YesNo, .choices = "no yes"_choices},
+                             {.type = Type::After, .name = "Called"_text, .key = "as", .box = Box::Channel, .label = "Name to stop it by"_text},
+                             {.type = Type::After, .name = "Fade in"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade in (seconds)"_text},
+                             {.type = Type::After, .name = "Volume"_text, .key = "volume", .box = Box::Volume, .hint = "100%"}};
 
-constexpr Slot kVoiceSlots[]{{.type = Type::Word, .name = "Voice", .box = Box::Sound, .label = "Voice file"},
-                             {.type = Type::Flag, .name = "Text follows it", .box = Box::Sync, .choices = "usual sync no_sync", .label = "Text in time with it"},
-                             {.type = Type::After, .name = "Volume", .key = "volume", .box = Box::Volume, .hint = "100%"}};
+const Slot kVoiceSlots[]{{.type = Type::Word, .name = "Voice"_text, .box = Box::Sound, .label = "Voice file"_text},
+                             {.type = Type::Flag, .name = "Text follows it"_text, .box = Box::Sync, .choices = "usual sync no_sync"_choices, .label = "Text in time with it"_text},
+                             {.type = Type::After, .name = "Volume"_text, .key = "volume", .box = Box::Volume, .hint = "100%"}};
 
-constexpr Slot kStopSlots[]{{.type = Type::Word, .name = "Called", .box = Box::Channel, .hint = "All", .only = "stop_sound", .label = "Sound's name"},
-                            {.type = Type::After, .name = "Fade out", .key = "fade", .box = Box::Seconds, .hint = "At once", .label = "Fade out (seconds)"}};
+const Slot kStopSlots[]{{.type = Type::Word, .name = "Called"_text, .box = Box::Channel, .hint = "All"_hint, .only = "stop_sound", .label = "Sound's name"_text},
+                            {.type = Type::After, .name = "Fade out"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade out (seconds)"_text}};
 
-constexpr Slot kWaitSlots[]{{.type = Type::Word, .name = "Seconds", .box = Box::Seconds, .hint = "Until a click", .seconds = true}};
-constexpr Slot kMoveSlots[]{{.type = Type::Word, .name = "Who", .box = Box::Shown, .label = "Character or image"},
-                            {.type = Type::After, .name = "To", .key = "to", .box = Box::Place, .group = "Where to", .label = "Place"},
-                            {.type = Type::Option, .name = "Height", .key = "y", .box = Box::Down, .hint = "As it is", .label = "Up or down"},
-                            {.type = Type::Option, .name = "Layer", .key = "layer", .box = Box::Layer, .hint = "As it is"},
-                            {.type = Type::Option, .name = "Zoom", .key = "zoom", .box = Box::Zoom, .hint = "As it is", .group = "Look"},
-                            {.type = Type::Option, .name = "Opacity", .key = "opacity", .box = Box::Opacity, .hint = "As it is"},
-                            {.type = Type::Option, .name = "Turn", .key = "rotate", .box = Box::Rotation, .hint = "As it is", .label = "Rotation"},
-                            {.type = Type::Option, .name = "Flip", .key = "flip", .box = Box::YesNoSame, .choices = "same yes no", .labels = "As it is|Flipped|Not flipped"},
-                            {.type = Type::Option, .name = "Tint", .key = "tint", .box = Box::Colour, .hint = "As it is"},
-                            {.type = Type::After, .name = "Over", .key = "over", .box = Box::Seconds, .hint = "From Settings", .seconds = true, .group = "Movement", .label = "Duration (seconds)"},
-                            {.type = Type::Option, .name = "Ease", .key = "ease", .box = Box::Easing, .choices = kEases, .label = "Easing"},
-                            {.type = Type::Flag, .name = "The story waits", .key = "and wait", .box = Box::YesNo, .choices = "no yes", .label = "Story waits for it"}};
+const Slot kWaitSlots[]{{.type = Type::Word, .name = "Seconds"_text, .box = Box::Seconds, .hint = "Until a click"_hint, .seconds = true}};
 
-constexpr Slot kShakeSlots[]{{.type = Type::Word, .name = "Colour", .box = Box::Colour, .hint = "From Settings", .only = "flash", .label = "Flash colour"},
-                             {.type = Type::Option, .name = "Strength", .key = "strength", .box = Box::Pixels, .hint = "From Settings", .only = "shake"},
-                             {.type = Type::After, .name = "For", .key = "for", .box = Box::Seconds, .hint = "From Settings", .seconds = true, .label = "Duration (seconds)"}};
+const Slot kEffectSlots[]{{.type = Type::Words, .name = "Effects"_text, .box = Box::Effects, .choices = "grayscale sepia invert blur pixelate noise glitch none"_choices},
+                              {.type = Type::Option, .name = "Amount"_text, .key = "amount", .box = Box::Percent, .hint = "100%", .label = "Strength"_text},
+                              {.type = Type::After, .name = "Fade"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade in (seconds)"_text},
+                              {.type = Type::After, .name = "Just for"_text, .key = "for", .box = Box::Seconds, .hint = "Until turned off"_hint, .seconds = true, .label = "Duration (seconds)"_text}};
 
-constexpr Slot kEffectSlots[]{{.type = Type::Words, .name = "Effects", .box = Box::Effects, .choices = "grayscale sepia invert blur pixelate noise glitch none"},
-                              {.type = Type::Option, .name = "Amount", .key = "amount", .box = Box::Percent, .hint = "100%", .label = "Strength"},
-                              {.type = Type::After, .name = "Fade", .key = "fade", .box = Box::Seconds, .hint = "At once", .label = "Fade in (seconds)"},
-                              {.type = Type::After, .name = "Just for", .key = "for", .box = Box::Seconds, .hint = "Until turned off", .seconds = true, .label = "Duration (seconds)"}};
+const Slot kWeatherSlots[]{{.type = Type::Word, .name = "Weather"_text, .box = Box::WeatherKind, .choices = "rain snow petals leaves embers"_choices, .label = "Kind"_text},
+                               {.type = Type::Option, .name = "Amount"_text, .key = "amount", .box = Box::Percent, .hint = "100%", .group = "Look"_group},
+                               {.type = Type::Option, .name = "Speed"_text, .key = "speed", .box = Box::Speed, .hint = "1"},
+                               {.type = Type::Option, .name = "Wind"_text, .key = "wind", .box = Box::Wind, .hint = "None"_hint},
+                               {.type = Type::Option, .name = "Colour"_text, .key = "color", .box = Box::Colour, .label = "Tint"_text},
+                               {.type = Type::Option, .name = "Image"_text, .key = "image", .box = Box::Picture},
+                               {.type = Type::Option, .name = "Behind people"_text, .key = "behind", .box = Box::YesNo, .choices = "no yes"_choices, .label = "Behind characters"_text},
+                               {.type = Type::After, .name = "Fade in"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade in (seconds)"_text}};
 
-constexpr Slot kWeatherSlots[]{{.type = Type::Word, .name = "Weather", .box = Box::WeatherKind, .choices = "rain snow petals leaves embers", .label = "Kind"},
-                               {.type = Type::Option, .name = "Amount", .key = "amount", .box = Box::Percent, .hint = "100%", .group = "Look"},
-                               {.type = Type::Option, .name = "Speed", .key = "speed", .box = Box::Speed, .hint = "1"},
-                               {.type = Type::Option, .name = "Wind", .key = "wind", .box = Box::Wind, .hint = "None"},
-                               {.type = Type::Option, .name = "Colour", .key = "color", .box = Box::Colour, .label = "Tint"},
-                               {.type = Type::Option, .name = "Image", .key = "image", .box = Box::Picture},
-                               {.type = Type::Option, .name = "Behind people", .key = "behind", .box = Box::YesNo, .choices = "no yes", .label = "Behind characters"},
-                               {.type = Type::After, .name = "Fade in", .key = "fade", .box = Box::Seconds, .hint = "At once", .label = "Fade in (seconds)"}};
+const Slot kCameraSlots[]{{.type = Type::Option, .name = "Animation"_text, .key = "animation", .box = Box::Animation, .hint = "None"_hint,
+                           .suggest = "none:stops the one it has"_suggest, .group = "Animations"_group},
+                          {.type = Type::After, .name = "Animation now"_text, .key = "with", .box = Box::Animation, .suggest = "none:back to normal"_suggest},
+                          {.type = Type::Flag, .name = "The story waits"_text, .key = "and wait", .box = Box::YesNo, .choices = "no yes"_choices, .label = "Story waits for it"_text}};
 
-constexpr Slot kCameraSlots[]{{.type = Type::Flag, .name = "Back to normal", .key = "reset", .box = Box::YesNo, .choices = "no yes", .label = "Reset"},
-                              {.type = Type::Option, .name = "Zoom", .key = "zoom", .box = Box::Zoom, .group = "View"},
-                              {.type = Type::Option, .name = "Across", .key = "x", .box = Box::Across, .label = "Looks at (across)"},
-                              {.type = Type::Option, .name = "Height", .key = "y", .box = Box::Down, .label = "Looks at (up or down)"},
-                              {.type = Type::Option, .name = "Turn", .key = "rotate", .box = Box::Rotation, .label = "Rotation"},
-                              {.type = Type::After, .name = "Over", .key = "over", .box = Box::Seconds, .hint = "At once", .seconds = true, .group = "Movement", .label = "Duration (seconds)"},
-                              {.type = Type::Option, .name = "Ease", .key = "ease", .box = Box::Easing, .choices = kEases, .label = "Easing"},
-                              {.type = Type::Flag, .name = "The story waits", .key = "and wait", .box = Box::YesNo, .choices = "no yes", .label = "Story waits for it"}};
+const Slot kMovieSlots[]{{.type = Type::Word, .name = "Movie"_text, .box = Box::Movie},
+                             {.type = Type::Flag, .name = "Loop"_text, .key = "loop", .box = Box::YesNo, .choices = "no yes"_choices},
+                             {.type = Type::Option, .name = "Can be skipped"_text, .key = "skip", .box = Box::YesNo, .choices = "yes no"_choices, .label = "Skippable"_text},
+                             {.type = Type::After, .name = "Volume"_text, .key = "volume", .box = Box::Volume, .hint = "100%"}};
 
-constexpr Slot kMovieSlots[]{{.type = Type::Word, .name = "Movie", .box = Box::Movie},
-                             {.type = Type::Flag, .name = "Loop", .key = "loop", .box = Box::YesNo, .choices = "no yes"},
-                             {.type = Type::Option, .name = "Can be skipped", .key = "skip", .box = Box::YesNo, .choices = "yes no", .label = "Skippable"},
-                             {.type = Type::After, .name = "Volume", .key = "volume", .box = Box::Volume, .hint = "100%"}};
+const Slot kScreenSlots[]{{.type = Type::Word, .name = "Screen"_text, .box = Box::Screen}};
+const Slot kNotifySlots[]{{.type = Type::Text, .name = "Message"_text, .rich = true}};
+const Slot kTextboxSlots[]{{.type = Type::Word, .name = "Screen"_text, .box = Box::Screen, .hint = "say", .only = "textbox", .label = "Textbox screen"_text},
+                               {.type = Type::Word, .name = "Screen"_text, .box = Box::Screen, .hint = "All"_hint, .only = "hide_textbox", .label = "Textbox screen"_text}};
 
-constexpr Slot kScreenSlots[]{{.type = Type::Word, .name = "Screen", .box = Box::Screen}};
-constexpr Slot kNotifySlots[]{{.type = Type::Text, .name = "Message", .rich = true}};
-constexpr Slot kTextboxSlots[]{{.type = Type::Word, .name = "Screen", .box = Box::Screen, .hint = "say", .only = "textbox", .label = "Textbox screen"},
-                               {.type = Type::Word, .name = "Screen", .box = Box::Screen, .hint = "All", .only = "hide_textbox", .label = "Textbox screen"}};
+const Slot kChapterSlots[]{{.type = Type::Text, .name = "Title"_text, .key = "quoted", .box = Box::Text}};
+const Slot kUnlockSlots[]{{.type = Type::Word, .name = "Name"_text, .box = Box::Record}};
+const Slot kAskSlots[]{{.type = Type::Word, .name = "Variable"_text, .box = Box::Variable, .label = "Answer goes in"_text},
+                           {.type = Type::Text, .name = "Question"_text, .key = "quoted", .box = Box::Text},
+                           {.type = Type::Option, .name = "To start with"_text, .key = "default", .box = Box::Text, .hint = "None"_hint, .label = "Default answer"_text},
+                           {.type = Type::Option, .name = "Longest"_text, .key = "max", .box = Box::Count, .hint = "None"_hint, .label = "Most letters"_text}};
 
-constexpr Slot kChapterSlots[]{{.type = Type::Text, .name = "Title", .key = "quoted", .box = Box::Text}};
-constexpr Slot kUnlockSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Record}};
-constexpr Slot kAskSlots[]{{.type = Type::Word, .name = "Variable", .box = Box::Variable, .label = "Answer goes in"},
-                           {.type = Type::Text, .name = "Question", .key = "quoted", .box = Box::Text},
-                           {.type = Type::Option, .name = "To start with", .key = "default", .box = Box::Text, .hint = "None", .label = "Default answer"},
-                           {.type = Type::Option, .name = "Longest", .key = "max", .box = Box::Count, .hint = "None", .label = "Most letters"}};
-
-constexpr CommandForm kForms[]{
+const CommandForm kForms[]{
     {StoryEditor::Kind::Jump, "jump call", "Jump|Call (and come back)", kJumpSlots},
     {StoryEditor::Kind::End, "end return", "End of the story|Back to the call", {}},
     {StoryEditor::Kind::Music, "music", "", kMusicSlots},
@@ -164,8 +142,6 @@ constexpr CommandForm kForms[]{
     {StoryEditor::Kind::Voice, "voice", "", kVoiceSlots},
     {StoryEditor::Kind::Stop, "stop_music stop_sound stop_voice stop_weather", "Music|Sound|Voice|Weather", kStopSlots, "Stops"},
     {StoryEditor::Kind::Wait, "wait", "", kWaitSlots},
-    {StoryEditor::Kind::Move, "move", "", kMoveSlots},
-    {StoryEditor::Kind::Shake, "shake flash", "Shake|Flash", kShakeSlots, "Effect"},
     {StoryEditor::Kind::Effect, "effect", "", kEffectSlots},
     {StoryEditor::Kind::Weather, "weather", "", kWeatherSlots},
     {StoryEditor::Kind::Camera, "camera", "", kCameraSlots},
@@ -184,29 +160,29 @@ constexpr CommandForm kForms[]{
 
 // Characters' and other definitions' forms (the same parts as commands' forms; the line starts with
 // the kind's word).
-constexpr Slot kCharacterSlots[]{
-    {.type = Type::Word, .name = "Name", .box = Box::Name},
-    {.type = Type::Option, .name = "Image", .key = "image", .box = Box::Base, .label = "Image name"}, // (empty: the name, in lower case: see showConfigValues)
-    {.type = Type::Option, .name = "Colour", .key = "color", .box = Box::Colour, .hint = "Default", .label = "Name colour"},
-    {.type = Type::Option, .name = "Words' colour", .key = "text_color", .box = Box::Colour, .hint = "Default", .label = "Text colour"},
-    {.type = Type::Option, .name = "Lines appear", .key = "reveal", .box = Box::Reveal, .choices = "usual letter word line", .group = "Lines", .label = "Text appears"},
-    {.type = Type::Option, .name = "Textbox", .key = "textbox", .box = Box::Screen, .hint = "say"},
-    {.type = Type::Option, .name = "Voices", .key = "voices", .box = Box::VoiceFolder, .hint = "None",
-     .suggest = "yes:audio/voices/ and its name|no", .group = "Voice", .label = "Voice files"},
-    {.type = Type::Option, .name = "Made-up voice", .key = "babble", .box = Box::Babble, .hint = "None"},
-    {.type = Type::Option, .name = "Its speed", .key = "babble_speed", .box = Box::Speed, .hint = "From Settings", .label = "Made-up voice speed"},
-    {.type = Type::Option, .name = "Typing sound", .key = "blip", .box = Box::Sound, .hint = "None"},
-    {.type = Type::Option, .name = "Blinks", .key = "blink", .box = Box::YesNoSettings, .choices = "usual yes no", .group = "Blinking and talking"},
-    {.type = Type::Option, .name = "Blinks every", .key = "blink_every", .box = Box::Seconds, .hint = "From Settings", .label = "Seconds between blinks"},
-    {.type = Type::Option, .name = "Mouth moves", .key = "talk", .box = Box::Talk, .choices = "usual yes voice no"},
-    {.type = Type::Option, .name = "Mouth's speed", .key = "talk_speed", .box = Box::PerSecond, .hint = "From Settings", .label = "Mouth speed"},
-    {.type = Type::Option, .name = "Face", .key = "face", .box = Box::Picture, .hint = "None", .suggest = "yes:its image's name and _face|no",
-     .group = "Face", .label = "Image"},
-    {.type = Type::Option, .name = "Face's side", .key = "face_side", .box = Box::Side, .choices = "left right", .label = "Side"},
-    {.type = Type::Option, .name = "Face copies", .key = "face_sync", .box = Box::FaceCopies, .choices = "expression blink talk", .commas = true, .label = "Copies from stage"},
-    {.type = Type::Option, .name = "Face flipped", .key = "face_flip", .box = Box::YesNo, .choices = "no yes", .label = "Flipped"},
-    {.type = Type::Option, .name = "Face blinks", .key = "face_blink", .box = Box::YesNoSame, .choices = "same yes no", .labels = "As on stage|Yes|No", .label = "Blinks"},
-    {.type = Type::Option, .name = "Face's mouth", .key = "face_talk", .box = Box::FaceTalk, .choices = "same yes voice no", .label = "Mouth"}};
+const Slot kCharacterSlots[]{
+    {.type = Type::Word, .name = "Name"_text, .box = Box::Name},
+    {.type = Type::Option, .name = "Image"_text, .key = "image", .box = Box::Base, .label = "Image name"_text}, // (empty: the name, in lower case: see showConfigValues)
+    {.type = Type::Option, .name = "Colour"_text, .key = "color", .box = Box::Colour, .hint = "Default"_hint, .label = "Name colour"_text},
+    {.type = Type::Option, .name = "Words' colour"_text, .key = "text_color", .box = Box::Colour, .hint = "Default"_hint, .label = "Text colour"_text},
+    {.type = Type::Option, .name = "Lines appear"_text, .key = "reveal", .box = Box::Reveal, .choices = "usual letter word line"_choices, .group = "Lines"_group, .label = "Text appears"_text},
+    {.type = Type::Option, .name = "Textbox"_text, .key = "textbox", .box = Box::Screen, .hint = "say"},
+    {.type = Type::Option, .name = "Voices"_text, .key = "voices", .box = Box::VoiceFolder, .hint = "None"_hint,
+     .suggest = "yes:audio/voices/ and its name|no"_suggest, .group = "Voice"_group, .label = "Voice files"_text},
+    {.type = Type::Option, .name = "Made-up voice"_text, .key = "babble", .box = Box::Babble, .hint = "None"_hint},
+    {.type = Type::Option, .name = "Its speed"_text, .key = "babble_speed", .box = Box::Speed, .hint = "From Settings"_hint, .label = "Made-up voice speed"_text},
+    {.type = Type::Option, .name = "Typing sound"_text, .key = "blip", .box = Box::Sound, .hint = "None"_hint},
+    {.type = Type::Option, .name = "Blinks"_text, .key = "blink", .box = Box::YesNoSettings, .choices = "usual yes no"_choices, .group = "Blinking and talking"_group},
+    {.type = Type::Option, .name = "Blinks every"_text, .key = "blink_every", .box = Box::Seconds, .hint = "From Settings"_hint, .label = "Seconds between blinks"_text},
+    {.type = Type::Option, .name = "Mouth moves"_text, .key = "talk", .box = Box::Talk, .choices = "usual yes voice no"_choices},
+    {.type = Type::Option, .name = "Mouth's speed"_text, .key = "talk_speed", .box = Box::PerSecond, .hint = "From Settings"_hint, .label = "Mouth speed"_text},
+    {.type = Type::Option, .name = "Face"_text, .key = "face", .box = Box::Picture, .hint = "None"_hint, .suggest = "yes:its image's name and _face|no"_suggest,
+     .group = "Face"_group, .label = "Image"_text},
+    {.type = Type::Option, .name = "Face's side"_text, .key = "face_side", .box = Box::Side, .choices = "left right"_choices, .label = "Side"_text},
+    {.type = Type::Option, .name = "Face copies"_text, .key = "face_sync", .box = Box::FaceCopies, .choices = "expression blink talk"_choices, .commas = true, .label = "Copies from stage"_text},
+    {.type = Type::Option, .name = "Face flipped"_text, .key = "face_flip", .box = Box::YesNo, .choices = "no yes"_choices, .label = "Flipped"_text},
+    {.type = Type::Option, .name = "Face blinks"_text, .key = "face_blink", .box = Box::YesNoSame, .choices = "same yes no"_choices, .labels = "As on stage|Yes|No"_labels, .label = "Blinks"_text},
+    {.type = Type::Option, .name = "Face's mouth"_text, .key = "face_talk", .box = Box::FaceTalk, .choices = "same yes voice no"_choices, .label = "Mouth"_text}};
 
 CommandForm definitionForm(std::string_view kind) {
     if (kind == "character") return {StoryEditor::Kind::Other, "character", "", kCharacterSlots};
@@ -214,7 +190,7 @@ CommandForm definitionForm(std::string_view kind) {
     return {StoryEditor::Kind::Other, it != std::end(kDefinitionKinds) ? it->kind : kind, "", it != std::end(kDefinitionKinds) ? it->slots : std::span<const Slot>{}};
 }
 
-constexpr std::pair<std::string_view, std::string_view> kAtlasParts[]{{"expressions", "Expressions"}, {"eyes", "Eyes"}, {"mouth", "Mouth"}}; // (each, and what the form calls it)
+const std::pair<std::string_view, ToolsText> kAtlasParts[]{{"expressions", "Expressions"}, {"eyes", "Eyes"}, {"mouth", "Mouth"}}; // (each, and what the form calls it)
 
 bool appliesTo(const Slot& s, std::string_view verb) {
     return s.only.empty() || std::ranges::contains(wordsOf(s.only), verb);
@@ -238,7 +214,7 @@ std::vector<StoryEditor::Field> formFields(const CommandForm& f, std::string_vie
     using Field = StoryEditor::Field;
     const auto [verb, w] = verbOf(f, t);
     std::vector<Field> out;
-    if (wordsOf(f.verbs).size() > 1) out.push_back({.name = "What", .value = verb, .label = std::string(f.what), .choices = std::string(f.verbs), .labels = std::string(f.labels)});
+    if (wordsOf(f.verbs).size() > 1) out.push_back({.name = "What"_text, .value = verb, .label = std::string(f.what), .choices = std::string(f.verbs), .labels = std::string(f.labels)});
     std::vector<std::pair<std::string_view, std::string>> values; // by slot name (two slots can share one, for different verbs)
     auto set = [&](const Slot& s, std::string v) { values.emplace_back(s.name, std::move(v)); };
     auto matches = [&](std::size_t i, std::string_view words) { // the words at i
@@ -325,7 +301,7 @@ std::vector<StoryEditor::Field> formFields(const CommandForm& f, std::string_vie
                        .suggest = std::string(s.suggest), .rich = s.rich, .group = std::string(s.group)});
         if (!s.label.empty()) out.back().label = std::string(s.label);
     }
-    if (!more.empty()) out.push_back({.name = "More", .value = joined(more), .hidden = true});
+    if (!more.empty()) out.push_back({.name = "More"_text, .value = joined(more), .hidden = true});
     return out;
 }
 
@@ -343,6 +319,7 @@ const StoryEditor::BoxKind& StoryEditor::kindOf(Box box) {
         {.box = Box::Name},
         {.box = Box::Picture, .pick = Pick::PicturesOrColors, .wheel = true, .pictures = true, .wide = true}, // (a picture, or a colour: the square and the wheel, the pictures under it)
         {.box = Box::PictureFile, .pick = Pick::PictureFiles, .pictures = true, .wide = true},
+        {.box = Box::Shape, .pick = Pick::Pictures, .pictures = true, .wide = true},
         {.box = Box::Colour, .pick = Pick::Colors, .wheel = true},
         {.box = Box::Sound, .pick = Pick::Sounds, .listen = true, .wide = true},
         {.box = Box::Movie, .pick = Pick::Movies, .wide = true},
@@ -364,79 +341,78 @@ const StoryEditor::BoxKind& StoryEditor::kindOf(Box box) {
         {.box = Box::VoiceFolder, .pick = Pick::VoiceFolders, .wide = true},
         {.box = Box::Control, .pick = Pick::Controls},
         {.box = Box::Base, .pick = Pick::Bases, .wide = true},
-        {.box = Box::Language, .suggest = languageList(), .wide = true},
+        {.box = Box::Language, .suggest = ToolsSuggestions(languageList()), .wide = true}, // (the languages' names: not the tools' own)
         {.box = Box::Across, .suggest = kAcross},
         {.box = Box::Down, .suggest = kDown},
         {.box = Box::Layer, .suggest = kLayers},
         {.box = Box::Speed, .suggest = kSpeeds},
-        {.box = Box::Zoom, .suggest = "50%:half its size|100%:its size|150%|200%:twice its size", .percent = true},
-        {.box = Box::Opacity, .suggest = "0%:unseen|25%|50%|75%|100%:fully seen", .percent = true},
-        {.box = Box::Volume, .suggest = "0%:silent|50%|100%", .percent = true},
-        {.box = Box::Percent, .suggest = "50%:half|100%:as it is|150%|200%:double", .percent = true},
-        {.box = Box::Rotation, .suggest = "-90|-45|0:straight|45|90|180"},
-        {.box = Box::Seconds, .suggest = "0.25|0.5|1|2"},
+        {.box = Box::Zoom, .suggest = "50%:half its size|100%:its size|150%|200%:twice its size"_suggest, .percent = true},
+        {.box = Box::Opacity, .suggest = "0%:unseen|25%|50%|75%|100%:fully seen"_suggest, .percent = true},
+        {.box = Box::Wipe, .suggest = "0%:none of it|50%:half of it|100%:all of it"_suggest, .percent = true},
+        {.box = Box::Volume, .suggest = "0%:silent|50%|100%"_suggest, .percent = true},
+        {.box = Box::Percent, .suggest = "50%:half|100%:as it is|150%|200%:double"_suggest, .percent = true},
+        {.box = Box::Rotation, .suggest = "-90|-45|0:straight|45|90|180"_suggest},
+        {.box = Box::Seconds, .suggest = "0.25|0.5|1|2"_suggest},
         {.box = Box::Pixels},
         {.box = Box::Count},
         {.box = Box::Number},
         {.box = Box::PerSecond},
-        {.box = Box::LineSpacing, .suggest = "1:single|1.2|1.5:one and a half|2:double"},
-        {.box = Box::TextSpeed, .suggest = "0:at once|10:slow|25|45|80:fast"},
-        {.box = Box::Pause, .suggest = "click:until a click|0.5:half a second|1:a second|2:two seconds"},
-        {.box = Box::Wind, .suggest = "-1:to the left|-0.5|0.5|1:to the right"},
-        {.box = Box::WidthHeight, .suggest = "1280 720|1920 1080|1600 900|2560 1440|1024 768|800 600"},
-        {.box = Box::Point, .suggest = "0 0|8 8|16 16"},
-        {.box = Box::FontStyle, .suggest = "Regular|Bold|Italic|Bold Italic"},
-        {.box = Box::Babble, .suggest = "high|medium|low|deep|no"},
-        {.box = Box::VariableValue, .suggest = "yes|no|0|1"},
-        {.box = Box::Action, .suggest = actionGroupList()},
-        {.box = Box::ScreenAction, .suggest = actionKindList("screen")},
-        {.box = Box::VariableAction, .suggest = actionKindList("variable")},
-        {.box = Box::StoryAction, .suggest = actionKindList("story")},
-        {.box = Box::SoundAction, .suggest = actionKindList("sound")},
-        {.box = Box::SaveAction, .suggest = actionKindList("saves")},
-        {.box = Box::SettingAction, .suggest = actionKindList("settings")},
-        {.box = Box::GalleryAction, .suggest = actionKindList("gallery")},
-        {.box = Box::ContainerFit, .choices = "box parts", .labels = "Fills its box|As big as its biggest part"},
-        {.box = Box::Change, .suggest = kStepKindList},
-        {.box = Box::Playing, .suggest = "music:the music|sound:looping sounds|voice:the voice"},
-        {.box = Box::KeySlot, .suggest = "1:the first|2:the second|pad:its controller button"},
-        {.box = Box::SaveMode, .suggest = "save:saving|load:loading"},
-        {.box = Box::TimedTransition, .suggest = "dissolve 0.25|fade 0.5|wipe 0.5|slide 0.5|none:at once"},
-        {.box = Box::YesNo, .choices = "yes no", .labels = "Yes|No"},
-        {.box = Box::YesNoStyle, .choices = "inherit yes no", .labels = "From its base style|Yes|No"},
-        {.box = Box::YesNoSettings, .choices = "usual yes no", .labels = "From Settings|Yes|No"},
-        {.box = Box::YesNoSame, .choices = "same yes no", .labels = "As it is|Yes|No"},
-        {.box = Box::Easing, .choices = "inout linear in out", .labels = "Smoothly|Evenly|Speeding up|Slowing down"},
+        {.box = Box::LineSpacing, .suggest = "1:single|1.2|1.5:one and a half|2:double"_suggest},
+        {.box = Box::TextSpeed, .suggest = "0:at once|10:slow|25|45|80:fast"_suggest},
+        {.box = Box::Pause, .suggest = "click:until a click|0.5:half a second|1:a second|2:two seconds"_suggest},
+        {.box = Box::Wind, .suggest = "-1:to the left|-0.5|0.5|1:to the right"_suggest},
+        {.box = Box::WidthHeight, .suggest = "1280 720|1920 1080|1600 900|2560 1440|1024 768|800 600"_suggest},
+        {.box = Box::Point, .suggest = "0 0|8 8|16 16"_suggest},
+        {.box = Box::FontStyle, .suggest = "Regular|Bold|Italic|Bold Italic"_suggest},
+        {.box = Box::Babble, .suggest = "high|medium|low|deep|no"_suggest},
+        {.box = Box::VariableValue, .suggest = "yes|no|0|1"_suggest},
+        {.box = Box::Action, .suggest = ToolsSuggestions(actionGroupList())},
+        {.box = Box::ScreenAction, .suggest = ToolsSuggestions(actionKindList("screen"))},
+        {.box = Box::VariableAction, .suggest = ToolsSuggestions(actionKindList("variable"))},
+        {.box = Box::StoryAction, .suggest = ToolsSuggestions(actionKindList("story"))},
+        {.box = Box::SoundAction, .suggest = ToolsSuggestions(actionKindList("sound"))},
+        {.box = Box::SaveAction, .suggest = ToolsSuggestions(actionKindList("saves"))},
+        {.box = Box::SettingAction, .suggest = ToolsSuggestions(actionKindList("settings"))},
+        {.box = Box::GalleryAction, .suggest = ToolsSuggestions(actionKindList("gallery"))},
+        {.box = Box::ContainerFit, .choices = "box parts"_choices, .labels = "Fills its box|As big as its biggest part"_labels},
+        {.box = Box::Playing, .suggest = "music:the music|sound:looping sounds|voice:the voice"_suggest},
+        {.box = Box::KeySlot, .suggest = "1:the first|2:the second|pad:its controller button"_suggest},
+        {.box = Box::SaveMode, .suggest = "save:saving|load:loading"_suggest},
+        {.box = Box::YesNo, .choices = "yes no"_choices, .labels = "Yes|No"_labels},
+        {.box = Box::YesNoStyle, .choices = "inherit yes no"_choices, .labels = "From its base style|Yes|No"_labels},
+        {.box = Box::YesNoSettings, .choices = "usual yes no"_choices, .labels = "From Settings|Yes|No"_labels},
+        {.box = Box::YesNoSame, .choices = "same yes no"_choices, .labels = "As it is|Yes|No"_labels},
+        {.box = Box::Easing, .choices = "inout linear in out bounce spring overshoot"_choices,
+         .labels = "Smoothly|Evenly|Speeding up|Slowing down|Bouncing|Wobbling|Overshooting"_labels},
+        {.box = Box::Plays, .choices = "once loop times"_choices, .labels = "Once|Looping|A number of times"_labels},
         {.box = Box::Condition, .pick = Pick::Conditions},
         {.box = Box::SettingChoice}, // (the list is the setting's own: the Settings tab's box for it, as a list)
         {.box = Box::GameLanguage, .pick = Pick::Languages},
-        {.box = Box::Transition, .choices = "usual none fade dissolve wipe slide", .labels = "From Settings|At once|Fade|Dissolve|Wipe|Slide"},
-        {.box = Box::Fading, .choices = "none fade", .labels = "At once|Fade"},
-        {.box = Box::Fit, .choices = "contain cover stretch original", .labels = "All of it shows|It fills the part|Stretched|Its own size"},
-        {.box = Box::Reveal, .choices = "usual letter word line", .labels = "From Settings|A letter at a time|A word|A line"},
-        {.box = Box::Talk, .choices = "usual yes voice no", .labels = "From Settings|Yes|With a voice|No"},
-        {.box = Box::ImageFilter, .choices = "smooth pixel", .labels = "Smooth|Sharp pixels"},
-        {.box = Box::SkipHold, .choices = "ctrl shift alt none", .labels = "Ctrl|Shift|Alt|None"},
-        {.box = Box::WindowFill, .choices = "fit integer stretch fill", .labels = "Fit|Whole pixels|Stretch|Fill"},
-        {.box = Box::Mouths, .choices = "always voice never", .labels = "Always|With a voice|Never"},
-        {.box = Box::Sync, .choices = "usual sync no_sync", .labels = "From Settings|Yes|No"},
-        {.box = Box::Side, .choices = "left right", .labels = "Left|Right"},
-        {.box = Box::FaceCopies, .choices = "expression blink talk", .labels = "Expression|Blinks|Mouth"},
-        {.box = Box::FaceTalk, .choices = "same yes voice no", .labels = "As on stage|Moves|With a voice|Still"},
-        {.box = Box::Align, .choices = "inherit left center right", .labels = "From its base style|Left|Centre|Right"},
-        {.box = Box::VAlign, .choices = "inherit top center bottom", .labels = "From its base style|Top|Centre|Bottom"},
-        {.box = Box::Operation, .choices = "nothing + - * /", .labels = "Nothing more|Plus|Minus|Times|Divided by"},
-        {.box = Box::Joiner, .choices = "nothing and or", .labels = "Nothing more|And|Or"},
-        {.box = Box::ShowHide, .choices = "show hide", .labels = "Show|Hide"},
-        {.box = Box::Visibility, .choices = "hidden locked", .labels = "Hidden|Locked"},
-        {.box = Box::SetVerb, .choices = "set add subtract toggle", .labels = "Set to|Add|Subtract|Toggle"},
-        {.box = Box::Sent, .choices = "to_player by_player", .labels = "To the player|By the player"},
-        {.box = Box::Anchor, .choices = "center top bottom", .labels = "The middle|The top|The bottom"},
-        {.box = Box::Repeat, .choices = "no across down both", .labels = "No|Across|Down|Both ways"},
-        {.box = Box::Scroll, .choices = "no left right up down", .labels = "No|Left|Right|Up|Down"},
-        {.box = Box::Effects, .choices = "grayscale sepia invert blur pixelate noise glitch none", .labels = "Grayscale|Sepia|Invert|Blur|Pixelate|Noise|Glitch|None"},
-        {.box = Box::WeatherKind, .choices = "rain snow petals leaves embers", .labels = "Rain|Snow|Petals|Leaves|Embers"},
-        {.box = Box::Edges, .choices = "show cut fade", .labels = "Show what's past them|Cut it off|Fade it out"},
+        {.box = Box::Fit, .choices = "contain cover stretch original"_choices, .labels = "All of it shows|It fills the part|Stretched|Its own size"_labels},
+        {.box = Box::Reveal, .choices = "usual letter word line"_choices, .labels = "From Settings|A letter at a time|A word|A line"_labels},
+        {.box = Box::Talk, .choices = "usual yes voice no"_choices, .labels = "From Settings|Yes|With a voice|No"_labels},
+        {.box = Box::ImageFilter, .choices = "smooth pixel"_choices, .labels = "Smooth|Sharp pixels"_labels},
+        {.box = Box::SkipHold, .choices = "ctrl shift alt none"_choices, .labels = "Ctrl|Shift|Alt|None"_labels},
+        {.box = Box::WindowFill, .choices = "fit integer stretch fill"_choices, .labels = "Fit|Whole pixels|Stretch|Fill"_labels},
+        {.box = Box::Mouths, .choices = "always voice never"_choices, .labels = "Always|With a voice|Never"_labels},
+        {.box = Box::Sync, .choices = "usual sync no_sync"_choices, .labels = "From Settings|Yes|No"_labels},
+        {.box = Box::Side, .choices = "left right"_choices, .labels = "Left|Right"_labels},
+        {.box = Box::FaceCopies, .choices = "expression blink talk"_choices, .labels = "Expression|Blinks|Mouth"_labels},
+        {.box = Box::FaceTalk, .choices = "same yes voice no"_choices, .labels = "As on stage|Moves|With a voice|Still"_labels},
+        {.box = Box::Align, .choices = "inherit left center right"_choices, .labels = "From its base style|Left|Centre|Right"_labels},
+        {.box = Box::VAlign, .choices = "inherit top center bottom"_choices, .labels = "From its base style|Top|Centre|Bottom"_labels},
+        {.box = Box::Operation, .choices = "nothing + - * /"_choices, .labels = "Nothing more|Plus|Minus|Times|Divided by"_labels},
+        {.box = Box::Joiner, .choices = "nothing and or"_choices, .labels = "Nothing more|And|Or"_labels},
+        {.box = Box::ShowHide, .choices = "show hide"_choices, .labels = "Show|Hide"_labels},
+        {.box = Box::Visibility, .choices = "hidden locked"_choices, .labels = "Hidden|Locked"_labels},
+        {.box = Box::SetVerb, .choices = "set add subtract toggle"_choices, .labels = "Set to|Add|Subtract|Toggle"_labels},
+        {.box = Box::Sent, .choices = "to_player by_player"_choices, .labels = "To the player|By the player"_labels},
+        {.box = Box::Anchor, .choices = "center top bottom"_choices, .labels = "The middle|The top|The bottom"_labels},
+        {.box = Box::Repeat, .choices = "no across down both"_choices, .labels = "No|Across|Down|Both ways"_labels},
+        {.box = Box::Scroll, .choices = "no left right up down"_choices, .labels = "No|Left|Right|Up|Down"_labels},
+        {.box = Box::Effects, .choices = "grayscale sepia invert blur pixelate noise glitch none"_choices, .labels = "Greyscale|Sepia|Invert|Blur|Pixelate|Noise|Glitch|None"_labels},
+        {.box = Box::WeatherKind, .choices = "rain snow petals leaves embers"_choices, .labels = "Rain|Snow|Petals|Leaves|Embers"_labels},
+        {.box = Box::Edges, .choices = "show cut fade"_choices, .labels = "Show what's past them|Cut it off|Fade it out"_labels},
     };
     const auto it = std::ranges::find(kinds, box, &BoxKind::box);
     return it != std::end(kinds) ? *it : kinds[0];
@@ -468,7 +444,7 @@ std::string percentText(std::string_view value) {
     if (v.empty() || v.ends_with('%')) return std::string(v);
     const auto n = parseNumber(v);
     if (!n) return std::string(v); // (a variable, or words)
-    const float percent = v.contains('.') || *n <= 1.0f ? *n * 100.0f : *n; // (a fraction, as it used to be written; else a percent already)
+    const float percent = v.contains('.') || *n <= 1.0f ? *n * 100.0f : *n; // (a fraction, as scripts may write it; else a percent already)
     return toString(number(percent)) + "%";
 }
 
@@ -604,7 +580,7 @@ std::string inSingleQuotes(const std::string& v) { return isQuoted(v) && !v.cont
 
 // A value's fields: a box with what it can be (a variable, yes, no, a number, a random number...), and
 // for a random number the lowest and highest it can be. Named `name`, `name from` and `name to`.
-constexpr std::string_view kValueSuggest = "random:a random number|yes|no|0|1";
+const ToolsSuggestions kValueSuggest = "random:a random number|yes|no|0|1";
 
 std::optional<std::pair<std::string, std::string>> randomOf(std::string_view term) {
     term = trim(term);
@@ -619,8 +595,8 @@ void addValueFields(std::vector<StoryEditor::Field>& out, const std::string& nam
                     Box box, const std::vector<std::string>& variables, bool asWritten = false) {
     if (const auto r = randomOf(term)) {
         out.push_back({.name = name, .value = "random", .label = std::string(label), .box = box, .suggest = std::string(kValueSuggest)});
-        out.push_back({.name = name + " from", .value = r->first, .label = "From", .box = Box::Count});
-        out.push_back({.name = name + " to", .value = r->second, .label = "To", .box = Box::Count});
+        out.push_back({.name = name + " from", .value = r->first, .label = "From"_text, .box = Box::Count});
+        out.push_back({.name = name + " to", .value = r->second, .label = "To"_text, .box = Box::Count});
         return;
     }
     out.push_back({.name = name, .value = asWritten ? std::string(term) : shown(term, variables), .label = std::string(label), .box = box,
@@ -651,8 +627,8 @@ void addSumFields(std::vector<StoryEditor::Field>& out, const std::string& name,
     }
     for (std::size_t i = 0; i < sum->terms.size(); ++i) {
         const std::string n = numbered(name, i);
-        addValueFields(out, n, i == 0 ? label : "Value", hint, sum->terms[i], Box::Variable, variables);
-        out.push_back({.name = n + " then", .value = i < sum->ops.size() ? sum->ops[i] : "nothing", .label = "Then", .box = Box::Operation, .choices = "nothing + - * /"});
+        addValueFields(out, n, i == 0 ? label : std::string_view("Value"_text), hint, sum->terms[i], Box::Variable, variables);
+        out.push_back({.name = n + " then", .value = i < sum->ops.size() ? sum->ops[i] : "nothing", .label = "Then"_text, .box = Box::Operation, .choices = "nothing + - * /"_choices});
     }
 }
 
@@ -686,7 +662,7 @@ struct Check {
 };
 
 constexpr std::string_view kComparisons = "yes no is is_not is_at_least is_at_most is_more_than is_less_than";
-constexpr std::string_view kComparisonLabels = "yes|no|equal to|not equal to|at least|at most|more than|less than";
+const ToolsLabels kComparisonLabels = "yes|no|equal to|not equal to|at least|at most|more than|less than";
 Check checkOf(std::string_view clause) {
     const auto w = rawWords(trim(clause));
     static constexpr std::pair<std::string_view, std::string_view> symbols[]{
@@ -790,12 +766,13 @@ std::vector<std::string> actionsOf(std::string_view text) {
 // group's: its word, what the list says it does; a setting's name), and what comes after the word
 // (what the third box asks for, and what it lists; none: nothing more).
 struct ActionGroup {
-    std::string_view word, about;
-    Box box;                      // the kinds of this group: their box's kind (None: one kind, with no box for it)
-    std::string_view how = "How"; // what the form calls that box
+    std::string_view word;
+    ToolsText about;
+    Box box;               // the kinds of this group: their box's kind (None: one kind, with no box for it)
+    ToolsText how = "How"; // what the form calls that box
 };
 
-constexpr ActionGroup kActionGroups[]{
+const ActionGroup kActionGroups[]{
     {"screen", "a screen", Box::ScreenAction},        {"story", "the story", Box::StoryAction},
     {"variable", "a variable", Box::VariableAction},  {"sound", "music and sounds", Box::SoundAction},
     {"saves", "the saves", Box::SaveAction},          {"gallery", "the gallery", Box::GalleryAction},
@@ -806,11 +783,13 @@ constexpr ActionGroup kActionGroups[]{
 };
 
 struct ActionKind {
-    std::string_view group, verb, about, detail;
+    std::string_view group, verb;
+    ToolsText about, detail;
     Box box; // what comes after its word: its box's kind
-    std::string_view hint, suggest, context;
-    constexpr ActionKind(std::string_view g, std::string_view v, std::string_view a, std::string_view d = {}, Box b = Box::None, std::string_view h = {},
-                         std::string_view s = {}, std::string_view c = {})
+    ToolsHint hint;
+    ToolsSuggestions suggest;
+    std::string_view context;
+    ActionKind(std::string_view g, std::string_view v, ToolsText a, ToolsText d = {}, Box b = Box::None, ToolsHint h = {}, ToolsSuggestions s = {}, std::string_view c = {})
         : group(g), verb(v), about(a), detail(d), box(b), hint(h), suggest(s), context(c) {}
 };
 
@@ -820,7 +799,7 @@ const std::vector<ActionKind>& actionKinds();
 
 bool percentSetting(std::string_view setting);         // (a player setting the Settings tab writes as a percent: "85%")
 std::string_view settingOptions(std::string_view setting); // (what it can go to, as a list: the Settings tab's box for it, each option named)
-constexpr ActionKind kActionKinds[]{
+const ActionKind kActionKinds[]{
     {"screen", "open", "open a screen", "Screen", Box::Screen},
     {"screen", "close", "close this screen"},
     {"screen", "show screen", "show a screen over the others", "Screen", Box::Screen},
@@ -866,7 +845,7 @@ constexpr ActionKind kActionKinds[]{
 
 // The window's size: the one setting with no row of its own in the Settings tab (a width and a height,
 // in two boxes).
-constexpr ActionKind kWindowSizeKind{"settings", "setting window_size", "The window's width and height, in pixels", "Width", Box::Pixels};
+const ActionKind kWindowSizeKind{"settings", "setting window_size", "The window's width and height, in pixels", "Width", Box::Pixels};
 
 // What the group's box calls a kind: its word, or a setting's name alone ("setting vsync": vsync).
 std::string_view kindWord(const ActionKind& a) { return a.verb.starts_with("setting ") ? a.verb.substr(8) : a.verb; }
@@ -1250,9 +1229,6 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
         for (std::string& p : defined("position"))
             if (!std::ranges::contains(out, lower(p))) out.push_back(std::move(p));
         break;
-    case Pick::Transitions:
-        out = {"fade", "dissolve", "wipe", "slide", "none"};
-        break;
     case Pick::Scenes:
         for (const Scene& s : scenes_) out.push_back(s.name);
         break;
@@ -1326,170 +1302,200 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
 }
 
 std::string_view StoryEditor::kindName(Kind kind) {
-    static constexpr std::string_view names[]{"Line",   "Character", "Background", "Choice", "Option", "If",      "Else",    "Set",
-                                              "Jump",   "End",       "Music",      "Sound",  "Voice",  "Stop",    "Wait",    "Move",
-                                              "Shake",  "Effect",    "Weather",    "Camera", "Movie",  "Screen",  "Notify",  "Textbox",
-                                              "New page", "Together", "Chapter",   "Unlock", "Message", "Phone",  "Ask",     "Game",
-                                              "Note",     "Command"};
+    static const std::array<std::string_view, 33> names{"Line"_text,     "Character"_text, "Background"_text, "Choice"_text, "Option"_text, "If"_text,
+                                                        "Else"_text,     "Set"_text,       "Jump"_text,       "End"_text,    "Music"_text,  "Sound"_text,
+                                                        "Voice"_text,    "Stop"_text,      "Wait"_text,       "Effect"_text,
+                                                        "Weather"_text,  "Camera"_text,    "Movie"_text,      "Screen"_text, "Notify"_text, "Textbox"_text,
+                                                        "New page"_text, "Together"_text,  "Chapter"_text,    "Unlock"_text, "Message"_text, "Phone"_text,
+                                                        "Ask"_text,      "Game"_text,      "Note"_text,       "Command"_text}; // (each said with tr() where it's shown)
     return names[static_cast<std::size_t>(kind)];
 }
 
 namespace {
 
-// An animation's step as written: what it changes (x=-10 opacity=40%), how long it takes and how it
-// moves (ease=), and back.
-struct StepWords {
-    std::string changes, seconds, ease;
-};
-
-StepWords stepOf(std::string_view line) {
-    StepWords out;
-    const auto w = rawWords(line);
-    std::vector<std::string> changes;
-    for (std::size_t i = 0; i < w.size(); ++i) {
-        const std::string word = lower(w[i]);
-        if ((word == "over" || word == "wait" || word == "for") && i + 1 < w.size()) out.seconds = w[++i];
-        else if (word.starts_with("ease=")) out.ease = word.substr(5);
-        else if (word != "seconds" && word != "second") changes.push_back(w[i]);
-    }
-    out.changes = joined(changes);
-    return out;
-}
-
-std::string stepLine(const std::string& changes, const std::string& seconds, const std::string& ease) {
-    const std::string time = seconds.empty() ? std::string{} : seconds + (seconds == "1" ? " second" : " seconds");
-    if (changes.empty()) return time.empty() ? std::string{} : "wait " + time;
-    return changes + (time.empty() ? "" : " over " + time) + (ease.empty() || ease == "inout" ? "" : " ease=" + ease);
-}
-
-// What a step changes, as its form calls it, and the values it often has: amounts as plain numbers, and places
-// on the screen from -1 to 1 like the stage's (home: its own place).
-struct StepKind {
-    std::string_view key, label;
-    Box box;                  // its box's kind (what it suggests, and how it's written)
-    std::string_view more;    // (values its box suggests besides its kind's)
-    std::string_view start;   // its value when it's picked
-};
-
-constexpr StepKind kStepKinds[]{
-    {"opacity", "Opacity", Box::Opacity, "", "100%"},
-    {"x", "Move across", Box::Across, "home:its own place|-2:just off the left|2:just off the right", "home"},
-    {"y", "Move up or down", Box::Down, "home:its own place|-2:just off the bottom|2:just off the top", "home"},
-    {"zoom", "Zoom", Box::Zoom, "", "100%"},
-    {"rotate", "Rotation", Box::Rotation, "", "0"},
-    {"color", "Colour", Box::Colour, "", "white"},
-    {"fade", "Fade to a colour", Box::Colour, "none:back from it", "black"}, // (the screen covered with it, as a screen's fade transition does)
-};
-
-const StepKind* stepKind(std::string_view keyOrLabel) {
-    const auto it = std::ranges::find_if(kStepKinds, [&](const StepKind& k) { return k.key == lower(keyOrLabel) || lower(k.label) == lower(keyOrLabel); });
-    return it != std::end(kStepKinds) ? &*it : nullptr;
-}
-
-// A step's changes (opacity=40% x=home) as pairs; an amount is shown as a percent, however it was written (0.4 is 40%).
-std::vector<std::pair<std::string, std::string>> stepChanges(std::string_view changes) {
-    std::vector<std::pair<std::string, std::string>> out;
-    for (const std::string& word : rawWords(changes)) {
-        const auto eq = word.find('=');
-        if (eq == npos || eq == 0) continue;
-        std::string key = lower(word.substr(0, eq)), value = unquote(word.substr(eq + 1));
-        if (const StepKind* kind = stepKind(key); kind && StoryEditor::kindOf(kind->box).percent) value = percentText(value);
-        out.emplace_back(std::move(key), std::move(value));
-    }
-    return out;
-}
-
-// A transition as written after "with": its kind, the picture a scene's wipe has the shape of, its
-// seconds and the colour it fades through (with fade 2 to white).
-struct WithWords {
-    std::string kind, shape, seconds, color;
-};
-
-WithWords transitionOf(const std::vector<std::string>& w, std::size_t& i) {
-    WithWords t;
-    if (i >= w.size() || lower(w[i]) != "with") return t;
-    ++i;
-    if (i < w.size()) t.kind = lower(w[i++]);
-    auto word = [&](std::string_view s) { return i < w.size() && lower(w[i]) == s; };
-    if (t.kind == "wipe" && i < w.size() && !parseNumber(w[i]) && !word("at") && !word("as") && !word("to") && !w[i].contains('='))
-        t.shape = w[i++];
-    auto seconds = [&] {
-        if (i < w.size() && parseNumber(w[i])) {
-            t.seconds = w[i++];
-            if (word("seconds") || word("second")) ++i;
+// `line` with the animation `from` called `to` wherever it's played by name: after "with" in a scene,
+// show, hide, open or camera command (open's "and close with" too), as a story line or as an action (in quotes
+// after action=, drop=, on_show= or on_hide=, or after another one there with ";"); and as the config
+// show_animation or hide_animation. (animation= and the other options: with the rest of the options.)
+std::string animationRenamed(std::string line, std::string_view from, std::string_view to) {
+    const std::string name = lower(from);
+    std::vector<std::size_t> starts{std::min(line.size(), line.find_first_not_of(' '))}; // (where each command begins)
+    bool quoted = false, actions = false;
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        if (quoted && line[i] == '\\') {
+            ++i;
+        } else if (line[i] == '"') {
+            quoted = !quoted;
+            actions = false;
+            if (quoted && i > 0 && line[i - 1] == '=') {
+                const std::size_t key = line.find_last_of(' ', i - 1) == npos ? 0 : line.find_last_of(' ', i - 1) + 1;
+                static constexpr std::array<std::string_view, 4> kActions{"action", "drop", "on_show", "on_hide"};
+                actions = std::ranges::contains(kActions, lower(line.substr(key, i - 1 - key)));
+                if (actions) starts.push_back(i + 1);
+            }
+        } else if (actions && line[i] == ';') {
+            starts.push_back(i + 1);
         }
-    };
-    seconds();
-    if (word("to") && i + 1 < w.size()) {
-        t.color = w[i + 1];
-        i += 2;
-    } else if (i < w.size() && parseColor(w[i])) {
-        t.color = w[i++];
     }
-    if (t.seconds.empty()) seconds(); // (with fade to white 2)
+    for (auto s = starts.rbegin(); s != starts.rend(); ++s) { // (the last first: renaming one leaves the places before it as they were)
+        const std::size_t end = std::min(line.size(), line.find_first_of(";\"", *s));
+        std::vector<std::pair<std::size_t, std::size_t>> words; // (where each of its words is, and how long)
+        for (std::size_t i = *s; i < end;) {
+            while (i < end && line[i] == ' ') ++i;
+            std::size_t j = i;
+            while (j < end && line[j] != ' ') ++j;
+            if (j > i) words.emplace_back(i, j - i);
+            i = j;
+        }
+        auto word = [&](std::size_t k) { return lower(line.substr(words[k].first, words[k].second)); };
+        std::vector<std::size_t> named; // (the words that are it)
+        if (const std::string verb = words.empty() ? std::string{} : word(0); verb == "scene" || verb == "show" || verb == "hide" || verb == "open" || verb == "camera") {
+            for (std::size_t k = 1; k + 1 < words.size(); ++k)
+                if (word(k) == "with" && word(k + 1) == name) named.push_back(k + 1);
+        } else if (verb == "config" && words.size() >= 3 && (word(1) == "show_animation" || word(1) == "hide_animation") && word(2) == name) {
+            named.push_back(2);
+        }
+        for (auto k = named.rbegin(); k != named.rend(); ++k) line.replace(words[*k].first, words[*k].second, to);
+    }
+    return line;
+}
+
+// Seconds as an animation's lines write them: "1 second", "0.5 seconds".
+std::string secondsWords(float seconds) {
+    const std::string n = secondsText(seconds);
+    return n + (n == "1" ? " second" : " seconds");
+}
+
+// An animation's line's usual easing, for what it changes: a fade's is even, as a screen's fade is.
+std::string_view usualEase(std::string_view key) { return key == "fade" ? "linear" : "inout"; }
+
+} // namespace
+
+std::size_t StoryEditor::timelineRow(std::string_view key) {
+    const auto it = std::ranges::find_if(kTimelineRows, [&](const TimelineRow& row) { return std::ranges::contains(wordsOf(row.keys), key); });
+    return static_cast<std::size_t>(it - std::begin(kTimelineRows));
+}
+
+StoryEditor::Timeline StoryEditor::timelineOf(std::span<const std::string> steps) {
+    Timeline t;
+    float ended = 0.0f; // (where the line before ended)
+    for (const std::string& line : steps) {
+        const std::string_view text = trim(splitNote(line).first);
+        if (text.empty()) continue;
+        const auto w = rawWords(text);
+        std::vector<Bar> bars;
+        std::optional<float> start, seconds;
+        std::string ease, shape;
+        auto number = [&](std::size_t& i) -> std::optional<float> { // (the number at i, and "seconds" after it)
+            const auto n = i < w.size() ? parseNumber(w[i]) : std::nullopt;
+            if (!n) return std::nullopt;
+            if (i + 1 < w.size() && (lower(w[i + 1]) == "seconds" || lower(w[i + 1]) == "second")) ++i;
+            return std::max(0.0f, *n);
+        };
+        if (lower(w.front()) == "wait") {
+            std::size_t i = 1;
+            const auto n = number(i);
+            if (!n || i + 1 != w.size()) t.ok = false;
+            else ended += *n, t.length = std::max(t.length, ended);
+            continue;
+        }
+        for (std::size_t i = 0; i < w.size(); ++i) {
+            const std::string word = lower(w[i]);
+            if (word == "over" || word == "for") {
+                if (const auto n = number(++i)) seconds = *n;
+                else t.ok = false;
+            } else if (word == "from") {
+                const auto a = number(++i);
+                const auto b = a && i + 1 < w.size() && lower(w[i + 1]) == "to" ? number(i += 2) : std::nullopt;
+                if (!a || !b || *b < *a) t.ok = false;
+                else start = *a, seconds = *b - *a;
+            } else if (word == "at") {
+                if (const auto n = number(++i)) start = *n, seconds = 0.0f;
+                else t.ok = false;
+            } else if (word.starts_with("ease=")) {
+                ease = word.substr(5);
+            } else if (word.starts_with("shape=")) { // (the line's wipe's)
+                shape = unquote(std::string_view(w[i]).substr(6));
+            } else if (const auto eq = word.find('='); eq != npos && eq > 0 && timelineRow(word.substr(0, eq)) < kTimelineRowCount) {
+                bars.push_back({.key = word.substr(0, eq), .value = unquote(std::string_view(w[i]).substr(eq + 1))});
+            } else {
+                t.ok = false;
+            }
+        }
+        const auto wipe = std::ranges::find(bars, std::string("wipe"), &Bar::key);
+        if (bars.empty() || (!shape.empty() && wipe == bars.end())) {
+            t.ok = false;
+            continue;
+        }
+        if (!shape.empty()) wipe->shape = shape;
+        for (Bar& b : bars) {
+            b.start = start.value_or(ended);
+            b.seconds = seconds.value_or(0.0f);
+            b.ease = ease.empty() ? std::string(usualEase(b.key)) : ease;
+            t.bars.push_back(std::move(b));
+        }
+        ended = start.value_or(ended) + seconds.value_or(0.0f);
+        t.length = std::max(t.length, ended);
+    }
+    std::ranges::stable_sort(t.bars, {}, &Bar::start);
     return t;
 }
 
-} // namespace
+std::vector<std::string> StoryEditor::stepsOf(const Timeline& timeline) {
+    std::vector<Bar> bars = timeline.bars; // (in the order they begin, then end; together on a line when they begin and end together, eased alike)
+    std::ranges::stable_sort(bars, [](const Bar& a, const Bar& b) {
+        if (!sameMoment(a.start, b.start)) return a.start < b.start;
+        if (!sameMoment(a.seconds, b.seconds)) return a.seconds < b.seconds;
+        if (a.ease != b.ease) return a.ease < b.ease;
+        return timelineRow(a.key) < timelineRow(b.key);
+    });
+    std::vector<std::string> out;
+    float ended = 0.0f, last = 0.0f; // (where the line before ended; where the last change ends)
+    for (std::size_t i = 0; i < bars.size();) {
+        const Bar& b = bars[i];
+        std::string changes;
+        bool usual = true;
+        std::size_t j = i;
+        for (; j < bars.size() && sameMoment(bars[j].start, b.start) && sameMoment(bars[j].seconds, b.seconds) && bars[j].ease == b.ease; ++j) {
+            changes += std::format("{}{}={}", changes.empty() ? "" : " ", bars[j].key, written(bars[j].value));
+            if (!bars[j].shape.empty()) changes += " shape=" + written(bars[j].shape);
+            usual = usual && bars[j].ease == usualEase(bars[j].key);
+        }
+        std::string timing;
+        if (sameMoment(b.start, ended)) timing = b.seconds > 0.0f ? " over " + secondsWords(b.seconds) : "";
+        else if (b.seconds <= 0.0f) timing = " at " + secondsWords(b.start);
+        else timing = std::format(" from {} to {}", secondsText(b.start), secondsWords(b.start + b.seconds));
+        out.push_back(changes + timing + (usual ? "" : " ease=" + b.ease));
+        ended = b.start + b.seconds;
+        last = std::max(last, ended);
+        i = j;
+    }
+    if (timeline.length > last + 0.005f) out.push_back("wait " + secondsWords(timeline.length - ended)); // (time after the last change, before it ends)
+    return out;
+}
 
 std::vector<StoryEditor::Field> StoryEditor::fields(const Row& row) const {
     const std::string_view t = row.text;
     if (const CommandForm* form = formOf(row.kind)) {
         auto out = formFields(*form, t);
-        if (row.kind == Kind::Screen && lower(firstWord(t)) == "open") { // how it comes and goes: with fade [SECONDS] [to COLOUR] [then fade ...] [and close with fade ...]
+        if (row.kind == Kind::Screen && lower(firstWord(t)) == "open") { // with NAME [and close with NAME]: what it plays this time, as it opens and closes
             const auto more = std::ranges::find(out, std::string("More"), &Field::name);
-            auto w = more != out.end() ? rawWords(more->value) : std::vector<std::string>{};
+            const auto w = more != out.end() ? rawWords(more->value) : std::vector<std::string>{};
             std::size_t i = 0;
-            auto fadesAt = [&](std::size_t& at) { // a fade, and the ones after it
-                std::vector<WithWords> fades{transitionOf(w, at)};
-                while (fades.front().kind == "fade" && at + 1 < w.size() && lower(w[at]) == "then" && lower(w[at + 1]) == "fade") {
-                    w[at] = "with"; // (read like the first)
-                    fades.push_back(transitionOf(w, at));
-                }
-                return fades;
-            };
-            const std::vector<WithWords> opening = fadesAt(i);
-            if (!opening.front().kind.empty() && opening.front().kind != "fade") return out; // (kept as it is: a mistake)
-            std::vector<WithWords> closing{WithWords{}};
-            if (i + 2 < w.size() && lower(w[i]) == "and" && lower(w[i + 1]) == "close" && lower(w[i + 2]) == "with") {
-                std::size_t at = i + 2;
-                if (auto fades = fadesAt(at); fades.front().kind == "fade") closing = std::move(fades), i = at;
-            }
+            std::string opening, closing;
+            if (i + 1 < w.size() && lower(w[i]) == "with") opening = w[i + 1], i += 2;
+            if (i + 3 < w.size() && lower(w[i]) == "and" && lower(w[i + 1]) == "close" && lower(w[i + 2]) == "with") closing = w[i + 3], i += 4;
             if (more != out.end() && i == w.size()) out.erase(more);
             else if (more != out.end()) more->value = joined(std::vector(w.begin() + static_cast<std::ptrdiff_t>(i), w.end()));
-            // Each fade: to its colour in half its time; the screen comes (or the story comes back) from the last one's.
-            auto addFades = [&](const std::vector<WithWords>& fades, const std::string& prefix, std::string_view group) { // (group: a heading that lasts)
-                const std::string kind = fades.front().kind.empty() ? std::string("none") : fades.front().kind;
-                out.push_back({.name = prefix + "Transition", .value = kind, .label = "Transition", .box = Box::Fading, .choices = "none fade", .labels = "At once|Fade", .group = std::string(group)});
-                if (kind != "fade") return;
-                for (std::size_t f = 0; f <= fades.size(); ++f) {
-                    const std::string n = f == 0 ? std::string() : std::format(" {}", f + 1);
-                    if (f > 0) out.push_back({.name = std::format("{}Then {}", prefix, f), .value = f < fades.size() ? "fade" : "none", .label = "Then",
-                                              .box = Box::Fading, .choices = "none fade", .labels = "Nothing more|Another fade"});
-                    if (f == fades.size()) break;
-                    out.push_back({.name = prefix + "Seconds" + n, .value = fades[f].seconds, .label = "Seconds", .box = Box::Seconds, .hint = "From Settings"});
-                    out.push_back({.name = prefix + "Through colour" + n, .value = fades[f].color, .label = "Fade colour", .box = Box::Colour, .hint = "black"});
-                }
-            };
-            addFades(opening, "", "When it opens");
-            addFades(closing, "Closing ", "When it closes");
+            out.push_back({.name = "Animation on open"_text, .value = opening, .box = Box::Animation, .hint = "Default"_hint, .suggest = "none:at once"_suggest,
+                           .group = "Animations"_group});
+            out.push_back({.name = "Animation on close"_text, .value = closing, .box = Box::Animation, .hint = "Default"_hint, .suggest = "none:at once"_suggest});
         }
         return out;
     }
     const auto w = rawWords(afterFirst(t));
     std::size_t i = 0;
     auto next = [&] { return i < w.size() ? w[i++] : std::string{}; };
-    // A transition's fields: how, and (unless it's none) how long, and for a scene the shape of a wipe
-    // and the colour a fade goes through.
-    auto addTransition = [](std::vector<Field>& out, const WithWords& tr, bool scene) {
-        const std::string kind = tr.kind.empty() ? std::string(scene ? "none" : "usual") : tr.kind;
-        if (scene) out.push_back({.name = "Transition", .value = kind, .box = Box::Transition, .choices = "none fade dissolve wipe slide", .group = "Transition"});
-        else out.push_back({.name = "Transition", .value = kind, .box = Box::Transition, .choices = "usual fade dissolve wipe slide none", .group = "Transition"});
-        if (kind == "none" || kind == "usual") return;
-        out.push_back({.name = "Seconds", .value = tr.seconds, .box = Box::Seconds, .hint = "From Settings"});
-        if (scene && kind == "wipe") out.push_back({.name = "Wipe's shape", .value = tr.shape, .label = "Wipe shape", .box = Box::Picture, .hint = "Default"});
-        if (scene && kind == "fade") out.push_back({.name = "Through colour", .value = tr.color, .label = "Fade colour", .box = Box::Colour, .hint = "black"});
-    };
     switch (row.kind) {
     case Kind::Line: {
         std::string speaker, expression, words;
@@ -1508,25 +1514,38 @@ std::vector<StoryEditor::Field> StoryEditor::fields(const Row& row) const {
         } else {
             words = unquote(t); // narration
         }
-        return {{.name = "Speaker", .value = speaker, .box = Box::Character},
-                {.name = "Expression", .value = expression, .box = Box::Expression, .context = speaker},
-                {.name = "Words", .value = words, .label = "Text", .rich = true}};
+        return {{.name = "Speaker"_text, .value = speaker, .box = Box::Character},
+                {.name = "Expression"_text, .value = expression, .box = Box::Expression, .context = speaker},
+                {.name = "Words"_text, .value = words, .label = "Text"_text, .rich = true}};
     }
-    case Kind::Background: {
-        std::vector<Field> out{{.name = "Image", .value = next(), .label = "Background", .box = Box::Picture}};
-        if (i < w.size() && lower(w[i]).starts_with("bottom=")) // (bottom=: a colour fading down to another, as one value: navy-black)
-            if (const std::string bottom = unquote(w[i++].substr(7)); !bottom.empty() && !out[0].value.contains('-')) out[0].value += "-" + bottom;
-        addTransition(out, transitionOf(w, i), true);
-        if (i < w.size()) out.push_back({.name = "More", .value = joined(w, i), .hidden = true});
+    case Kind::Background: { // scene IMAGE [bottom=COLOUR] [animation=NAME] [with NAME]
+        std::vector<std::string> words = w; // (its animation=NAME and with NAME, wherever they're written, have boxes of their own)
+        std::string animation, with;
+        if (const auto at = std::ranges::find_if(words, [](const std::string& s) { return lower(s).starts_with("animation="); }); at != words.end()) {
+            animation = unquote(std::string_view(*at).substr(10));
+            words.erase(at);
+        }
+        if (const auto at = std::ranges::find_if(words, [](const std::string& s) { return lower(s) == "with"; }); at != words.end() && at + 1 != words.end()) {
+            with = *(at + 1);
+            words.erase(at, at + 2);
+        }
+        std::size_t k = 0;
+        std::vector<Field> out{{.name = "Image"_text, .value = k < words.size() ? words[k++] : std::string{}, .label = "Background"_text, .box = Box::Picture},
+                               {.name = "Animation"_text, .value = animation, .box = Box::Animation, .hint = "None"_hint, .group = "Animations"_group},
+                               {.name = "Animation on show"_text, .value = with, .box = Box::Animation, .hint = "At once"_hint}};
+        if (k < words.size() && lower(words[k]).starts_with("bottom=")) // (bottom=: a colour fading down to another, as one value: navy-black)
+            if (const std::string bottom = unquote(words[k++].substr(7)); !bottom.empty() && !out[0].value.contains('-')) out[0].value += "-" + bottom;
+        if (k < words.size()) out.push_back({.name = "More"_text, .value = joined(words, k), .hidden = true});
         return out;
     }
     case Kind::Character: {
         const bool hide = lower(firstWord(t)) == "hide";
         std::string who = next(), expression, place, tag;
         std::vector<std::pair<std::string, std::string>> settings; // key=value
-        WithWords tr;
+        std::string with, waits = "no";
         std::vector<std::string> more;
-        if (!hide && i < w.size() && !w[i].contains('=') && lower(w[i]) != "at" && lower(w[i]) != "to" && lower(w[i]) != "with" && lower(w[i]) != "as")
+        if (!hide && i < w.size() && !w[i].contains('=') && lower(w[i]) != "at" && lower(w[i]) != "to" && lower(w[i]) != "with" && lower(w[i]) != "as" &&
+            lower(w[i]) != "and")
             expression = next();
         while (i < w.size()) {
             const std::string word = lower(w[i]);
@@ -1536,8 +1555,12 @@ std::vector<StoryEditor::Field> StoryEditor::fields(const Row& row) const {
             } else if (!hide && i + 1 < w.size() && word == "as") {
                 tag = w[i + 1];
                 i += 2;
-            } else if (word == "with") {
-                tr = transitionOf(w, i);
+            } else if (word == "with" && i + 1 < w.size()) {
+                with = w[i + 1];
+                i += 2;
+            } else if (word == "and" && i + 1 < w.size() && lower(w[i + 1]) == "wait") {
+                waits = "yes";
+                i += 2;
             } else if (const auto eq = word.find('='); !hide && eq != npos && eq > 0) {
                 const std::string key = word.substr(0, eq), value = unquote(std::string_view(w[i]).substr(eq + 1));
                 if (key == "x") place = value; // (the same as at)
@@ -1551,26 +1574,33 @@ std::vector<StoryEditor::Field> StoryEditor::fields(const Row& row) const {
             const auto it = std::ranges::find(settings, key, &std::pair<std::string, std::string>::first);
             return it != settings.end() ? it->second : std::string{};
         };
-        std::vector<Field> out{{.name = "Show or hide", .value = hide ? "hide" : "show", .label = "Action", .box = Box::ShowHide, .choices = "show hide"},
-                               {.name = "Who", .value = who, .label = "Character or image", .box = Box::Shown}};
+        std::vector<Field> out{{.name = "Show or hide"_text, .value = hide ? "hide" : "show", .label = "Action"_text, .box = Box::ShowHide, .choices = "show hide"_choices},
+                               {.name = "Who"_text, .value = who, .label = "Character or image"_text, .box = Box::Shown}};
         if (!hide) {
             const std::string flip = setting("flip");
-            out.insert(out.end(), {{.name = "Expression", .value = expression, .box = Box::Expression, .context = who},
-                                   {.name = "Place", .value = place, .box = Box::Place, .group = "Where"},
-                                   {.name = "Height", .value = setting("y"), .label = "Up or down", .box = Box::Down},
-                                   {.name = "Layer", .value = setting("layer"), .box = Box::Layer, .hint = "0"},
-                                   {.name = "Zoom", .value = percentText(setting("zoom")), .box = Box::Zoom, .hint = "100%", .group = "Look"},
-                                   {.name = "Opacity", .value = percentText(setting("opacity")), .box = Box::Opacity, .hint = "100%"},
-                                   {.name = "Turn", .value = setting("rotate"), .label = "Rotation", .box = Box::Rotation, .hint = "0"},
-                                   {.name = "Flip", .value = parseBool(flip).value_or(false) ? "yes" : "no", .box = Box::YesNo, .choices = "no yes"},
-                                   {.name = "Tint", .value = setting("tint"), .box = Box::Colour, .hint = "None"},
-                                   {.name = "Called", .value = tag, .label = "Name on stage", .box = Box::Name, .group = "Second copy"}});
+            out.insert(out.end(), {{.name = "Expression"_text, .value = expression, .box = Box::Expression, .context = who},
+                                   {.name = "Place"_text, .value = place, .box = Box::Place, .group = "Where"_group},
+                                   {.name = "Height"_text, .value = setting("y"), .label = "Up or down"_text, .box = Box::Down},
+                                   {.name = "Layer"_text, .value = setting("layer"), .box = Box::Layer, .hint = "0"},
+                                   {.name = "Zoom"_text, .value = percentText(setting("zoom")), .box = Box::Zoom, .hint = "100%", .group = "Look"_group},
+                                   {.name = "Opacity"_text, .value = percentText(setting("opacity")), .box = Box::Opacity, .hint = "100%"},
+                                   {.name = "Turn"_text, .value = setting("rotate"), .label = "Rotation"_text, .box = Box::Rotation, .hint = "0"},
+                                   {.name = "Flip"_text, .value = parseBool(flip).value_or(false) ? "yes" : "no", .box = Box::YesNo, .choices = "no yes"_choices},
+                                   {.name = "Tint"_text, .value = setting("tint"), .box = Box::Colour, .hint = "None"_hint},
+                                   {.name = "Animation"_text, .value = setting("animation"), .box = Box::Animation, .hint = "None"_hint,
+                                    .suggest = "none:stops the one it has"_suggest, .group = "Animations"_group},
+                                   {.name = "Animation on show"_text, .value = with, .box = Box::Animation, .hint = "From Settings"_hint, .suggest = "none:at once"_suggest},
+                                   {.name = "Story waits"_text, .value = waits, .label = "Story waits for it"_text, .box = Box::YesNo, .choices = "no yes"_choices},
+                                   {.name = "Called"_text, .value = tag, .label = "Name on stage"_text, .box = Box::Name, .group = "Second copy"_group}});
+        } else {
+            out.insert(out.end(), {{.name = "Animation on hide"_text, .value = with, .box = Box::Animation, .hint = "From Settings"_hint, .suggest = "none:at once"_suggest,
+                                    .group = "Animations"_group},
+                                   {.name = "Story waits"_text, .value = waits, .label = "Story waits for it"_text, .box = Box::YesNo, .choices = "no yes"_choices}});
         }
-        addTransition(out, tr, false);
         for (const auto& [key, value] : settings) // (the ones without a box)
-            if (key != "y" && key != "zoom" && key != "opacity" && key != "rotate" && key != "flip" && key != "layer" && key != "tint")
+            if (key != "y" && key != "zoom" && key != "opacity" && key != "rotate" && key != "flip" && key != "layer" && key != "tint" && key != "animation")
                 more.push_back(key + "=" + written(value));
-        if (!more.empty()) out.push_back({.name = "More", .value = joined(more), .hidden = true});
+        if (!more.empty()) out.push_back({.name = "More"_text, .value = joined(more), .hidden = true});
         return out;
     }
     case Kind::Choice: { // choice QUESTION [optional=yes] [screen=NAME] [for N seconds | for N lines] [return=no]
@@ -1591,21 +1621,21 @@ std::vector<StoryEditor::Field> StoryEditor::fields(const Row& row) const {
             }
             q.pop_back();
         }
-        std::vector<Field> out{{.name = "Question", .value = joined(q), .rich = true},
-                               {.name = "Can be passed", .value = optional, .label = "Optional", .box = Box::YesNo, .choices = "no yes", .group = "Choice"},
-                               {.name = "Time limit", .value = seconds, .label = "Time limit (seconds)", .box = Box::Seconds, .hint = "None"},
-                               {.name = "Up for lines", .value = lines, .label = "Stays up for (lines)", .box = Box::Count, .hint = "None"}};
-        if (!lines.empty()) out.push_back({.name = "Comes back", .value = returns, .label = "Returns after", .box = Box::YesNo, .choices = "yes no"});
-        out.push_back({.name = "On the screen", .value = screen, .label = "Screen", .box = Box::Screen, .hint = "choice"});
+        std::vector<Field> out{{.name = "Question"_text, .value = joined(q), .rich = true},
+                               {.name = "Can be passed"_text, .value = optional, .label = "Optional"_text, .box = Box::YesNo, .choices = "no yes"_choices, .group = "Choice"_group},
+                               {.name = "Time limit"_text, .value = seconds, .label = "Time limit (seconds)"_text, .box = Box::Seconds, .hint = "None"_hint},
+                               {.name = "Up for lines"_text, .value = lines, .label = "Stays up for (lines)"_text, .box = Box::Count, .hint = "None"_hint}};
+        if (!lines.empty()) out.push_back({.name = "Comes back"_text, .value = returns, .label = "Returns after"_text, .box = Box::YesNo, .choices = "yes no"_choices});
+        out.push_back({.name = "On the screen"_text, .value = screen, .label = "Screen"_text, .box = Box::Screen, .hint = "choice"});
         return out;
     }
     case Kind::Option: {
         const OptionParts o = optionParts(t);
-        std::vector<Field> out{{.name = "Text", .value = o.text, .rich = true}, {.name = "Goes to", .value = o.label, .label = "Jumps to", .box = Box::Scene, .hint = "None (its own lines)"}};
-        addCheckFields(out, "Only when", "Available when", "Always", o.condition, Box::Variable, variables());
-        out[2].group = "Availability";
-        if (!o.condition.empty()) out.push_back({.name = "Until then", .value = o.locked ? "locked" : "hidden", .box = Box::Visibility, .choices = "hidden locked"});
-        if (o.locked) out.push_back({.name = "What it needs", .value = o.note, .label = "Locked note", .box = Box::Text});
+        std::vector<Field> out{{.name = "Text"_text, .value = o.text, .rich = true}, {.name = "Goes to"_text, .value = o.label, .label = "Jumps to"_text, .box = Box::Scene, .hint = "None"_hint}};
+        addCheckFields(out, "Only when", "Available when"_text, "Always"_hint, o.condition, Box::Variable, variables());
+        out[2].group = "Availability"_group;
+        if (!o.condition.empty()) out.push_back({.name = "Until then"_text, .value = o.locked ? "locked" : "hidden", .box = Box::Visibility, .choices = "hidden locked"_choices});
+        if (o.locked) out.push_back({.name = "What it needs"_text, .value = o.note, .label = "Locked note"_text, .box = Box::Text});
         return out;
     }
     case Kind::If:
@@ -1614,7 +1644,7 @@ std::vector<StoryEditor::Field> StoryEditor::fields(const Row& row) const {
         if (row.kind == Kind::Else && lower(firstWord(t)) == "else") condition = lower(firstWord(condition)) == "if" ? afterFirst(condition) : std::string_view{};
         if (condition.ends_with(':')) condition.remove_suffix(1);
         std::vector<Field> out;
-        addCheckFields(out, "What", "Check", row.kind == Kind::Else ? "Otherwise" : "", condition, Box::Variable, variables());
+        addCheckFields(out, "What", "Check"_text, row.kind == Kind::Else ? std::string_view("Otherwise"_hint) : std::string_view{}, condition, Box::Variable, variables());
         return out;
     }
     case Kind::Set: { // set X to V | add V to X | subtract V from X | toggle X
@@ -1637,9 +1667,9 @@ std::vector<StoryEditor::Field> StoryEditor::fields(const Row& row) const {
             value = trim(rest.substr(0, at));
             variable = trim(rest.substr(at + (verb == "add" ? 4 : 6)));
         }
-        std::vector<Field> out{{.name = "Change", .value = verb, .label = "Action", .box = Box::SetVerb, .choices = "set add subtract toggle"},
-                               {.name = "Variable", .value = variable, .box = Box::Variable}};
-        if (verb != "toggle") addSumFields(out, "Value", "Value", "", value, variables());
+        std::vector<Field> out{{.name = "Change"_text, .value = verb, .label = "Action"_text, .box = Box::SetVerb, .choices = "set add subtract toggle"_choices},
+                               {.name = "Variable"_text, .value = variable, .box = Box::Variable}};
+        if (verb != "toggle") addSumFields(out, "Value", "Value"_text, "", value, variables());
         return out;
     }
     case Kind::Message: { // message NAME: text | message to NAME: text
@@ -1649,37 +1679,25 @@ std::vector<StoryEditor::Field> StoryEditor::fields(const Row& row) const {
         std::string words(colon == npos ? std::string_view{} : trim(rest.substr(colon + 1)));
         const bool mine = lower(firstWord(who)) == "to" && who.size() > 3;
         if (mine) who = trim(std::string_view(who).substr(3));
-        return {{.name = "Sent", .value = mine ? "by_player" : "to_player", .label = "Direction", .box = Box::Sent, .choices = "to_player by_player"},
-                {.name = "Who", .value = who, .label = "Contact", .box = Box::Character},
-                {.name = "Text", .value = unquote(words), .rich = true}};
+        return {{.name = "Sent"_text, .value = mine ? "by_player" : "to_player", .label = "Direction"_text, .box = Box::Sent, .choices = "to_player by_player"_choices},
+                {.name = "Who"_text, .value = who, .label = "Contact"_text, .box = Box::Character},
+                {.name = "Text"_text, .value = unquote(words), .rich = true}};
     }
     case Kind::Note:
-        return {{.name = "Note", .value = std::string(trim(t.substr(1))), .box = Box::Text}};
+        return {{.name = "Note"_text, .value = std::string(trim(t.substr(1))), .box = Box::Text}};
     default:
         break;
     }
-    return {{.name = "Line", .value = std::string(t), .box = Box::Text}};
+    return {{.name = "Line"_text, .value = std::string(t), .box = Box::Text}};
 }
 
 std::string StoryEditor::lineOf(Kind kind, const std::vector<Field>& f) const {
     auto value = [&](std::string_view name) { return fieldValue(f, name); };
     auto with = [](std::string_view word, const std::string& v) { return v.empty() ? std::string{} : std::format(" {}{}{}", word, word.empty() ? "" : " ", v); };
-    auto transition = [&] {
-        const std::string how = value("Transition");
-        if (how.empty() || how == "usual" || (how == "none" && value("Show or hide").empty())) return std::string{}; // (a scene's none: not written)
-        return " with " + how + with("", value("Wipe's shape")) + with("", value("Seconds")) + with("to", value("Through colour"));
-    };
     if (const CommandForm* form = formOf(kind)) {
-        const bool opens = kind == Kind::Screen && (value("What").empty() || value("What") == "open"); // (a screen opened, or closed, with fade)
-        auto fades = [&](const std::string& prefix) { // with fade [SECONDS] [to COLOUR] [then fade ...]
-            if (!opens || value(prefix + "Transition") != "fade") return std::string{};
-            std::string out = " with fade" + with("", value(prefix + "Seconds")) + with("to", value(prefix + "Through colour"));
-            for (int n = 2; value(std::format("{}Then {}", prefix, n - 1)) == "fade"; ++n)
-                out += " then fade" + with("", value(std::format("{}Seconds {}", prefix, n))) + with("to", value(std::format("{}Through colour {}", prefix, n)));
-            return out;
-        };
-        const std::string closing = fades("Closing ");
-        return formLine(*form, f) + fades("") + (closing.empty() ? std::string{} : " and close" + closing);
+        const bool opens = kind == Kind::Screen && (value("What").empty() || value("What") == "open"); // (a screen opened: with what it plays this time)
+        if (!opens) return formLine(*form, f);
+        return formLine(*form, f) + with("with", value("Animation on open")) + with("and close with", value("Animation on close"));
     }
     switch (kind) {
     case Kind::Line: {
@@ -1692,17 +1710,19 @@ std::string StoryEditor::lineOf(Kind kind, const std::vector<Field>& f) const {
         return std::format("{}: {}", prefix, words);
     }
     case Kind::Background:
-        return "scene " + value("Image") + transition() + with("", value("More"));
+        return "scene " + value("Image") + (value("Animation").empty() ? std::string{} : " animation=" + written(value("Animation"))) +
+               with("with", value("Animation on show")) + with("", value("More"));
     case Kind::Character: {
-        if (value("Show or hide") == "hide") return "hide " + value("Who") + transition() + with("", value("More"));
+        const std::string waits = value("Story waits") == "yes" ? " and wait" : "";
+        if (value("Show or hide") == "hide") return "hide " + value("Who") + with("with", value("Animation on hide")) + waits + with("", value("More"));
         std::string out = "show " + value("Who") + with("", value("Expression")) + with("at", value("Place"));
         for (const auto& [name, key] : {std::pair{"Height", "y"}, {"Zoom", "zoom"}, {"Opacity", "opacity"}, {"Turn", "rotate"}, {"Flip", "flip"},
-                                        {"Layer", "layer"}, {"Tint", "tint"}})
+                                        {"Layer", "layer"}, {"Tint", "tint"}, {"Animation", "animation"}})
             if (const std::string v = value(name); !v.empty() && !(key == std::string_view("flip") && v == "no")) {
                 const auto field = std::ranges::find(f, std::string_view(name), &Field::name);
                 out += std::format(" {}={}", key, written(field != f.end() && kindOf(field->box).percent ? percentText(v) : v));
             }
-        return out + with("as", value("Called")) + with("", value("More")) + transition();
+        return out + with("as", value("Called")) + with("", value("More")) + with("with", value("Animation on show")) + waits;
     }
     case Kind::Choice: {
         std::string out = "choice" + with("", value("Question"));
@@ -1756,41 +1776,47 @@ std::string StoryEditor::summary(const Row& row) const {
         if (it == f.end()) return std::string{};
         return it->rich ? withoutTags(it->value) : it->value;
     };
+    auto with = [&](std::string said, std::string_view field) { // (and the animation it plays as it comes or goes)
+        return v(field).empty() ? said : "{}, with {}"_tr(said, v(field));
+    };
+    if (row.kind == Kind::Camera) return v("Animation now").empty() ? v("Animation") : "with {}"_tr(v("Animation now")); // (what it plays now, else what it keeps playing)
     if (const CommandForm* form = formOf(row.kind)) { // the choice it makes, and what's in its places
         std::string out;
         if (const auto verbs = wordsOf(form->verbs); verbs.size() > 1) {
             const auto labels = wordsOf(form->labels, '|');
             const auto at = static_cast<std::size_t>(std::ranges::find(verbs, std::string_view(v("What"))) - verbs.begin());
-            out = at < labels.size() ? std::string(labels[at].substr(0, labels[at].find(" ("))) : v("What"); // ("Call", not "Call (and come back)")
-            if (out == kindName(row.kind)) out.clear();
+            const std::string_view label = at < labels.size() ? tr(labels[at]) : std::string_view{}; // (in the tools' language)
+            out = at < labels.size() ? std::string(label.substr(0, label.find(" ("))) : v("What"); // ("Call", not "Call (and come back)")
+            if (out == tr(kindName(row.kind))) out.clear();
         }
         for (const Slot& s : form->slots)
             if ((s.type == Type::Word || s.type == Type::Words || s.type == Type::Text) && appliesTo(s, v("What").empty() ? wordsOf(form->verbs).front() : v("What")))
                 if (const std::string value = v(s.name); !value.empty()) out += (out.empty() ? "" : " ") + value;
-        return out;
+        return with(std::move(out), "Animation on open");
     }
     switch (row.kind) {
     case Kind::Line:
         if (v("Speaker").empty()) return v("Words");
         return std::format("{}{}: {}", v("Speaker"), v("Expression").empty() ? "" : " (" + v("Expression") + ")", v("Words"));
     case Kind::Background:
-        return v("Image") + (v("Transition").empty() || v("Transition") == "usual" ? "" : v("Transition") == "none" ? ", at once" : ", with " + v("Transition"));
+        return with(v("Image"), "Animation on show");
     case Kind::Character:
-        if (v("Show or hide") == "hide") return "Hide " + v("Who");
-        return "Show " + v("Who") + (v("Expression").empty() ? "" : " (" + v("Expression") + ")") + (v("Place").empty() ? "" : ", at " + v("Place"));
+        if (v("Show or hide") == "hide") return with("Hide {}"_tr(v("Who")), "Animation on hide");
+        if (const std::string who = v("Who") + (v("Expression").empty() ? "" : " (" + v("Expression") + ")"); v("Place").empty()) return with("Show {}"_tr(who), "Animation on show");
+        else return with("Show {}, at {}"_tr(who, v("Place")), "Animation on show");
     case Kind::Option:
         return v("Text") + (v("Goes to").empty() ? "" : "  -> " + v("Goes to"));
     case Kind::If:
     case Kind::Else: {
         const std::string c = conditionFrom(f, "What", variables());
-        return row.kind == Kind::Else && c.empty() ? "Otherwise" : c;
+        return row.kind == Kind::Else && c.empty() ? "Otherwise"_tr() : c;
     }
     case Kind::Set:
         return lineOf(Kind::Set, f);
     case Kind::Message:
-        return std::format("{} {}: {}", v("Sent") == "by_player" ? "To" : "From", v("Who"), v("Text"));
+        return (v("Sent") == "by_player" ? "To {}: {}"_tr : "From {}: {}"_tr)(v("Who"), v("Text"));
     case Kind::Together:
-        return "These lines at once";
+        return "These lines at once"_tr();
     default:
         return f.empty() ? std::string{} : f.front().value;
     }
@@ -1827,34 +1853,22 @@ std::vector<StoryEditor::Field> StoryEditor::fields(std::string_view kind, const
                 return it != settings.end() ? it->second : std::string{};
             };
             const std::string n(partLabel);
+            static_cast<void>(std::array{"Eyes image"_text, "Eyes X"_text, "Eyes Y"_text, "Mouth image"_text, "Mouth X"_text, "Mouth Y"_text}); // (the labels made below, listed)
             out.push_back({.name = n, .value = names, .box = Box::Text});
             if (part == "expressions") continue;
             out.push_back({.name = n + "' image", .value = setting("image"), .label = n + " image", .box = Box::Picture});
             out.push_back({.name = n + "' x", .value = setting("x"), .label = n + " X", .box = Box::Pixels, .hint = "0"});
             out.push_back({.name = n + "' y", .value = setting("y"), .label = n + " Y", .box = Box::Pixels, .hint = "0"});
         }
-    if (kind == "animation") { // its steps: what each changes, how long it takes and how it moves (and one more, empty)
-        std::size_t n = 0;
-        for (std::size_t i = 1; i <= lines.size(); ++i) {
-            const StepWords step = i < lines.size() ? stepOf(lines[i]) : StepWords{};
-            const bool more = i == lines.size(); // (to add one)
-            const std::string name = std::format("Step {}", ++n);
-            // What it changes (a list), and to what (a list of the values it often has); "And" adds another.
-            const auto changes = stepChanges(step.changes);
-            for (std::size_t c = 0; c <= changes.size() && !(more && c > 0); ++c) {
-                const std::string cn = std::format("{} change {}", name, c + 1);
-                const StepKind* change = c < changes.size() ? stepKind(changes[c].first) : nullptr;
-                out.push_back({.name = cn, .value = change ? std::string(change->label) : std::string{}, .label = c > 0 ? std::string("And") : more && n > 1 ? std::string("Then") : name,
-                               .box = Box::Change, .hint = c > 0 ? "None" : "None (waits)"});
-                out.push_back({.name = cn + " was", .value = change ? std::string(change->key) : std::string{}, .hidden = true});
-                if (change)
-                    out.push_back({.name = cn + " to", .value = changes[c].second, .label = "To", .box = change->box, .suggest = std::string(change->more)});
-            }
-            out.push_back({.name = name + " seconds", .value = step.seconds, .label = "Duration (seconds)", .box = Box::Seconds, .hint = "0"});
-            if (!more)
-                out.push_back({.name = name + " ease", .value = step.ease.empty() ? std::string("inout") : step.ease, .label = "Easing",
-                               .box = Box::Easing, .choices = "inout linear in out"});
-        }
+    if (kind == "animation") { // how often it plays: once, again and again (loop), or a few times (loop 3 times)
+        const auto w = rawWords(lines.front());
+        std::string plays = "once", times;
+        for (std::size_t i = 2; i < w.size(); ++i)
+            if (lower(w[i]) == "loop") plays = "loop";
+            else if (parseNumber(w[i]) && plays == "loop") plays = "times", times = w[i];
+        std::erase_if(out, [](const Field& f) { return f.name == "More"; }); // (those words: these boxes')
+        out.push_back({.name = "Plays"_text, .value = plays, .box = Box::Plays});
+        if (plays == "times") out.push_back({.name = "Times"_text, .value = times, .label = "Number of times"_text, .box = Box::Count, .hint = "2"});
     }
     for (Field& f : out)
         if (f.box == Box::Record) f.context = "atlas";
@@ -1864,13 +1878,13 @@ std::vector<StoryEditor::Field> StoryEditor::fields(std::string_view kind, const
         const std::string does = at->value;
         at = out.erase(at);
         std::vector<Field> actions;
-        addActionFields(actions, "Does", "Action", "None", does, variables());
+        addActionFields(actions, "Does", "Action"_text, "None"_hint, does, variables());
         at = out.insert(at, actions.begin(), actions.end());
         at = std::ranges::find(out, std::string("Only when"), &Field::name);
         const std::string when = at->value;
         at = out.erase(at);
         std::vector<Field> checks;
-        addCheckFields(checks, "Only when", "Works when", "Always", when, Box::Condition, variables());
+        addCheckFields(checks, "Only when", "Works when"_text, "Always"_hint, when, Box::Condition, variables());
         out.insert(at, checks.begin(), checks.end());
     }
     return out;
@@ -1887,20 +1901,11 @@ std::vector<std::string> StoryEditor::linesOf(std::string_view kind, const std::
     std::vector<std::string> out{formLine(definitionForm(kind), filled)};
     auto with = [](const std::string& v) { return v.empty() ? v : " " + v; };
     if (kind == "font" && value("Name").empty()) out.front() = std::format("font \"{}\"", value("File")) + (value("Style").empty() ? "" : " " + value("Style"));
-    if (kind == "animation")
-        for (std::size_t n = 1; std::ranges::contains(fields, std::format("Step {} change 1", n), &Field::name); ++n) {
-            const std::string name = std::format("Step {}", n);
-            std::string changes;
-            for (std::size_t c = 1; std::ranges::contains(fields, std::format("{} change {}", name, c), &Field::name); ++c) {
-                const std::string cn = std::format("{} change {}", name, c);
-                const StepKind* change = stepKind(value(cn));
-                if (!change) continue;
-                std::string to = value(cn + " to");
-                if (value(cn + " was") != change->key || to.empty()) to = change->start; // (another change, or one just picked: its value starts again)
-                changes += std::format("{}{}={}", changes.empty() ? "" : " ", change->key, written(kindOf(change->box).percent ? percentText(to) : to));
-            }
-            if (std::string line = stepLine(changes, value(name + " seconds"), value(name + " ease")); !line.empty()) out.push_back(std::move(line));
-        }
+    if (kind == "animation") { // (its line only: the lines under it stay as they are)
+        const std::string plays = value("Plays"), times = value("Times");
+        if (plays == "loop") out.front() += " loop";
+        else if (plays == "times") out.front() += std::format(" loop {} {}", times.empty() || times == "0" ? "2" : times, times == "1" ? "time" : "times"); // (empty: twice)
+    }
     if (kind == "atlas")
         for (const auto& [part, partLabel] : kAtlasParts) {
             const std::string n(partLabel);
@@ -1953,7 +1958,7 @@ void StoryEditor::remember(const std::string& key) {
 void StoryEditor::write(std::size_t file) {
     const std::string text = joinedLines(files_[file].lines);
     const std::string path = root_ + files_[file].path;
-    if (!SDL_SaveFile(path.c_str(), text.data(), text.size())) problem_ = std::format("Can't save '{}': {}.", files_[file].path, SDL_GetError());
+    if (!SDL_SaveFile(path.c_str(), text.data(), text.size())) problem_ = "Can't save '{}': {}."_tr(files_[file].path, SDL_GetError());
     if (SDL_PathInfo info; SDL_GetPathInfo(path.c_str(), &info)) files_[file].modified = info.modify_time;
     ++version_;
 }
@@ -2463,6 +2468,12 @@ std::optional<std::string> StoryEditor::lineText(std::string_view path, std::siz
     return std::nullopt;
 }
 
+const std::vector<std::string>* StoryEditor::fileLines(std::string_view path) const {
+    for (const File& f : files_)
+        if (f.path == path) return &f.lines;
+    return nullptr;
+}
+
 bool StoryEditor::mentions(std::string_view word) const {
     const std::string low = lower(word);
     if (low.empty()) return false;
@@ -2485,7 +2496,7 @@ std::string StoryEditor::placeOf(std::size_t file, std::size_t line) const {
     for (const DefinitionKind& kind : kDefinitionKinds)
         for (const Definition& def : definitions(kind.kind))
             if (def.file == file && def.line <= line && line < std::max(def.end, def.line + 1)) return std::format("{} {}", kind.kind, def.name);
-    if (file == 0 && isSetting(line)) return "Settings";
+    if (file == 0 && isSetting(line)) return "Settings"_tr();
     return fileName(file) + ".vnscript";
 }
 
@@ -2685,7 +2696,7 @@ std::string assetRenamed(const std::string& line, std::string_view folder, const
         }
         const std::string plain = unquote(w);
         bool use = false;
-        if (images) use = (i == 1 && plain == name && (verb == "scene" || verb == "show" || verb == "hide" || verb == "move" || verb == "gallery" || verb == "image")) ||
+        if (images) use = (i == 1 && plain == name && (verb == "scene" || verb == "show" || verb == "hide" || verb == "gallery" || verb == "image")) ||
                           (i >= 2 && plain == name && word(i - 1) == "wipe" && word(i - 2) == "with") ||
                           (i == 2 && plain == name && verb == "config" && word(1) == "cursor");
         if (sounds) use = (i == 1 && plain == name && (verb == "music" || verb == "sound" || verb == "voice" || verb == "song")) ||
@@ -3280,6 +3291,7 @@ bool StoryEditor::renameDefinition(std::string_view kind, std::size_t index, con
         }
         std::string now = changed ? indent + joined(w) : line;
         if (kind == "picture") now = assetRenamed(now, "images/", d.name, name, bases);
+        if (kind == "animation") now = animationRenamed(now, from, name);
         if (kind == "tip") { // {tip NAME}words{/tip}
             const std::string tag = "{tip " + from + "}";
             for (std::size_t at = lower(now).find(tag); at != npos; at = lower(now).find(tag, at + 1)) now.replace(at, tag.size(), "{tip " + name + "}");
@@ -3399,7 +3411,7 @@ const std::vector<ActionKind>& actionKinds() {
                 settings = true;
                 for (const Setting& s : kSettings) { // (what each goes to: settingOptions(), once its box is asked for: the kinds of box aren't known yet here)
                     if (!s.name.starts_with("default.")) continue;
-                    out.emplace_back("settings", kept("setting " + std::string(s.name.substr(8))), s.help, "To", Box::SettingChoice);
+                    out.emplace_back("settings", kept("setting " + std::string(s.name.substr(8))), s.help, "To"_text, Box::SettingChoice);
                     if (s.name == "default.fullscreen") out.push_back(kWindowSizeKind);
                 }
             }
@@ -3595,11 +3607,11 @@ void addCheckFields(std::vector<StoryEditor::Field>& out, const std::string& nam
     for (std::size_t i = 0; i < checks.size(); ++i) {
         const Check& c = checks[i];
         const std::string n = numbered(name, i);
-        addValueFields(out, n, i == 0 ? label : "What", i == 0 ? hint : "", c.what, box, variables, true);
+        addValueFields(out, n, i == 0 ? label : std::string_view("What"_text), i == 0 ? hint : "", c.what, box, variables, true);
         if (c.what.empty() && i == 0) return;
-        out.push_back({.name = n + " is", .value = c.is, .label = "Is", .choices = std::string(kComparisons), .labels = std::string(kComparisonLabels)});
-        if (c.is != "yes" && c.is != "no") addValueFields(out, n + " value", "Value", "", c.value, box, variables);
-        out.push_back({.name = n + " also", .value = c.then.empty() ? "nothing" : c.then, .label = "Also", .box = Box::Joiner, .choices = "nothing and or"});
+        out.push_back({.name = n + " is", .value = c.is, .label = "Is"_text, .choices = std::string(kComparisons), .labels = std::string(kComparisonLabels)});
+        if (c.is != "yes" && c.is != "no") addValueFields(out, n + " value", "Value"_text, "", c.value, box, variables);
+        out.push_back({.name = n + " also", .value = c.then.empty() ? "nothing" : c.then, .label = "Also"_text, .box = Box::Joiner, .choices = "nothing and or"_choices});
     }
 }
 
@@ -3633,24 +3645,24 @@ void addActionFields(std::vector<StoryEditor::Field>& out, const std::string& na
         const auto [verb, rest] = list[i].empty() ? std::pair<std::string, std::string>{} : actionParts(list[i]);
         const ActionKind* kind = actionKind(verb);
         const ActionGroup* group = kind ? actionGroup(kind->group) : nullptr;
-        out.push_back({.name = n, .value = group ? std::string(group->word) : std::string{}, .label = i == 0 ? std::string(label) : "And then", .box = Box::Action,
+        out.push_back({.name = n, .value = group ? std::string(group->word) : std::string{}, .label = i == 0 ? std::string(label) : std::string("And then"_text), .box = Box::Action,
                        .hint = i == 0 ? std::string(hint) : std::string("None")});
         out.push_back({.name = n + " was", .value = verb, .hidden = true});
         if (group && group->box != Box::None)
             out.push_back({.name = n + " how", .value = std::string(kindWord(*kind)), .label = std::string(group->how), .box = group->box, .beside = true});
         if (group && group->word == "variable") { // (the variable, and the value it's set to or the amount: boxes of their own)
             const auto [var, val] = variableParts(verb, rest);
-            out.push_back({.name = n + " variable", .value = var, .label = "Variable", .box = Box::Variable, .beside = true});
+            out.push_back({.name = n + " variable", .value = var, .label = "Variable"_text, .box = Box::Variable, .beside = true});
             if (verb != "toggle")
-                out.push_back({.name = n + " value", .value = valueShown(val, variables), .label = verb == "set" ? "Value" : "Amount", .box = verb == "set" ? Box::VariableValue : Box::Number,
+                out.push_back({.name = n + " value", .value = valueShown(val, variables), .label = std::string(verb == "set" ? "Value"_text : "Amount"_text), .box = verb == "set" ? Box::VariableValue : Box::Number,
                                .beside = true});
         } else if (kind && kind->verb == kWindowSizeKind.verb) { // (a width and a height: boxes of their own)
             const auto words = rawWords(rest);
-            out.push_back({.name = n + " what", .value = words.empty() ? std::string{} : words[0], .label = "Width", .box = Box::Pixels, .beside = true});
-            out.push_back({.name = n + " height", .value = words.size() < 2 ? std::string{} : words[1], .label = "Height", .box = Box::Pixels, .beside = true});
+            out.push_back({.name = n + " what", .value = words.empty() ? std::string{} : words[0], .label = "Width"_text, .box = Box::Pixels, .beside = true});
+            out.push_back({.name = n + " height", .value = words.size() < 2 ? std::string{} : words[1], .label = "Height"_text, .box = Box::Pixels, .beside = true});
         } else if (kind && !kind->detail.empty()) {
             out.push_back({.name = n + " what", .value = rest, .label = std::string(kind->detail), .box = kind->box, .hint = std::string(kind->hint), .context = std::string(kind->context),
-                           .suggest = std::string(kind->box == Box::SettingChoice ? settingOptions(kind->verb) : kind->suggest), .beside = true});
+                           .suggest = std::string(kind->box == Box::SettingChoice ? settingOptions(kind->verb) : std::string_view(kind->suggest)), .beside = true});
         }
     }
 }

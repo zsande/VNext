@@ -46,7 +46,7 @@ std::vector<PopupEntry> popupEntries(DeveloperTools::Popup& p, const StoryEditor
     for (const std::string_view entry : wordsOf(f.suggest, '|')) {
         const auto colon = entry.find(':');
         const std::string value(entry.substr(0, colon));
-        add(value, value, colon == npos ? std::string{} : std::string(entry.substr(colon + 1)), false);
+        add(value, value, colon == npos ? std::string{} : std::string(tr(entry.substr(colon + 1))), false);
     }
     if (p.namesVersion != editor.version()) { // (found once, not every frame it's open)
         p.names = editor.names(f.pick, f.context);
@@ -56,11 +56,11 @@ std::vector<PopupEntry> popupEntries(DeveloperTools::Popup& p, const StoryEditor
     // First, what the field empty means (unless the list is empty, or has it already): its hint; a box of
     // pictures without one: None, to empty it for what's usual; a colour's without one: transparent.
     const bool colourOnly = kind.wheel && !kind.pictures && f.hint.empty();
-    const std::string_view emptyMeans = !f.hint.empty() ? f.hint : kind.pictures ? std::string_view("None") : colourOnly ? std::string_view("Transparent") : std::string_view{};
+    const std::string_view emptyMeans = !f.hint.empty() ? f.hint : kind.pictures ? std::string_view("None"_text) : colourOnly ? std::string_view("Transparent"_text) : std::string_view{};
     const std::string emptyValue = colourOnly ? "#00000000" : "";
     if (!entries.empty() && !emptyMeans.empty() && !f.multi && !p.typed && typed.empty() &&
         std::ranges::none_of(entries, [&](const PopupEntry& e) { return lower(e.value) == lower(colourOnly ? std::string_view(emptyValue) : emptyMeans); }))
-        entries.insert(entries.begin(), PopupEntry{.value = emptyValue, .label = std::string(emptyMeans), .empty = true}); // (transparent: as the empty one, kept and dim)
+        entries.insert(entries.begin(), PopupEntry{.value = emptyValue, .label = std::string(tr(emptyMeans)), .empty = true}); // (transparent: as the empty one, kept and dim)
 
     if (f.box == StoryEditor::Box::Colour) { // (under the wheel: the game's own colours, and the words the box can be)
         std::vector<std::string> words;
@@ -82,8 +82,8 @@ std::vector<PopupEntry> popupEntries(DeveloperTools::Popup& p, const StoryEditor
 // its label in the label column, the second beside it with its label between.
 constexpr std::pair<std::string_view, std::string_view> kPairedLabels[]{
     {"Width", "Height"},       {"Left", "Top"},         {"Item width", "Item height"},    {"Spacing across", "Spacing down"},
-    {"Minimum", "Maximum"},    {"Zoom", "Opacity"},     {"Place", "Up or down"},          {"Looks at (across)", "Looks at (up or down)"},
-    {"Amount", "Speed"},       {"Eyes X", "Eyes Y"},    {"Mouth X", "Mouth Y"},           {"Duration (seconds)", "Easing"},
+    {"Minimum", "Maximum"},    {"Zoom", "Opacity"},     {"Place", "Up or down"},
+    {"Amount", "Speed"},       {"Eyes X", "Eyes Y"},    {"Mouth X", "Mouth Y"},
     {"Font size", "Text colour"}, {"Padding", "Opacity"}, {"Shadow colour", "Shadow offset"}, {"Background colour", "Border colour"},
     {"Speaker", "Expression"}, {"Fade in (seconds)", "Volume"}, {"Strength", "Duration (seconds)"}, {"Strength", "Fade in (seconds)"}, {"Time limit (seconds)", "Stays up for (lines)"},
     {"Name colour", "Text colour"}, {"Made-up voice", "Made-up voice speed"}, {"Bob distance", "Bob speed"}, {"Bar height", "Bar colour"},
@@ -114,12 +114,13 @@ std::optional<Developer::FormEdit> Developer::drawForm(DeveloperUi& ui, const st
         if (!f.group.empty() && f.group != group) {
             group = f.group;
             y += first ? 0.0f : layout::groupGap * k;
-            ui.text(group, x, y, layout::groupText, kAccent);
+            ui.text(tr(group.starts_with('+') ? group.substr(1) : group), x, y, layout::groupText, kAccent);
             y += layout::groupStep * k;
         }
         first = false;
         const float in = group.empty() ? 0.0f : layout::groupIndent * k;
-        auto labelOf = [](const StoryEditor::Field& g) { return g.label.empty() ? std::string_view(g.name) : std::string_view(g.label); };
+        auto labelOf = [](const StoryEditor::Field& g) { return g.label.empty() ? std::string_view(g.name) : std::string_view(g.label); }; // (as written)
+        auto shownLabel = [&](const StoryEditor::Field& g) { return tr(labelOf(g)); };                                                    // (as shown)
         const std::string_view label = labelOf(f);
         // A box: typed into or picked from, with its colour beside it when it names one, and the
         // buttons for what its words can be under it while it's typed into.
@@ -152,7 +153,7 @@ std::optional<Developer::FormEdit> Developer::drawForm(DeveloperUi& ui, const st
         if (run.size() > 1 && labelW > 0.0f && f.choices.empty() && !needsWidth(f)) {
             const float room = w - labelW, between = 6 * k;
             auto need = [&](const StoryEditor::Field& g) { // (as wide as its words need, with its arrow; a little at least)
-                const std::string_view shown = trim(g.value).empty() ? g.hint : std::string_view(g.value);
+                const std::string_view shown = trim(g.value).empty() ? tr(g.hint) : std::string_view(g.value);
                 const bool arrow = g.pick != StoryEditor::Pick::None || !g.suggest.empty();
                 return std::max(layout::runBoxW * k, ui.width(shown, layout::boxText) + 20 * k + (arrow ? boxH : 0.0f));
             };
@@ -161,14 +162,14 @@ std::optional<Developer::FormEdit> Developer::drawForm(DeveloperUi& ui, const st
             for (std::size_t j = 0; j < run.size(); ++j) {
                 widths.push_back(need(fields[run[j]]));
                 total += widths.back() + between;
-                if (j > 0) labels += ui.width(labelOf(fields[run[j]]), layout::labelText) + 12 * k;
+                if (j > 0) labels += ui.width(shownLabel(fields[run[j]]), layout::labelText) + 12 * k;
             }
             // (their labels between them when all fit on one row with those, else just the boxes, on as many
             // rows as they need; the boxes on a row share out the room left on it, so each row is filled)
             const bool withLabels = total + labels <= room;
             std::vector<float> lws(run.size(), 0.0f);
             if (withLabels)
-                for (std::size_t j = 1; j < run.size(); ++j) lws[j] = ui.width(labelOf(fields[run[j]]), layout::labelText) + 12 * k;
+                for (std::size_t j = 1; j < run.size(); ++j) lws[j] = ui.width(shownLabel(fields[run[j]]), layout::labelText) + 12 * k;
             std::vector<std::vector<std::size_t>> rowBoxes(1);
             float used = 0.0f;
             for (std::size_t j = 0; j < run.size(); ++j) {
@@ -182,7 +183,7 @@ std::optional<Developer::FormEdit> Developer::drawForm(DeveloperUi& ui, const st
                 rowBoxes.back().push_back(j);
                 used += add;
             }
-            ui.textAround(label, x + in, y + boxH / 2, layout::labelText, theme::dim, labelW - in - 8 * k);
+            ui.textAround(tr(label), x + in, y + boxH / 2, layout::labelText, theme::dim, labelW - in - 8 * k);
             for (std::size_t r = 0; r < rowBoxes.size(); ++r) {
                 float taken = between * static_cast<float>(rowBoxes[r].size() - 1);
                 for (const std::size_t j : rowBoxes[r]) taken += lws[j] + widths[j];
@@ -193,7 +194,7 @@ std::optional<Developer::FormEdit> Developer::drawForm(DeveloperUi& ui, const st
                     const StoryEditor::Field& g = fields[run[j]];
                     if (c > 0) bx += between;
                     if (lws[j] > 0.0f) {
-                        ui.textAround(labelOf(g), bx, y + boxH / 2, layout::labelText, theme::dim, lws[j] - 4 * k);
+                        ui.textAround(shownLabel(g), bx, y + boxH / 2, layout::labelText, theme::dim, lws[j] - 4 * k);
                         bx += lws[j];
                     }
                     const float bw = std::floor(widths[j] + spare);
@@ -213,7 +214,7 @@ std::optional<Developer::FormEdit> Developer::drawForm(DeveloperUi& ui, const st
                           !needsWidth(fields[next]) && (std::ranges::contains(kPairedLabels, std::pair{label, labelOf(fields[next])}) || labelOf(fields[next]) == "To"); // (a change and what to)
         if (pair) { // (when there's room for both to be read: the second's label on two lines when it's long, and each box wide enough)
             const StoryEditor::Field& g = fields[next];
-            const std::string_view label2 = labelOf(g);
+            const std::string_view label2 = shownLabel(g);
             const float room = w - labelW;
             float lw2 = ui.width(label2, layout::labelText) + 12 * k;
             if (lw2 > room * layout::pairLabelPart) { // (on two lines, no narrower than its longest word)
@@ -223,7 +224,7 @@ std::optional<Developer::FormEdit> Developer::drawForm(DeveloperUi& ui, const st
             }
             const float bw = std::floor((room - lw2 - 6 * k) / 2);
             if (bw >= layout::pairBoxW * k) {
-                ui.textAround(label, x + in, y + boxH / 2, layout::labelText, theme::dim, labelW - in - 8 * k);
+                ui.textAround(tr(label), x + in, y + boxH / 2, layout::labelText, theme::dim, labelW - in - 8 * k);
                 drawBox(f, {x + labelW, y, bw, boxH}, false);
                 ui.textAround(label2, x + labelW + bw + 6 * k, y + boxH / 2, layout::labelText, theme::dim, lw2 - 4 * k);
                 drawBox(g, {x + labelW + bw + 6 * k + lw2, y, bw, boxH}, false);
@@ -233,9 +234,9 @@ std::optional<Developer::FormEdit> Developer::drawForm(DeveloperUi& ui, const st
             }
         }
         if (labelW > 0.0f) {
-            ui.textAround(label, x + in, y + boxH / 2, layout::labelText, theme::dim, labelW - in - 8 * k);
+            ui.textAround(tr(label), x + in, y + boxH / 2, layout::labelText, theme::dim, labelW - in - 8 * k);
         } else {
-            ui.text(label, x, y, layout::labelText, theme::dim);
+            ui.text(tr(label), x, y, layout::labelText, theme::dim);
             y += layout::labelAboveH * k;
         }
         const SDL_FRect box{x + labelW, y, w - labelW, boxH};
@@ -255,8 +256,8 @@ std::optional<Developer::FormEdit> Developer::drawForm(DeveloperUi& ui, const st
 std::optional<std::string> Developer::drawFormatBar(DeveloperUi& ui, const std::string& id, float x, float w, float& y) {
     DeveloperTools& d = tools;
     const float k = ui.k, h = layout::barButtonH * k;
-    static constexpr std::array<std::string_view, 12> kLabels{"Bold", "Italic", "Underline", "Crossed out", "Colour", "Speed",
-                                                               "Furigana", "Tip", "Pause", "Variable", "Appears", "No wait"};
+    static const std::array<std::string_view, 12> kLabels{"Bold"_text,     "Italic"_text, "Underline"_text, "Crossed out"_text, "Colour"_text,   "Speed"_text,
+                                                          "Furigana"_text, "Tip"_text,    "Pause"_text,     "Variable"_text,    "Appears"_text, "No wait"_text};
     static constexpr std::array<bool, 12> kWith{false, true, true, true, false, true, false, true, false, true, false, true}; // (the looks together, then each pair)
     const auto places = ui.flow({kLabels.begin(), kLabels.end()}, w, h, layout::barButtonGap * k, layout::smallText, std::vector<bool>(kWith.begin(), kWith.end()));
     auto chosen = [&] { return std::pair{std::min(d.anchor, d.caret), std::max(d.anchor, d.caret)}; };
@@ -277,7 +278,7 @@ std::optional<std::string> Developer::drawFormatBar(DeveloperUi& ui, const std::
         const std::string_view label = kLabels[i];
         const std::string bid = std::format("{}:format:{}", id, label);
         std::optional<std::string> picked;
-        auto list = [&](const StoryEditor::Field& f) { picked = ui.listButton(bid, b, label, f); };
+        auto list = [&](const StoryEditor::Field& f) { picked = ui.listButton(bid, b, tr(label), f); };
         bool clicked = false;
         if (label == "Colour") list({.name = "colour", .box = Box::Colour});
         else if (label == "Speed") list({.name = "speed", .box = Box::TextSpeed});
@@ -285,7 +286,7 @@ std::optional<std::string> Developer::drawFormatBar(DeveloperUi& ui, const std::
         else if (label == "Pause") list({.name = "pause", .box = Box::Pause});
         else if (label == "Variable") list({.name = "variable", .box = Box::Variable});
         else if (label == "Appears") list({.name = "appears", .box = Box::Reveal, .choices = "letter word line"});
-        else clicked = ui.button(b, label, false, true, layout::smallButtonText);
+        else clicked = ui.button(b, tr(label), false, true, layout::smallButtonText);
         if (!clicked && !picked) continue;
         if (label == "Bold") wrap("{bold}", "{/bold}");
         else if (label == "Italic") wrap("{italic}", "{/italic}");
@@ -332,18 +333,18 @@ std::optional<std::string> Developer::drawFormatBar(DeveloperUi& ui, const std::
             if (all.size() > 5) all.resize(5);
             it = guesses.emplace(language + "|" + word, std::move(all)).first;
         }
-        std::vector<std::string_view> labels{"Spelling:"};
+        std::vector<std::string_view> labels{"Spelling:"_text};
         for (const std::string& g : it->second) labels.emplace_back(g);
-        labels.emplace_back("Learn it");
+        labels.emplace_back("Learn it"_text);
         const auto row = ui.flow(labels, w, h, layout::barButtonGap * k, layout::smallButtonText);
         y += 4 * k;
         for (std::size_t i = 0; i < labels.size(); ++i) {
             const SDL_FRect b{x + row[i].x, y + row[i].y, row[i].w, row[i].h};
             if (i == 0) {
-                ui.textAround(labels[0], b.x, b.y + b.h / 2, layout::labelText, kBad);
+                ui.textAround(tr(labels[0]), b.x, b.y + b.h / 2, layout::labelText, kBad);
                 continue;
             }
-            if (!ui.button(b, labels[i], false, true, layout::smallButtonText)) continue;
+            if (!ui.button(b, i + 1 == labels.size() ? tr(labels[i]) : labels[i], false, true, layout::smallButtonText)) continue;
             if (i + 1 == labels.size()) {
                 learnSpelling(word);
                 d.spelling.erase(language + "|" + word);
@@ -448,11 +449,11 @@ void Developer::drawPopup(DeveloperUi& ui) {
     if (byVariable) {
         const SDL_FRect row{box.x + pad, listTop, box.w - 2 * pad, itemH - 2 * k};
         if (ui.over(row)) draw::rect(r, row, kButtonHover);
-        ui.textAround("Depends on a variable...", row.x + 8 * k, row.y + row.h / 2, layout::popupText, kAccent);
+        ui.textAround("Depends on a variable..."_tr, row.x + 8 * k, row.y + row.h / 2, layout::popupText, kAccent);
         if (ui.click(row)) pop.clicked = std::string(kPictureBy);
     }
     const float itemsTop = listTop + (byVariable ? itemH : 0.0f);
-    if (entries.empty() && !colors) ui.textAround("Empty", box.x + 10 * k, itemsTop + itemH / 2, layout::popupText, theme::dim);
+    if (entries.empty() && !colors) ui.textAround("Empty"_tr, box.x + 10 * k, itemsTop + itemH / 2, layout::popupText, theme::dim);
     for (std::size_t i = 0; i < entries.size(); ++i) {
         const PopupEntry& e = entries[i];
         if (pictures) { // a small picture, its name under it
@@ -542,10 +543,10 @@ void Developer::drawColourWheel(PopupFrame& pop) {
     auto third = [&](int i) { return SDL_FRect{buttons.x + static_cast<float>(i) * (bw + pad), buttons.y, bw, buttons.h}; };
     bool arranged = false; // (made a gradient, or one colour again: it stays open)
     if (gradient) {
-        if (ui.button(third(0), "Top", !p.editBottom, true, layout::smallButtonText)) p.editBottom = false, arranged = true;
-        if (ui.button(third(1), "Bottom", p.editBottom, true, layout::smallButtonText)) p.editBottom = true, arranged = true;
-        if (ui.button(third(2), "One colour", false, true, layout::smallButtonText)) pop.clicked = topText, p.editBottom = false, arranged = true;
-    } else if (ui.button(third(0), "Gradient", false, true, layout::smallButtonText)) {
+        if (ui.button(third(0), "Top"_tr, !p.editBottom, true, layout::smallButtonText)) p.editBottom = false, arranged = true;
+        if (ui.button(third(1), "Bottom"_tr, p.editBottom, true, layout::smallButtonText)) p.editBottom = true, arranged = true;
+        if (ui.button(third(2), "One colour"_tr, false, true, layout::smallButtonText)) pop.clicked = topText, p.editBottom = false, arranged = true;
+    } else if (ui.button(third(0), "Gradient"_tr, false, true, layout::smallButtonText)) {
         const std::string one = parseColor(p.field.value, &pal) ? p.field.value : parseColor(f.hint, &pal) ? std::string(f.hint) : std::string("black");
         pop.clicked = one + "-" + one;
         p.editBottom = true;
@@ -666,7 +667,7 @@ void Developer::drawSettings(DeveloperUi& ui, const SDL_FRect& box) {
     const DeveloperUi::Clip clipped(ui, box, true);
     float y = box.y - scroll;
     for (const ScriptError* e : others) {
-        ui.text(std::format("main.vnscript line {}: {}", e->line, e->message), box.x, y + 4 * k, layout::noteText, kBad, box.w);
+        ui.text("main.vnscript line {}: {}"_tr(e->line, e->message), box.x, y + 4 * k, layout::noteText, kBad, box.w);
         y += otherH;
     }
     // A setting's control in `field` (buttons for its choices, else a box with its default in grey)
@@ -698,7 +699,7 @@ void Developer::drawSettings(DeveloperUi& ui, const SDL_FRect& box) {
         return problem;
     };
     auto helpText = [&](const Setting& s, const ScriptError* problem, float x, float middle, float w, bool oneLine = false) { // (a pair's: a line each)
-        const std::string_view said = problem ? std::string_view(problem->message) : s.help;
+        const std::string_view said = problem ? std::string_view(problem->message) : tr(s.help);
         if (oneLine) ui.textAround(ui.fitted(said, layout::smallText, w), x, middle, layout::smallText, problem ? kBad : theme::dim);
         else ui.textAround(said, x, middle, layout::smallText, problem ? kBad : theme::dim, w);
     };
@@ -709,13 +710,13 @@ void Developer::drawSettings(DeveloperUi& ui, const SDL_FRect& box) {
         y += height(i);
         if (second) ++i;
         if (y < box.y || top > box.y + box.h) continue;
-        if (s.name.empty()) {
-            ui.text(s.label, box.x, top + 16 * k, layout::settingHeadText, kAccent);
-            if (!s.help.empty()) ui.text(s.help, box.x, top + headH - 2 * k, layout::smallText, theme::dim, box.w);
+        if (s.name.empty()) { // (a group's heading, as every form has them, and its settings in under it)
+            ui.text(tr(s.label), box.x, top + 16 * k, layout::groupText, kAccent);
+            if (!s.help.empty()) ui.text(tr(s.help), box.x, top + headH - 2 * k, layout::smallText, theme::dim, box.w);
             continue;
         }
         const float middle = top + rowH / 2;
-        ui.textAround(s.label, box.x + 12 * k, middle, layout::settingLabelText, theme::text, labelW - 16 * k);
+        ui.textAround(tr(s.label), box.x + layout::groupIndent * k, middle, layout::labelText, theme::dim, labelW - (layout::groupIndent + 4) * k);
         if (!second) {
             const ScriptError* problem = control(s, {fieldX, top + 5 * k, fieldW, boxH});
             if (problem) draw::rect(r, {box.x, top + 6 * k, 4 * k, rowH - 12 * k}, kBad);
@@ -723,10 +724,10 @@ void Developer::drawSettings(DeveloperUi& ui, const SDL_FRect& box) {
             continue;
         }
         // The pair: each with a box half as wide, the second's label between, and their help on two lines.
-        const float lw2 = std::min(labelW, ui.width(second->label, layout::settingLabelText) + 16 * k);
+        const float lw2 = std::min(labelW, ui.width(tr(second->label), layout::labelText) + 16 * k);
         const ScriptError* problem = control(s, {fieldX, top + 5 * k, pairW, boxH});
         const float x2 = fieldX + pairW + 12 * k;
-        ui.textAround(second->label, x2, middle, layout::settingLabelText, theme::text, lw2 - 4 * k);
+        ui.textAround(tr(second->label), x2, middle, layout::labelText, theme::dim, lw2 - 4 * k);
         const ScriptError* problem2 = control(*second, {x2 + lw2, top + 5 * k, pairW, boxH});
         if (problem || problem2) draw::rect(r, {box.x, top + 6 * k, 4 * k, rowH - 12 * k}, kBad);
         const float hx = x2 + lw2 + pairW + 16 * k, hw = std::max(0.0f, box.x + box.w - hx);

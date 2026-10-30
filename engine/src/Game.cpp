@@ -6,6 +6,7 @@
 #include <charconv>
 #include <cmath>
 #include <format>
+#include <numbers>
 #include <sstream>
 
 namespace vn {
@@ -115,10 +116,6 @@ std::string Chart::text() const {
 
 namespace {
 
-float rateFor(const Transition& t) {
-    return t.kind != TransitionKind::None && t.duration > 0.0f ? 1.0f / t.duration : 0.0f;
-}
-
 std::array<float, 8> values(const Stage::ObjectState& s) {
     return {s.x, s.y, s.zoom, s.opacity, s.rotate, static_cast<float>(s.tint.r), static_cast<float>(s.tint.g), static_cast<float>(s.tint.b)};
 }
@@ -136,12 +133,19 @@ void setValues(Stage::ObjectState& s, const std::array<float, 8>& v) {
 
 } // namespace
 
-void Stage::setBackground(std::string key, const Transition& transition) {
+void Stage::setBackground(std::string key, std::shared_ptr<const Animation> entrance, bool done) {
+    if (key == background_ && !key.empty()) return backgroundAnimations_.set(std::move(entrance), false, done); // (the one there: only the animation, on it)
+    if (!previous_.empty()) dropPrevious(); // (one still coming in: it's in)
     previous_ = std::exchange(background_, std::move(key));
-    bgTransition_ = transition;
-    bgDuration_ = transition.kind == TransitionKind::None ? 0.0f : std::max(0.0f, transition.duration);
-    bgTime_ = 0.0f;
-    if (bgDuration_ <= 0.0f) previous_.clear();
+    previousAnimations_ = std::exchange(backgroundAnimations_, {});
+    backgroundAnimations_.set(std::move(entrance), false, done || still_);
+    if (!backgroundAnimations_.going()) dropPrevious();
+}
+
+void Stage::dropPrevious() {
+    previous_.clear();
+    previousAnimations_ = {};
+    std::erase_if(objects_, [](const Object& o) { return o.oldScene; });
 }
 
 Stage::Object* Stage::find(std::string_view tag) {
@@ -173,19 +177,25 @@ void Stage::apply(Object& o, const StageProps& p, float seconds, Ease ease) {
 }
 
 void Stage::show(const std::string& tag, const CharacterDef* def, const std::string& image, const std::string& expression,
-                 const StageProps& props, const Transition& transition, float slide) {
-    const float rate = rateFor(transition);
+                 const StageProps& props, std::shared_ptr<const Animation> played, float slide, bool done) {
+    auto play = [&](Object& o) {
+        if (!played) return;
+        o.s.played = played->name;
+        o.animations.set(std::move(played), false, done || still_);
+    };
     if (Object* o = find(tag)) {
-        o->leaving = false;
-        o->fadeRate = rate;
-        if (rate == 0.0f) o->fade = 1.0f;
+        if (o->leaving || o->oldScene) { // (going: it stays, as it was before it began to go)
+            o->leaving = o->oldScene = false;
+            o->s.played.clear();
+            o->animations.set(nullptr, false, true);
+        }
         if (!expression.empty()) o->s.expression = expression;
         if (!image.empty()) o->s.image = image;
         apply(*o, props, slide);
+        play(*o);
         return;
     }
-    Object o{.s = {.tag = tag, .image = image, .expression = expression}, .order = nextOrder_++,
-             .fade = rate > 0 ? 0.0f : 1.0f, .fadeRate = rate};
+    Object o{.s = {.tag = tag, .image = image, .expression = expression}, .order = nextOrder_++};
     if (def) {
         o.s.character = def->key;
         o.def = *def;
@@ -193,7 +203,12 @@ void Stage::show(const std::string& tag, const CharacterDef* def, const std::str
         o.s.y = 0.5f;
     }
     apply(o, props, 0.0f);
+    play(o);
     objects_.push_back(std::move(o));
+}
+
+bool Stage::has(std::string_view tag) const {
+    return std::ranges::any_of(objects_, [&](const Object& o) { return o.s.tag == tag && !o.leaving && !o.oldScene; });
 }
 
 void Stage::setExpression(std::string_view tag, const std::string& expression) {
@@ -205,37 +220,125 @@ std::string Stage::expression(std::string_view tag) const {
     return it != objects_.end() ? it->s.expression : std::string{};
 }
 
-void Stage::hide(std::string_view tag, const Transition& transition) {
+void Stage::hide(std::string_view tag, std::shared_ptr<const Animation> exit, bool done) {
     Object* o = find(tag);
     if (!o) return;
-    o->leaving = true;
-    o->fadeRate = rateFor(transition);
-    if (o->fadeRate == 0.0f) o->fade = 0.0f;
-    std::erase_if(objects_, [](const Object& x) { return x.leaving && x.fade <= 0.0f; });
-}
-
-bool Stage::move(std::string_view tag, const StageProps& props, float seconds, Ease ease) {
-    Object* o = find(tag);
-    if (!o) return false;
-    apply(*o, props, seconds, ease);
-    return true;
-}
-
-bool Stage::moving() const {
-    return cameraTime_ < 1.0f || std::ranges::any_of(objects_, [](const Object& o) { return o.tweenTime < 1.0f; });
-}
-
-void Stage::moveCamera(const Camera& to, float seconds, Ease ease) {
-    if (seconds <= 0.0f) {
-        camera_ = cameraTo_ = to;
-        cameraTime_ = 1.0f;
+    if (!exit || done || still_) {
+        std::erase_if(objects_, [&](const Object& x) { return x.s.tag == tag; });
         return;
     }
-    cameraFrom_ = camera_;
-    cameraTo_ = to;
-    cameraTime_ = 0.0f;
-    cameraDuration_ = seconds;
-    cameraEase_ = ease;
+    o->leaving = true;
+    o->s.played = exit->name;
+    o->animations.set(std::move(exit), false, false);
+}
+
+void Stage::Animations::set(std::shared_ptr<const Animation> animation, bool isOwn, bool done) {
+    std::shared_ptr<const Animation>& now = isOwn ? own : played;
+    if (isOwn && now && animation && now->name == animation->name) return; // (the one it has goes on)
+    (isOwn ? ownTime : playedTime) = done && animation && !animation->loops() ? animation->total() : 0.0f;
+    now = std::move(animation);
+}
+
+void Stage::Animations::onward(float dt, bool still) {
+    for (auto [a, time] : {std::pair{own.get(), &ownTime}, std::pair{played.get(), &playedTime}}) {
+        if (!a) continue;
+        if (still) { // (as it ends; one that plays again and again, standing at its start)
+            if (!a->loops()) *time = a->total();
+            continue;
+        }
+        *time += dt;
+        if (!a->loops()) *time = std::min(*time, a->total());
+        else if (a->length > 0.0f && *time >= 2.0f * a->length) *time = a->length + std::fmod(*time - a->length, a->length);
+    }
+}
+
+void Stage::Animations::finish() {
+    if (played) playedTime = played->loops() ? std::max(playedTime, played->length) : played->total(); // (at its end, or round again)
+    if (own && !own->loops()) ownTime = own->total();
+}
+
+bool Stage::Animations::going() const { return played && playedTime < played->total(); }
+
+Animation::Look Stage::Animations::look(SDL_Color tint, const Animation::Offset& offset, SDL_FPoint screen) const {
+    Animation::Look out;
+    if (own) out = own->at(ownTime, tint, offset, screen);
+    if (played) out = out.with(playedLook(out.color.value_or(tint), offset, screen));
+    else if (playedFrom.x != 0.0f || playedFrom.y != 0.0f || playedFrom.opacity != 1.0f || playedFrom.zoom != 1.0f || playedFrom.rotate != 0.0f ||
+             playedFrom.color || playedFrom.fade > 0.0f || playedFrom.wipe < 1.0f)
+        out = out.with(playedFrom); // (the camera: where the one before left it, when the one played now is gone from the scripts)
+    return out;
+}
+
+Animation::Look Stage::Animations::playedLook(SDL_Color tint, const Animation::Offset& offset, SDL_FPoint screen) const {
+    return played ? played->at(playedTime, tint, offset, screen, playedFrom) : playedFrom;
+}
+
+void Stage::animate(std::string_view tag, std::shared_ptr<const Animation> animation, bool own, bool done) {
+    Object* o = find(tag);
+    if (!o) return;
+    (own ? o->s.animation : o->s.played) = animation ? animation->name : std::string{};
+    o->animations.set(std::move(animation), own, done);
+}
+
+void Stage::animateBackground(std::shared_ptr<const Animation> animation, bool own, bool done) {
+    backgroundAnimations_.set(std::move(animation), own, done);
+}
+
+std::string Stage::backgroundAnimation(bool own) const {
+    const Animation* a = own ? backgroundAnimations_.own.get() : backgroundAnimations_.played.get();
+    return a ? a->name : std::string{};
+}
+
+bool Stage::moving() const { // (an animation played on something, until it ends: one time through, if it's looping)
+    return camera_.going() || backgroundAnimations_.going() ||
+           std::ranges::any_of(objects_, [](const Object& o) { return o.tweenTime < 1.0f || o.animations.going(); });
+}
+
+// The camera's places: what it looks at, as far from the middle as the place is (x=-1: the left edge).
+Animation::Offset Stage::cameraPlaces() const {
+    return [w = canvas.w, h = canvas.h](bool across, float place) { return across ? place * w / 2 : -place * h / 2; };
+}
+
+Animation::Look Stage::cameraLook() const { return camera_.look({255, 255, 255, 255}, cameraPlaces(), {canvas.w, canvas.h}); }
+
+void Stage::animateCamera(std::shared_ptr<const Animation> animation, bool own, bool done) {
+    if (!own) camera_.playedFrom = animation ? cameraStartFor(*animation) : Animation::Look{}; // (none: back to normal)
+    camera_.set(std::move(animation), own, done || still_);
+}
+
+// Where an animation played on the view starts: what it changes, from where the view is now; the rest,
+// where the one played before was taking it (as if it had ended: a click doesn't leave it halfway).
+Animation::Look Stage::cameraStartFor(const Animation& next) const {
+    const SDL_Color white{255, 255, 255, 255};
+    const SDL_FPoint screen{canvas.w, canvas.h};
+    const Animation::Look now = camera_.playedLook(white, cameraPlaces(), screen);
+    const Animation* was = camera_.played.get();
+    Animation::Look out = was && !was->loops() ? was->at(was->total(), white, cameraPlaces(), screen, camera_.playedFrom) : now;
+    using V = Animation::Value;
+    for (const Animation::Change& c : next.changes)
+        switch (c.what) {
+        case V::X: out.x = now.x; break;
+        case V::Y: out.y = now.y; break;
+        case V::Opacity: out.opacity = now.opacity; break;
+        case V::Zoom: out.zoom = now.zoom; break;
+        case V::Rotate: out.rotate = now.rotate; break;
+        case V::Color: out.color = now.color; break;
+        case V::Fade: out.fade = now.fade, out.fadeColor = now.fadeColor; break;
+        case V::Wipe: out.wipe = now.wipe, out.wipeShape = now.wipeShape; break;
+        }
+    return out;
+}
+
+std::string Stage::cameraAnimation(bool own) const {
+    const Animation* a = own ? camera_.own.get() : camera_.played.get();
+    return a ? a->name : std::string{};
+}
+
+void Stage::restoreCamera(std::shared_ptr<const Animation> own, std::shared_ptr<const Animation> played, const Animation::Look& start) {
+    camera_ = {};
+    camera_.set(std::move(own), true, true);
+    camera_.playedFrom = start;
+    camera_.set(std::move(played), false, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -320,7 +423,7 @@ void Stage::drawWeather(SDL_Renderer* r, Assets& assets) {
         if (alpha <= 0.0f || ps.empty()) return;
         const Picture pic = w.image.empty() ? Picture{} : assets.picture(w.image, {}, colorAlpha_ >= 0.5f ? colorMask_ : 0);
         for (const auto& p : ps) {
-            const float x = p.x + offset_.x, y = p.y + offset_.y;
+            const float x = p.x, y = p.y;
             float a = alpha;
             if (w.kind == "embers") a *= 0.6f + 0.4f * std::sin(clock_ * 7.0f + p.phase); // flicker
             const SDL_Color c = withAlpha(shade(p.color), a);
@@ -474,42 +577,24 @@ void Stage::drawNoise(SDL_Renderer* r, float alpha) {
     SDL_RenderTexture(r, noise_.get(), &src, &all);
 }
 
-void Stage::shake(float strength, float seconds) {
-    shakeStrength_ = strength;
-    shakeDuration_ = seconds;
-    shakeTime_ = 0.0f;
-}
-
-void Stage::flash(SDL_Color color, float seconds) {
-    flashColor_ = color;
-    flashDuration_ = seconds;
-    flashTime_ = 0.0f;
-}
-
-void Stage::clearObjects(const Transition& transition) {
-    for (auto& o : objects_) {
-        o.leaving = true;
-        o.fadeRate = rateFor(transition);
-        if (o.fadeRate == 0.0f) o.fade = 0.0f;
-    }
-    std::erase_if(objects_, [](const Object& o) { return o.fade <= 0.0f; });
+void Stage::clearObjects() {
+    for (auto& o : objects_) o.oldScene = true;
 }
 
 void Stage::reset() {
     background_.clear();
     previous_.clear();
-    bgDuration_ = bgTime_ = 0.0f;
+    backgroundAnimations_ = previousAnimations_ = {};
     objects_.clear();
-    shakeDuration_ = flashDuration_ = 0.0f;
     setWeather({}, 0.0f);
-    moveCamera({}, 0.0f, Ease::InOut);
+    camera_ = {};
     burst_ = 0;
     burstTime_ = 0.0f;
     setEffect({}, true);
 }
 
 void Stage::restore(const ObjectState& state, const CharacterDef* def) {
-    Object o{.s = state, .order = nextOrder_++, .fade = 1.0f};
+    Object o{.s = state, .order = nextOrder_++};
     if (def) o.def = *def;
     objects_.push_back(std::move(o));
 }
@@ -518,57 +603,36 @@ void Stage::update(float dt) {
     clock_ += dt;
     updateWeather(dt);
     updateEffects(dt);
-    if (cameraTime_ < 1.0f) {
-        cameraTime_ = cameraDuration_ > 0.0f ? std::min(1.0f, cameraTime_ + dt / cameraDuration_) : 1.0f;
-        const float t = eased(cameraEase_, cameraTime_);
-        camera_ = {std::lerp(cameraFrom_.x, cameraTo_.x, t), std::lerp(cameraFrom_.y, cameraTo_.y, t),
-                   std::lerp(cameraFrom_.zoom, cameraTo_.zoom, t), std::lerp(cameraFrom_.rotate, cameraTo_.rotate, t)};
-    }
-    if (bgTime_ < bgDuration_) {
-        bgTime_ = std::min(bgDuration_, bgTime_ + dt);
-        if (bgTime_ >= bgDuration_) previous_.clear();
-    }
+    camera_.onward(dt, still_);
+    backgroundAnimations_.onward(dt, still_);
+    previousAnimations_.onward(dt, still_);
+    if (!previous_.empty() && !backgroundAnimations_.going()) dropPrevious(); // (the new one has come in)
     for (auto& o : objects_) {
-        const float target = o.leaving ? 0.0f : 1.0f;
-        const float step = o.fadeRate > 0 ? o.fadeRate * dt : 1.0f;
-        o.fade = o.fade < target ? std::min(target, o.fade + step) : std::max(target, o.fade - step);
+        o.animations.onward(dt, still_);
         if (o.tweenTime < 1.0f) {
-            o.tweenTime = o.tweenDuration > 0.0f ? std::min(1.0f, o.tweenTime + dt / o.tweenDuration) : 1.0f;
+            o.tweenTime = o.tweenDuration > 0.0f && !still_ ? std::min(1.0f, o.tweenTime + dt / o.tweenDuration) : 1.0f;
             const float t = eased(o.ease, o.tweenTime);
             std::array<float, kTweened> v{};
             for (std::size_t i = 0; i < kTweened; ++i) v[i] = std::lerp(o.from[i], o.to[i], t);
             setValues(o.s, v);
         }
     }
-    std::erase_if(objects_, [](const Object& o) { return o.leaving && o.fade <= 0.0f; });
+    std::erase_if(objects_, [](const Object& o) { return o.leaving && !o.animations.going(); }); // (hidden: gone once its animation ends)
 
-    shakeTime_ += dt;
-    flashTime_ += dt;
-    offset_ = {0.0f, 0.0f};
-    if (shakeTime_ < shakeDuration_) {
-        const float k = shakeStrength_ * (1.0f - shakeTime_ / shakeDuration_);
-        offset_ = {k * std::sin(clock_ * 71.0f), k * std::cos(clock_ * 53.0f)};
-    }
 }
 
-void Stage::finishTransitions() {
-    bgTime_ = bgDuration_;
-    previous_.clear();
+void Stage::finish() {
+    if (!previous_.empty()) dropPrevious();
+    backgroundAnimations_.finish();
     for (auto& o : objects_) {
-        o.fade = o.leaving ? 0.0f : 1.0f;
         if (o.tweenTime < 1.0f) {
             setValues(o.s, o.to);
             o.tweenTime = 1.0f;
         }
+        o.animations.finish();
     }
     std::erase_if(objects_, [](const Object& o) { return o.leaving; });
-    shakeTime_ = shakeDuration_;
-    flashTime_ = flashDuration_;
-    offset_ = {0.0f, 0.0f};
-    if (cameraTime_ < 1.0f) {
-        camera_ = cameraTo_;
-        cameraTime_ = 1.0f;
-    }
+    camera_.finish();
     weatherAlpha_ = weather_.kind.empty() ? 0.0f : 1.0f;
     fadingAlpha_ = 0.0f;
     fadingParticles_.clear();
@@ -579,7 +643,7 @@ void Stage::finishTransitions() {
 std::vector<Stage::ObjectState> Stage::objects() const {
     std::vector<ObjectState> out;
     for (const auto& o : objects_) {
-        if (o.leaving) continue;
+        if (o.leaving || o.oldScene) continue;
         ObjectState s = o.s;
         if (o.tweenTime < 1.0f) setValues(s, o.to); // save where it is going
         out.push_back(std::move(s));
@@ -614,172 +678,148 @@ void Stage::draw(SDL_Renderer* r, Assets& assets, const Font& labelFont, bool la
         drawEffects(r, view);
     }
     if (strength(kLookNoise) > 0.0f) drawNoise(r, 0.35f * strength(kLookNoise) * (burst_ & kLookNoise ? burstAmount_ : lookAmount_));
-    if (flashTime_ < flashDuration_)
-        draw::rect(r, {0, 0, canvas.w, canvas.h}, withAlpha(flashColor_, 1.0f - flashTime_ / flashDuration_));
 }
 
 void Stage::drawView(SDL_Renderer* r, Assets& assets, const Font* font, float spriteHeight, const FrameOf& frameOf) {
-    if (camera_ == Camera{}) {
+    const Animation::Look look = cameraLook();
+    if (look.x == 0.0f && look.y == 0.0f && look.zoom == 1.0f && look.rotate == 0.0f && look.opacity >= 1.0f && !look.color && look.fade <= 0.0f && look.wipe >= 0.999f)
+        return drawScene(r, assets, font, spriteHeight, frameOf);
+    // The camera's animations have it moved (or fading, tinting, covering or wiping the stage): the stage
+    // is drawn into a texture (sharp enough for its zoom), then that is zoomed and turned around the point
+    // the camera looks at.
+    int outW = 0, outH = 0;
+    SDL_GetCurrentRenderOutputSize(r, &outW, &outH);
+    const float density = std::max(1.0f, std::min(static_cast<float>(outW) / canvas.w, static_cast<float>(outH) / canvas.h));
+    const float zoom = std::max(look.zoom, 0.1f);
+    const float scale = std::min(density * std::max(1.0f, zoom), 8192.0f / std::max(canvas.w, canvas.h));
+    SDL_Texture* scene = canvasTexture(r, scene_, static_cast<int>(std::ceil(canvas.w * scale)), static_cast<int>(std::ceil(canvas.h * scale)));
+    if (!scene) return drawScene(r, assets, font, spriteHeight, frameOf);
+    {
+        const RenderTarget _(r, scene, scale);
+        SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+        SDL_RenderClear(r);
         drawScene(r, assets, font, spriteHeight, frameOf);
-    } else {
-        // The camera moved: the stage is drawn into a texture (sharp enough for its zoom), then that
-        // is zoomed and turned around the point the camera looks at.
-        int outW = 0, outH = 0;
-        SDL_GetCurrentRenderOutputSize(r, &outW, &outH);
-        const float density = std::max(1.0f, std::min(static_cast<float>(outW) / canvas.w, static_cast<float>(outH) / canvas.h));
-        const float zoom = std::max(camera_.zoom, 0.1f);
-        const float scale = std::min(density * std::max(1.0f, zoom), 8192.0f / std::max(canvas.w, canvas.h));
-        SDL_Texture* scene = canvasTexture(r, scene_, static_cast<int>(std::ceil(canvas.w * scale)), static_cast<int>(std::ceil(canvas.h * scale)));
-        if (!scene) return drawScene(r, assets, font, spriteHeight, frameOf);
-        {
-            const RenderTarget _(r, scene, scale);
-            SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
-            SDL_RenderClear(r);
-            drawScene(r, assets, font, spriteHeight, frameOf);
-        }
-        // Keep the view inside the stage when zoomed in (turning still shows its corners).
-        const float half = 0.5f / zoom;
-        const float fx = zoom >= 1.0f ? std::clamp(camera_.x, half, 1.0f - half) : camera_.x;
-        const float fy = zoom >= 1.0f ? std::clamp(camera_.y, half, 1.0f - half) : camera_.y;
-        const SDL_FRect src{0, 0, canvas.w * scale, canvas.h * scale};
-        const SDL_FRect dst{canvas.w * 0.5f - fx * canvas.w * zoom, canvas.h * 0.5f - fy * canvas.h * zoom, canvas.w * zoom, canvas.h * zoom};
-        const SDL_FPoint pivot{fx * canvas.w * zoom, fy * canvas.h * zoom};
-        SDL_RenderTextureRotated(r, scene, &src, &dst, camera_.rotate, &pivot, SDL_FLIP_NONE);
     }
+    // Keep the view inside the stage when zoomed in (turning still shows its corners).
+    const float half = 0.5f / zoom, x = 0.5f + look.x / canvas.w, y = 0.5f + look.y / canvas.h;
+    const float fx = zoom >= 1.0f ? std::clamp(x, half, 1.0f - half) : x;
+    const float fy = zoom >= 1.0f ? std::clamp(y, half, 1.0f - half) : y;
+    const SDL_FRect src{0, 0, canvas.w * scale, canvas.h * scale};
+    const SDL_FRect dst{canvas.w * 0.5f - fx * canvas.w * zoom, canvas.h * 0.5f - fy * canvas.h * zoom, canvas.w * zoom, canvas.h * zoom};
+    const SDL_FPoint pivot{fx * canvas.w * zoom, fy * canvas.h * zoom};
+    const float seen = std::clamp(look.opacity, 0.0f, 1.0f);
+    const SDL_Color tint = shade(look.color.value_or(SDL_Color{255, 255, 255, 255}), true);
+    SDL_SetTextureColorMod(scene, tint.r, tint.g, tint.b);
+    SDL_SetTextureAlphaMod(scene, static_cast<Uint8>(std::lround(seen * 255.0f)));
+    auto paint = [&] {
+        SDL_RenderTextureRotated(r, scene, &src, &dst, look.rotate, &pivot, SDL_FLIP_NONE);
+        if (look.fade > 0.0f) draw::rect(r, whole(), withAlpha(shade(look.fadeColor), seen * std::min(1.0f, look.fade))); // (covered with a colour)
+    };
+    if (look.wipe >= 0.999f) paint();
+    else cameraWiper_.draw(r, assets, {canvas.w, canvas.h}, whole(), look.wipe, look.wipeShape, paint);
+    SDL_SetTextureColorMod(scene, 255, 255, 255);
+    SDL_SetTextureAlphaMod(scene, 255);
 }
 
 void Stage::drawScene(SDL_Renderer* r, Assets& assets, const Font* font, float spriteHeight, const FrameOf& frameOf) {
-    if (bgTime_ < bgDuration_) {
-        const float t = bgTime_ / bgDuration_;
-        switch (bgTransition_.kind) {
-        case TransitionKind::Dissolve:
-            drawBackground(r, assets, font, previous_, 1.0f, 0.0f);
-            drawBackground(r, assets, font, background_, t, 0.0f);
-            break;
-        case TransitionKind::Wipe: {
-            if (!bgTransition_.shape.empty()) {
-                drawShapedWipe(r, assets, font, t);
-                break;
-            }
-            drawBackground(r, assets, font, previous_, 1.0f, 0.0f);
-            {
-                const RenderClip _(r, {0.0f, 0.0f, canvas.w * t, canvas.h}); // (as far as it's wiped in)
-                drawBackground(r, assets, font, background_, 1.0f, 0.0f);
-            }
-            break;
-        }
-        case TransitionKind::Slide: {
-            const float k = easeInOut(t);
-            drawBackground(r, assets, font, previous_, 1.0f, -k * canvas.w);
-            drawBackground(r, assets, font, background_, 1.0f, (1.0f - k) * canvas.w);
-            break;
-        }
-        default: { // fade through a colour
-            drawBackground(r, assets, font, t < 0.5f ? previous_ : background_, 1.0f, 0.0f);
-            const SDL_Color c = bgTransition_.color;
-            draw::rect(r, {0, 0, canvas.w, canvas.h}, withAlpha(c, 1.0f - std::abs(t * 2.0f - 1.0f)));
-            break;
-        }
-        }
-    } else {
-        drawBackground(r, assets, font, background_, 1.0f, 0.0f);
+    // What's on stage, in its layers (and, among those, in the order they came).
+    auto drawObjects = [&](bool old) {
+        std::vector<const Object*> sorted;
+        sorted.reserve(objects_.size());
+        for (const auto& o : objects_)
+            if (o.oldScene == old) sorted.push_back(&o);
+        std::ranges::stable_sort(sorted, [](const Object* a, const Object* b) { return a->s.layer != b->s.layer ? a->s.layer < b->s.layer : a->order < b->order; });
+        for (const Object* o : sorted) drawObject(r, assets, font, *o, spriteHeight, frameOf ? frameOf(o->s) : Frame{});
+    };
+    // The background before, with what was on stage then, under the new one while it comes in.
+    if (!previous_.empty()) {
+        drawBackground(r, assets, font, true);
+        drawObjects(true);
     }
-
+    drawBackground(r, assets, font, false);
     if (weather_.behind) drawWeather(r, assets);
-    std::vector<const Object*> sorted;
-    sorted.reserve(objects_.size());
-    for (const auto& o : objects_) sorted.push_back(&o);
-    std::ranges::stable_sort(sorted, [](const Object* a, const Object* b) {
-        return a->s.layer != b->s.layer ? a->s.layer < b->s.layer : a->order < b->order;
-    });
-    for (const Object* o : sorted) drawObject(r, assets, font, *o, spriteHeight, frameOf ? frameOf(o->s) : Frame{});
+    drawObjects(false);
     if (!weather_.behind) drawWeather(r, assets);
 }
 
-// The new background comes in where the shape's picture is darkest first: drawn into a texture,
-// made see-through where it hasn't come yet, and laid over the old one. (Where the graphics can't
-// do that, an ordinary wipe.)
-void Stage::drawShapedWipe(SDL_Renderer* r, Assets& assets, const Font* font, float t) {
-    if (shape_ != bgTransition_.shape) { // its pixels, at most 480 across
-        shape_ = bgTransition_.shape;
-        shapeValues_.clear();
-        if (const SurfacePtr pixels = assets.pixels(shape_)) {
-            const int step = std::max(1, (pixels->w + 479) / 480);
-            shapeW_ = pixels->w / step;
-            shapeH_ = pixels->h / step;
-            for (int y = 0; y < shapeH_; ++y) {
-                const auto* row = reinterpret_cast<const SDL_Color*>(static_cast<const Uint8*>(pixels->pixels) + static_cast<std::ptrdiff_t>(y * step) * pixels->pitch);
-                for (int x = 0; x < shapeW_; ++x) {
-                    const SDL_Color c = row[x * step];
-                    shapeValues_.push_back(static_cast<Uint8>((c.r * 299 + c.g * 587 + c.b * 114) / 1000));
-                }
-            }
-            shapeMask_.reset(SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, shapeW_, shapeH_));
-            static const SDL_BlendMode cut = SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_ADD,
-                                                                        SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_SRC_ALPHA, SDL_BLENDOPERATION_ADD);
-            if (shapeMask_ && !SDL_SetTextureBlendMode(shapeMask_.get(), cut)) shapeMask_.reset(); // keeps what's under it, as see-through as it is
-        } else {
-            logWarn("There's no image called '{}' to wipe with, so the wipe is a straight one.", shape_);
-        }
-    }
-    drawBackground(r, assets, font, previous_, 1.0f, 0.0f);
-    int outW = 0, outH = 0;
-    SDL_GetCurrentRenderOutputSize(r, &outW, &outH);
-    const float k = std::clamp(static_cast<float>(outW) / canvas.w, 1.0f, 4.0f);
-    SDL_Texture* layer = shapeMask_ ? canvasTexture(r, shapeLayer_, static_cast<int>(canvas.w * k), static_cast<int>(canvas.h * k)) : nullptr;
-    if (!layer) { // an ordinary wipe
-        const RenderClip _(r, {0.0f, 0.0f, canvas.w * t, canvas.h}); // (as far as it's wiped in)
-        drawBackground(r, assets, font, background_, 1.0f, 0.0f);
-        return;
-    }
-    constexpr float soft = 0.15f; // the edge's width
-    std::vector<SDL_Color> mask(shapeValues_.size());
-    for (std::size_t i = 0; i < mask.size(); ++i) {
-        const float a = std::clamp((t * (1.0f + soft) - static_cast<float>(shapeValues_[i]) / 255.0f) / soft, 0.0f, 1.0f);
-        mask[i] = {255, 255, 255, static_cast<Uint8>(a * 255.0f)};
-    }
-    SDL_UpdateTexture(shapeMask_.get(), nullptr, mask.data(), shapeW_ * 4);
-    const SDL_FRect all = whole();
-    {
-        const RenderTarget _(r, layer, k);
-        SDL_SetRenderDrawColor(r, 0, 0, 0, 0);
-        SDL_RenderClear(r);
-        drawBackground(r, assets, font, background_, 1.0f, 0.0f);
-        SDL_RenderTexture(r, shapeMask_.get(), nullptr, &all);
-    }
-    SDL_RenderTexture(r, layer, nullptr, &all);
-}
+void Stage::drawBackground(SDL_Renderer* r, Assets& assets, const Font* font, bool previous) {
+    const std::string& key = previous ? previous_ : background_;
+    const Animations& animations = previous ? previousAnimations_ : backgroundAnimations_;
+    if (key.empty()) return;
+    const SDL_FRect screen = whole();
+    // Its animations move it, zoom and turn it around its middle, fade it, tint it, cover it with a
+    // colour and wipe it: where it goes when it would be drawn at `box`, and how it looks. (A colour
+    // fading down to another doesn't turn.)
+    struct Placed {
+        SDL_FRect box;
+        SDL_FPoint pivot;
+        Animation::Look look;
+        float alpha;
+    };
+    auto placed = [&](const SDL_FRect& box) {
+        const Animation::Look look = lookOf(animations, {255, 255, 255, 255}, box);
+        const float zoom = std::max(0.0f, look.zoom), w = box.w * zoom, h = box.h * zoom;
+        return Placed{{box.x + look.x + (box.w - w) / 2, box.y + look.y + (box.h - h) / 2, w, h}, {w / 2, h / 2}, look, std::clamp(look.opacity, 0.0f, 1.0f)};
+    };
+    auto tinted = [](SDL_Color c, const Animation::Look& look) { // (multiplied by its animations' colour)
+        if (!look.color) return c;
+        auto times = [](Uint8 a, Uint8 b) { return static_cast<Uint8>(a * b / 255); };
+        return SDL_Color{times(c.r, look.color->r), times(c.g, look.color->g), times(c.b, look.color->b), c.a};
+    };
+    auto covered = [&](const Placed& at) {
+        if (at.look.fade > 0.0f) draw::rect(r, at.box, withAlpha(shade(at.look.fadeColor), at.alpha * std::min(1.0f, at.look.fade)));
+    };
 
-void Stage::drawBackground(SDL_Renderer* r, Assets& assets, const Font* font, const std::string& key, float alpha, float dx) {
-    if (key.empty() || alpha <= 0.0f) return;
-    const SDL_FRect screen{dx + offset_.x, offset_.y, canvas.w, canvas.h};
+    auto wiped = [&](const Placed& at, const auto& paint) { // (a std::function made only for a wipe)
+        if (at.look.wipe >= 0.999f) return paint();
+        wiper_.draw(r, assets, {canvas.w, canvas.h}, at.box, at.look.wipe, at.look.wipeShape, paint);
+    };
 
     if (key.starts_with('#')) { // a colour, or "#top-#bottom": one fading down to another
-        auto colorOf = [&](std::string_view text) { return withAlpha(shade(parseColor(text).value_or(SDL_Color{0, 0, 0, 255})), alpha); };
-        if (const auto dash = key.find('-'); dash != std::string::npos) draw::gradient(r, screen, colorOf(key.substr(0, dash)), colorOf(key.substr(dash + 1)));
-        else draw::rect(r, screen, colorOf(key));
+        const Placed at = placed(screen);
+        auto colorOf = [&](std::string_view text) { return withAlpha(shade(tinted(parseColor(text).value_or(SDL_Color{0, 0, 0, 255}), at.look)), at.alpha); };
+        wiped(at, [&] {
+            if (const auto dash = key.find('-'); dash != std::string::npos) {
+                draw::gradient(r, at.box, colorOf(key.substr(0, dash)), colorOf(key.substr(dash + 1)));
+            } else {
+                const float turn = at.look.rotate * std::numbers::pi_v<float> / 180.0f, c = std::cos(turn), s = std::sin(turn);
+                const SDL_FPoint mid{at.box.x + at.pivot.x, at.box.y + at.pivot.y};
+                auto corner = [&](float x, float y) { return SDL_FPoint{mid.x + x * c - y * s, mid.y + x * s + y * c}; };
+                const float hw = at.box.w / 2, hh = at.box.h / 2;
+                draw::quad(r, corner(-hw, -hh), corner(hw, -hh), corner(hw, hh), corner(-hw, hh), colorOf(key));
+            }
+            covered(at);
+        });
         return;
     }
     if (assets.picture(key)) {
         paint(assets, key, {}, [&](const Picture& pic, float a) {
             const float w = pic.w(), h = pic.h();
             const float scale = std::max(canvas.w / w, canvas.h / h); // cover
-            pic.draw(r, {screen.x + (canvas.w - w * scale) * 0.5f, screen.y + (canvas.h - h * scale) * 0.5f, w * scale, h * scale}, alpha * a);
+            const Placed at = placed({screen.x + (canvas.w - w * scale) * 0.5f, screen.y + (canvas.h - h * scale) * 0.5f, w * scale, h * scale});
+            wiped(at, [&] {
+                pic.draw(r, at.box, at.alpha * a, at.look.rotate, &at.pivot, false, shade(at.look.color.value_or(SDL_Color{255, 255, 255, 255}), true));
+                if (at.look.fade > 0.0f) drawCovered(r, pic, at.box, at.look.rotate, at.pivot, false, shade(at.look.fadeColor), at.alpha * a * std::min(1.0f, at.look.fade));
+            });
         });
         return;
     }
 
     // Placeholder: a gradient tinted by the image name.
-    const float hue = static_cast<float>(fnv1a(key) % 1000) / 1000.0f;
-    const auto a = static_cast<Uint8>(255.0f * alpha);
-    draw::gradient(r, screen, shade(draw::hsv(hue, 0.35f, 0.50f, a)), shade(draw::hsv(hue + 0.08f, 0.55f, 0.16f, a)));
-    draw::rect(r, {screen.x, screen.y + canvas.h * 0.62f, canvas.w, 2}, withAlpha({255, 255, 255, 40}, alpha));
-    if (font) label(*font, std::format("images/{}.png", key)).draw(r, screen.x + 24, screen.y + 20, withAlpha(theme::dim, alpha));
+    const Placed at = placed(screen);
+    wiped(at, [&] {
+        const float hue = static_cast<float>(fnv1a(key) % 1000) / 1000.0f;
+        const auto a = static_cast<Uint8>(255.0f * at.alpha);
+        draw::gradient(r, at.box, shade(tinted(draw::hsv(hue, 0.35f, 0.50f, a), at.look)), shade(tinted(draw::hsv(hue + 0.08f, 0.55f, 0.16f, a), at.look)));
+        draw::rect(r, {at.box.x, at.box.y + at.box.h * 0.62f, at.box.w, 2}, withAlpha({255, 255, 255, 40}, at.alpha));
+        covered(at);
+        if (font) label(*font, std::format("images/{}.png", key)).draw(r, at.box.x + 24, at.box.y + 20, withAlpha(theme::dim, at.alpha));
+    });
 }
 
 void Stage::drawObject(SDL_Renderer* r, Assets& assets, const Font* font, const Object& o, float spriteHeight, Frame frame) {
     const ObjectState& s = o.s;
-    const float alpha = o.fade * s.opacity;
+    const float alpha = s.opacity;
     if (alpha <= 0.0f) return;
     const bool character = !s.character.empty();
     std::string key = s.image;
@@ -789,53 +829,135 @@ void Stage::drawObject(SDL_Renderer* r, Assets& assets, const Font* font, const 
     }
     // The point of the picture as far across (and down) it as its place is across the screen goes
     // there: 0 lines up the left edges, 0.5 the middles. Past the edges it slides on, still lined up.
-    const float px = s.x * canvas.w + offset_.x, py = s.y * canvas.h + offset_.y;
+    const float px = s.x * canvas.w, py = s.y * canvas.h;
     const float ax = std::clamp(s.x, 0.0f, 1.0f), ay = std::clamp(s.y, 0.0f, 1.0f);
+    // Its animations move it, fade it, zoom and turn it around that point (as its own zoom and turn
+    // do), tint it, cover it with a colour and wipe it: where a picture `w` x `h` (as it is) goes, and how
+    // it looks.
+    struct Placed {
+        SDL_FRect box;
+        SDL_FPoint pivot;
+        Animation::Look look;
+    };
+    auto placed = [&](float w, float h) {
+        const Animation::Look look = lookOf(o.animations, o.s.tint, {px - ax * w, py - ay * h, w, h});
+        const float zoom = std::max(0.0f, look.zoom), zw = w * zoom, zh = h * zoom;
+        return Placed{{px + look.x - ax * zw, py + look.y - ay * zh, zw, zh}, {ax * zw, ay * zh}, look};
+    };
+    auto wiped = [&](const Placed& at, const auto& paint) { // (a std::function made only for a wipe)
+        if (at.look.wipe >= 0.999f) return paint();
+        wiper_.draw(r, assets, {canvas.w, canvas.h}, at.box, at.look.wipe, at.look.wipeShape, paint);
+    };
 
     if (assets.picture(key, frame)) {
         paint(assets, key, frame, [&](const Picture& pic, float a) {
             const float scale = (character ? std::min(1.0f, canvas.h * spriteHeight / pic.h()) : 1.0f) * s.zoom;
-            const float dw = pic.w() * scale, dh = pic.h() * scale;
-            const SDL_FPoint pivot{ax * dw, ay * dh};
-            pic.draw(r, {px - ax * dw, py - ay * dh, dw, dh}, alpha * a, s.rotate, &pivot, s.flip, shade(s.tint, true));
+            const Placed at = placed(pic.w() * scale, pic.h() * scale);
+            const float seen = alpha * a * std::clamp(at.look.opacity, 0.0f, 1.0f), turn = s.rotate + at.look.rotate;
+            wiped(at, [&] {
+                pic.draw(r, at.box, seen, turn, &at.pivot, s.flip, shade(at.look.color.value_or(s.tint), true));
+                if (at.look.fade > 0.0f) drawCovered(r, pic, at.box, turn, at.pivot, s.flip, shade(at.look.fadeColor), seen * std::min(1.0f, at.look.fade));
+            });
         });
         return;
     }
 
-    // Placeholders, in their tint and the colour effects.
-    auto look = [&](SDL_Color c) {
-        auto times = [](Uint8 a, Uint8 b) { return static_cast<Uint8>(a * b / 255); };
-        return shade({times(c.r, s.tint.r), times(c.g, s.tint.g), times(c.b, s.tint.b), c.a});
-    };
+    // Placeholders, in their tint and the colour effects (and their animations' moves, fades and zooms).
     if (!character) {
         // Placeholder image: a tinted panel with its file name.
-        const float w = canvas.w * 0.5f * s.zoom, h = canvas.h * 0.5f * s.zoom;
-        const SDL_FRect rr{px - ax * w, py - ay * h, w, h};
-        const float hue = static_cast<float>(fnv1a(key) % 1000) / 1000.0f;
-        draw::gradient(r, rr, look(draw::hsv(hue, 0.3f, 0.55f, static_cast<Uint8>(230 * alpha))), look(draw::hsv(hue + 0.1f, 0.5f, 0.25f, static_cast<Uint8>(230 * alpha))));
-        draw::outline(r, rr, withAlpha({255, 255, 255, 90}, alpha));
-        if (font) {
-            auto& file = label(*font, std::format("images/{}.png", key));
-            file.draw(r, rr.x + (rr.w - file.size().x) * 0.5f, rr.y + (rr.h - file.size().y) * 0.5f, withAlpha(theme::text, alpha));
-        }
+        const Placed at = placed(canvas.w * 0.5f * s.zoom, canvas.h * 0.5f * s.zoom);
+        const SDL_Color tint = at.look.color.value_or(s.tint);
+        auto look = [&](SDL_Color c) {
+            auto times = [](Uint8 a, Uint8 b) { return static_cast<Uint8>(a * b / 255); };
+            return shade({times(c.r, tint.r), times(c.g, tint.g), times(c.b, tint.b), c.a});
+        };
+        const float seen = alpha * std::clamp(at.look.opacity, 0.0f, 1.0f);
+        const SDL_FRect rr = at.box;
+        wiped(at, [&] {
+            const float hue = static_cast<float>(fnv1a(key) % 1000) / 1000.0f;
+            draw::gradient(r, rr, look(draw::hsv(hue, 0.3f, 0.55f, static_cast<Uint8>(230 * seen))), look(draw::hsv(hue + 0.1f, 0.5f, 0.25f, static_cast<Uint8>(230 * seen))));
+            if (at.look.fade > 0.0f) draw::rect(r, rr, withAlpha(shade(at.look.fadeColor), seen * std::min(1.0f, at.look.fade)));
+            draw::outline(r, rr, withAlpha({255, 255, 255, 90}, seen));
+            if (font) {
+                auto& file = label(*font, std::format("images/{}.png", key));
+                file.draw(r, rr.x + (rr.w - file.size().x) * 0.5f, rr.y + (rr.h - file.size().y) * 0.5f, withAlpha(theme::text, seen));
+            }
+        });
         return;
     }
 
     // Placeholder silhouette in the character's colour.
-    const float k = s.zoom, w = 300.0f * k, h = 506.0f * k;
-    const float cx = px - ax * w + w * 0.5f, bottom = py - ay * h + h;
+    const Placed at = placed(300.0f * s.zoom, 506.0f * s.zoom);
+    const SDL_Color tint = at.look.color.value_or(s.tint);
+    auto look = [&](SDL_Color c) {
+        auto times = [](Uint8 a, Uint8 b) { return static_cast<Uint8>(a * b / 255); };
+        const SDL_Color tinted = shade({times(c.r, tint.r), times(c.g, tint.g), times(c.b, tint.b), c.a});
+        auto toward = [&](Uint8 from, Uint8 to) { return static_cast<Uint8>(std::lround(from + (to - from) * std::clamp(at.look.fade, 0.0f, 1.0f))); };
+        const SDL_Color cover = shade(at.look.fadeColor);
+        return SDL_Color{toward(tinted.r, cover.r), toward(tinted.g, cover.g), toward(tinted.b, cover.b), tinted.a};
+    };
+    const float alphaSeen = alpha * std::clamp(at.look.opacity, 0.0f, 1.0f);
+    const float k = s.zoom * std::max(0.0f, at.look.zoom), w = at.box.w, h = at.box.h;
+    const float cx = at.box.x + w * 0.5f, bottom = at.box.y + h;
     const SDL_Color body = withAlpha(look({static_cast<Uint8>(o.def.color.r * 0.55f), static_cast<Uint8>(o.def.color.g * 0.55f),
                                            static_cast<Uint8>(o.def.color.b * 0.55f), 235}),
-                                     alpha);
-    const SDL_Color rim = withAlpha(look(o.def.color), alpha * 0.9f);
-    draw::quad(r, {cx - 105 * k, bottom - 345 * k}, {cx + 105 * k, bottom - 345 * k}, {cx + 150 * k, bottom}, {cx - 150 * k, bottom}, body);
-    draw::circle(r, cx, bottom - 440 * k, 66 * k, rim);
-    draw::circle(r, cx, bottom - 440 * k, 60 * k, body);
-    if (!font) return;
-    auto& name = label(*font, o.def.name);
-    name.draw(r, cx - name.size().x * 0.5f, bottom - 300 * k, withAlpha(o.def.color, alpha));
-    auto& file = label(*font, std::format("images/{}.png", key));
-    file.draw(r, cx - file.size().x * 0.5f, bottom - 300 * k + font->lineHeight(), withAlpha(theme::dim, alpha));
+                                     alphaSeen);
+    const SDL_Color rim = withAlpha(look(o.def.color), alphaSeen * 0.9f);
+    wiped(at, [&] {
+        draw::quad(r, {cx - 105 * k, bottom - 345 * k}, {cx + 105 * k, bottom - 345 * k}, {cx + 150 * k, bottom}, {cx - 150 * k, bottom}, body);
+        draw::circle(r, cx, bottom - 440 * k, 66 * k, rim);
+        draw::circle(r, cx, bottom - 440 * k, 60 * k, body);
+        if (!font) return;
+        auto& name = label(*font, o.def.name);
+        name.draw(r, cx - name.size().x * 0.5f, bottom - 300 * k, withAlpha(o.def.color, alphaSeen));
+        auto& file = label(*font, std::format("images/{}.png", key));
+        file.draw(r, cx - file.size().x * 0.5f, bottom - 300 * k + font->lineHeight(), withAlpha(theme::dim, alphaSeen));
+    });
+}
+
+Animation::Look Stage::lookOf(const Animations& animations, SDL_Color tint, const SDL_FRect& box) const {
+    if (!animations.own && !animations.played) return {};
+    // A place, as screens' parts have them (±1: its edge on the screen's, ±2: just off it), as how far it is
+    // from where it is.
+    const auto offset = [&](bool across, float place) { return across ? placeEdge(place, box.w, canvas.w) - box.x : placeEdge(-place, box.h, canvas.h) - box.y; };
+    return animations.look(tint, offset, {canvas.w, canvas.h});
+}
+
+void Stage::drawCovered(SDL_Renderer* r, const Picture& pic, const SDL_FRect& box, float angle, const SDL_FPoint& pivot, bool flip, SDL_Color color,
+                        float amount) {
+    if (amount <= 0.0f || box.w <= 0.0f || box.h <= 0.0f) return;
+    // Drawn into a picture of its own (as sharp as the screen), its colours replaced by the one and its
+    // see-through parts kept, then that is laid over it.
+    static const SDL_BlendMode fill = SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ZERO, SDL_BLENDOPERATION_ADD,
+                                                                 SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_ADD);
+    int outW = 0, outH = 0;
+    SDL_GetCurrentRenderOutputSize(r, &outW, &outH);
+    const float k = std::clamp(static_cast<float>(outW) / canvas.w, 1.0f, 4.0f);
+    const int w = std::min(8192, static_cast<int>(std::ceil(box.w * k))), h = std::min(8192, static_cast<int>(std::ceil(box.h * k)));
+    if (!cover_ || coverW_ < w || coverH_ < h) { // (bigger, in steps: not made again every frame something grows)
+        coverW_ = std::max(coverW_, (w + 255) / 256 * 256);
+        coverH_ = std::max(coverH_, (h + 255) / 256 * 256);
+        cover_.reset(SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, coverW_, coverH_));
+        if (cover_) SDL_SetTextureBlendMode(cover_.get(), SDL_BLENDMODE_BLEND);
+    }
+    bool filled = false;
+    if (cover_) {
+        const RenderTarget _(r, cover_.get(), 1.0f);
+        SDL_SetRenderDrawColor(r, 0, 0, 0, 0);
+        SDL_RenderClear(r);
+        pic.draw(r, {0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h)}, 1.0f, 0.0, nullptr, flip);
+        if (SDL_SetRenderDrawBlendMode(r, fill)) {
+            SDL_SetRenderDrawColor(r, color.r, color.g, color.b, 255);
+            const SDL_FRect all{0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h)};
+            filled = SDL_RenderFillRect(r, &all);
+        }
+        SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    }
+    if (!filled) return pic.draw(r, box, amount, angle, &pivot, flip, color);
+    const SDL_FRect part{0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h)};
+    SDL_SetTextureAlphaModFloat(cover_.get(), amount);
+    SDL_RenderTextureRotated(r, cover_.get(), &part, &box, angle, &pivot, SDL_FLIP_NONE);
+    SDL_SetTextureAlphaModFloat(cover_.get(), 1.0f);
 }
 
 // ---------------------------------------------------------------------------
@@ -926,6 +1048,13 @@ void Game::run() {
             wait_ = Wait::Reached;
             return;
         }
+        if (stopWhere_ && stopWhere_(pc_)) { // (stopWhere: the developer tools open there; skipping stops)
+            resumePc_ = pc_;
+            resumeRandom_ = random_;
+            skip_ = false;
+            wait_ = Wait::Stopped;
+            return;
+        }
         const std::size_t here = current_ = pc_++;
         if (ran_.size() < 100000) ran_.push_back(here);
         if (here == watch_) watched_ = true;
@@ -938,6 +1067,12 @@ void Game::run() {
             return;
         }
     }
+}
+
+void Game::goOn() {
+    if (wait_ != Wait::Stopped) return;
+    wait_ = Wait::None;
+    run();
 }
 
 void Game::waitFor(Wait wait, std::size_t here) {
@@ -1158,38 +1293,31 @@ void Game::revealTo(std::size_t position) {
 void Game::execute(const Command& command, std::size_t here) {
     const RandomScope _(random_); // (its random() numbers: from its own sequence)
     const bool fast = skipping();
-    const bool instant = fast || !ctx_.settings.transitions;
-    auto shown = [&](const Transition& t) { return instant ? Transition{} : t; };
+    const bool instant = fast || !ctx_.settings.animations; // (an animation played: at its end at once; effects and weather: there at once)
 
     std::visit(
         Overloaded{
             [&](const cmd::Say& c) { sayLine(c, here, fast); },
-            [&](const cmd::Scene& c) {
+            [&](const cmd::Scene& c) { // a new background (what was on stage goes with the one before), or the one there played on
                 have(RecordKind::Gallery, c.image);
-                const Transition t = shown(c.transition);
-                // A fade hides the old picture first; everything on stage leaves with it.
-                stage_.clearObjects(t.kind == TransitionKind::Fade ? Transition{.kind = TransitionKind::Dissolve, .duration = t.duration * 0.5f} : t);
-                stage_.setBackground(c.image, t);
-                if (stage_.backgroundTransitioning()) wait_ = Wait::Transition;
+                if (c.image != stage_.background()) stage_.clearObjects();
+                stage_.setBackground(c.image, animation(c.with.value_or("")), instant);
+                if (c.animation) stage_.animateBackground(animation(*c.animation), true, fast);
+                if (stage_.backgroundComing()) wait_ = Wait::Background; // (the story goes on once it's in)
             },
-            [&](const cmd::Show& c) {
+            [&](const cmd::Show& c) { // (one that comes plays the game's show_animation, unless the line says)
                 if (!c.image.empty()) have(RecordKind::Gallery, c.image);
                 const CharacterDef* def = c.character.empty() ? nullptr : script_.character(c.character);
-                stage_.show(c.tag, def, c.image, c.expression, c.props, shown(c.transition), fast ? 0.0f : config().moveTime);
+                const std::string played = c.with ? *c.with : stage_.has(c.tag) ? std::string{} : config().showAnimation;
+                stage_.show(c.tag, def, c.image, c.expression, c.props, animation(played), fast ? 0.0f : config().moveTime, instant);
+                if (c.animation) stage_.animate(c.tag, animation(*c.animation), true, fast);
                 if (def && def->faceSync.expression) // their face looks as their picture does (a new one starts as it is)
                     expressions_.insert_or_assign(def->key, stage_.expression(c.tag));
+                if (c.wait && !fast && stage_.moving()) wait_ = Wait::Move;
             },
-            [&](const cmd::Hide& c) { stage_.hide(c.tag, shown(c.transition)); },
-            [&](const cmd::Move& c) {
-                if (!stage_.move(c.tag, c.props, fast ? 0.0f : c.seconds, c.ease))
-                    logWarn("{}: There's nothing called '{}' to move.", script_.where(script_.code[here]), c.tag);
-                else if (c.wait && !fast && c.seconds > 0.0f)
-                    wait_ = Wait::Move;
-            },
-            [&](const cmd::Shake& c) {
-                if (fast) return;
-                if (c.flash) stage_.flash(c.color, c.seconds);
-                else stage_.shake(c.strength, c.seconds);
+            [&](const cmd::Hide& c) { // (it plays the game's hide_animation, unless the line says; then it's gone)
+                stage_.hide(c.tag, animation(c.with.value_or(config().hideAnimation)), instant);
+                if (c.wait && !fast && stage_.moving()) wait_ = Wait::Move;
             },
             [&](const cmd::Phone& c) { phoneOn_ = c.on; },
             [&](const cmd::Effect& c) {
@@ -1241,7 +1369,7 @@ void Game::execute(const Command& command, std::size_t here) {
                 const ScreenDef* screen = c.verb == "open" ? script_.screen(c.arg) : nullptr;
                 if (!screen || !screen->modal) return requests_.push_back(c);
                 vars_.insert_or_assign("answer", std::string{}); // until it answers
-                waitForScreen({.name = c.arg, .transition = c.transition, .closing = c.closing}, here);
+                waitForScreen({.name = c.arg, .opening = c.opening, .closing = c.closing}, here);
             },
             [&](const cmd::Chapter& c) { // a new part of the story: its title card, if the screens have one
                 chapter_ = fillValues(c.title, lookup_);
@@ -1257,13 +1385,9 @@ void Game::execute(const Command& command, std::size_t here) {
             [&](const cmd::Message& c) { sendMessage(c, here); }, // on the phone; a new one from someone closes the answers to their last
             [&](const cmd::Weather& c) { stage_.setWeather(c, instant ? 0.0f : c.fade); },
             [&](const cmd::Camera& c) {
-                Stage::Camera to = c.reset ? Stage::Camera{} : stage_.camera();
-                if (c.x) to.x = *c.x;
-                if (c.y) to.y = *c.y;
-                if (c.zoom) to.zoom = *c.zoom;
-                if (c.rotate) to.rotate = *c.rotate;
-                stage_.moveCamera(to, fast ? 0.0f : c.seconds, c.ease);
-                if (c.wait && !fast && c.seconds > 0.0f) wait_ = Wait::Move;
+                if (c.animation) stage_.animateCamera(animation(*c.animation), true, fast);
+                if (c.with) stage_.animateCamera(animation(*c.with), false, instant);
+                if (c.wait && !fast && stage_.moving()) wait_ = Wait::Move;
             },
             [&](const cmd::Textbox& c) {
                 if (c.hide) return void(std::erase_if(others_, [&](const BoxLine& l) { return c.screen.empty() || l.box == c.screen; }));
@@ -1484,6 +1608,12 @@ void Game::addToPage() {
     if (page_.size() > 60) page_.erase(page_.begin());
 }
 
+std::shared_ptr<const Animation> Game::animation(std::string_view name) const {
+    if (name.empty()) return nullptr;
+    const auto it = script_.animations.find(name);
+    return it != script_.animations.end() ? std::make_shared<const Animation>(it->second) : nullptr;
+}
+
 void Game::perform(const Command& command) {
     if (const auto* jump = std::get_if<cmd::Jump>(&command)) {
         const auto pc = script_.findLabel(jump->label);
@@ -1529,9 +1659,9 @@ void Game::advance() {
         if (others) return;
         break;
     }
-    case Wait::Transition:
+    case Wait::Background:
     case Wait::Move:
-        stage_.finishTransitions();
+        stage_.finish();
         break;
     case Wait::Pause:
     case Wait::Timer:
@@ -1546,7 +1676,7 @@ void Game::advance() {
 
 bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& there, bool* skipped) {
     watch_ = target;
-    watched_ = false;
+    watched_ = std::ranges::contains(ran_, target); // (start() runs on to the first wait: it may have run it already)
     watchThere_ = &there;
     const ScopeExit _([this] { // (however this ends)
         watch_ = SIZE_MAX;
@@ -1575,7 +1705,7 @@ bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& th
                 for (BoxLine& l : others_) l.reveal = static_cast<float>(l.length);
                 passedStops_ = stops_.size();
                 revealTo(length_);
-                stage_.finishTransitions();
+                stage_.finish();
                 return true;
             }
             if (wait_ == Wait::Say) {
@@ -1606,7 +1736,7 @@ bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& th
                 break;
             }
             if (there(resumePc_)) { // (what the player sees at that line: a video's first picture)
-                stage_.finishTransitions();
+                stage_.finish();
                 if (movie_) movie_->showFirst();
                 return true;
             }
@@ -1616,7 +1746,7 @@ bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& th
         case Wait::None:
             run();
             break;
-        default: // a transition, a move, a pause or a timer: over at once
+        default: // an animation, a pause or a timer: over at once
             advance();
             break;
         }
@@ -1864,7 +1994,8 @@ void Game::screenClosed(std::optional<Value> answer) {
 
 void Game::update(float dt) {
     const bool fast = skipping();
-    if (fast) stage_.finishTransitions();
+    if (fast) stage_.finish();
+    stage_.setStill(!ctx_.settings.animations); // (animations off: still)
     stage_.update(dt);
     blipTimer_ -= dt;
     clock_ += dt;
@@ -1881,8 +2012,8 @@ void Game::update(float dt) {
     case Wait::Say:
         updateLine(dt, fast);
         break;
-    case Wait::Transition:
-        if (!stage_.backgroundTransitioning()) {
+    case Wait::Background:
+        if (!stage_.backgroundComing()) {
             wait_ = Wait::None;
             run();
         }
@@ -1911,6 +2042,7 @@ void Game::update(float dt) {
         break;
     case Wait::Screen:
     case Wait::Reached: // (stopBefore: it's saved from there, not played on)
+    case Wait::Stopped: // (stopWhere: until goOn())
     case Wait::Finished:
         break;
     }
@@ -2118,11 +2250,14 @@ std::string Game::save() const {
     for (const auto& [name, value] : vars_) out += std::format("var {} {}\n", name, encodeValue(value));
     for (const auto& o : stage_.objects())
         out += std::format("object {} char={} image={} expr={} x={} y={} zoom={} alpha={} rotate={} flip={} layer={} "
-                           "tint=#{:02x}{:02x}{:02x}\n",
+                           "tint=#{:02x}{:02x}{:02x}{}{}\n",
                            escape(o.tag), escape(o.character), escape(o.image), escape(o.expression),
                            std::lround(o.x * 10000.0f), std::lround(o.y * 10000.0f), std::lround(o.zoom * 10000.0f), std::lround(o.opacity * 10000.0f),
-                           std::lround(o.rotate * 100.0f), o.flip ? 1 : 0, o.layer, o.tint.r, o.tint.g, o.tint.b);
-    if (!stage_.background().empty()) out += std::format("scene {}\n", stage_.background());
+                           std::lround(o.rotate * 100.0f), o.flip ? 1 : 0, o.layer, o.tint.r, o.tint.g, o.tint.b,
+                           o.animation.empty() ? "" : " animation=" + escape(o.animation), o.played.empty() ? "" : " played=" + escape(o.played));
+    if (!stage_.background().empty())
+        out += std::format("scene {}{}{}\n", stage_.background(), stage_.backgroundAnimation(true).empty() ? "" : " animation=" + escape(stage_.backgroundAnimation(true)),
+                           stage_.backgroundAnimation(false).empty() ? "" : " played=" + escape(stage_.backgroundAnimation(false)));
     if (!chapter_.empty()) out += std::format("chapter {}\n", escape(chapter_));
     if (!chartNode_.empty()) out += std::format("chartplace {} {}\n", chartNode_, chartOption_);
     if (!music_.empty()) out += std::format("musicvol {}\nmusic {}\n", std::lround(musicVolume_ * 1000.0f), music_);
@@ -2152,9 +2287,15 @@ std::string Game::save() const {
                            escape(l.source));
     if (pass_) out += std::format("pass {} {}\n", pass_->depth, pass_->lines);
     if (hiddenLines_ > 0) out += std::format("hidden {}\n", hiddenLines_);
-    if (const Stage::Camera cam = stage_.camera(); cam != Stage::Camera{})
-        out += std::format("camera {} {} {} {}\n", std::lround(cam.x * 10000.0f), std::lround(cam.y * 10000.0f), std::lround(cam.zoom * 10000.0f),
-                           std::lround(cam.rotate * 100.0f));
+    if (const std::string own = stage_.cameraAnimation(true), played = stage_.cameraAnimation(false); !own.empty() || !played.empty()) {
+        // (its animations, then where the one played on it started: its numbers, colours and wipe's shape)
+        const Animation::Look& s = stage_.cameraStart();
+        auto hex = [](SDL_Color c) { return std::format("#{:02x}{:02x}{:02x}{:02x}", c.r, c.g, c.b, c.a); };
+        out += std::format("camera {} {} {} {} {} {} {} {} {} {} {} {}\n", own.empty() ? "-" : escape(own), played.empty() ? "-" : escape(played),
+                           std::lround(s.x * 1000.0f), std::lround(s.y * 1000.0f), std::lround(s.opacity * 1000.0f), std::lround(s.zoom * 1000.0f),
+                           std::lround(s.rotate * 1000.0f), std::lround(s.fade * 1000.0f), std::lround(s.wipe * 1000.0f), hex(s.fadeColor),
+                           s.color ? hex(*s.color) : "-", s.wipeShape.empty() ? "-" : escape(s.wipeShape));
+    }
     for (const auto& [character, expression] : expressions_) out += std::format("expr {} {}\n", escape(character), escape(expression));
     if (wait_ == Wait::Say && !lineVoice_.file.empty()) // the line's voice plays again when it's loaded
         out += std::format("voice {} {} {}\n", lineVoice_.sync ? (*lineVoice_.sync ? 1 : 0) : -1, std::lround(lineVoice_.volume * 1000.0f),
@@ -2259,7 +2400,7 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     std::vector<std::size_t> stack;
     Variables vars;
     std::vector<Stage::ObjectState> objects;
-    std::string scene, music, chapter, chartNode;
+    std::string scene, sceneAnimation, scenePlayed, music, chapter, chartNode;
     int chartOption = -1;
     float musicVolume = 1.0f;
     std::map<std::string, Loop, std::less<>> loops;
@@ -2272,7 +2413,8 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     std::vector<PageLine> page;
     cmd::Weather weather;
     cmd::Effect effect;
-    Stage::Camera camera;
+    std::string cameraOwn, cameraPlayed;
+    Animation::Look cameraStart;
 
     // The exact command when the script is unchanged; otherwise label + offset.
     auto resolve = [&](std::istream& s) -> std::optional<std::size_t> {
@@ -2342,9 +2484,17 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
                 else if (k == "flip") o.flip = n != 0.0f;
                 else if (k == "layer") o.layer = static_cast<int>(n);
                 else if (k == "tint") o.tint = parseColor(v).value_or(o.tint);
+                else if (k == "animation") o.animation = v;
+                else if (k == "played") o.played = v;
             }
             objects.push_back(std::move(o));
-        } else if (key == "scene") scene = rest;
+        } else if (key == "scene") { // (its name, then its animations: key=value)
+            ls >> scene;
+            std::string field;
+            while (ls >> field)
+                if (field.starts_with("animation=")) sceneAnimation = unescape(field.substr(10));
+                else if (field.starts_with("played=")) scenePlayed = unescape(field.substr(7));
+        }
         else if (key == "chapter") chapter = unescape(rest);
         else if (key == "chartplace") ls >> chartNode >> chartOption;
         else if (key == "music") music = rest;
@@ -2364,8 +2514,7 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
             std::string with, text;
             ls >> read >> r >> g >> b >> with >> text;
             with = unescape(with);
-            const bool mine = key == "sent" || with == "-";      // (older saves: "message ... - TEXT", to whoever wrote before)
-            if (with == "-") with = messages.empty() ? std::string{} : messages.back().with;
+            const bool mine = key == "sent";
             messages.push_back({.from = mine ? std::string{} : with, .with = with, .color = {static_cast<Uint8>(r), static_cast<Uint8>(g), static_cast<Uint8>(b), 255},
                                 .text = unescape(text), .read = read != 0, .replies = mine ? std::nullopt : resolve(ls),
                                 .typing = static_cast<float>(typing) / 1000.0f});
@@ -2400,10 +2549,16 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
             ls >> effect.looks >> amount;
             effect.amount = static_cast<float>(amount) / 1000.0f;
         } else if (key == "camera") {
-            long x = 5000, y = 5000, zoom = 10000, rotate = 0;
-            ls >> x >> y >> zoom >> rotate;
-            camera = {static_cast<float>(x) / 10000.0f, static_cast<float>(y) / 10000.0f, static_cast<float>(zoom) / 10000.0f,
-                      static_cast<float>(rotate) / 100.0f};
+            std::string own, played, fadeColor, color, shape;
+            long x = 0, y = 0, opacity = 1000, zoom = 1000, rotate = 0, fade = 0, wipe = 1000;
+            ls >> own >> played >> x >> y >> opacity >> zoom >> rotate >> fade >> wipe >> fadeColor >> color >> shape;
+            auto named = [](const std::string& s) { return s == "-" ? std::string{} : unescape(s); };
+            auto thousandths = [](long n) { return static_cast<float>(n) / 1000.0f; };
+            cameraOwn = named(own);
+            cameraPlayed = named(played);
+            cameraStart = {.x = thousandths(x), .y = thousandths(y), .opacity = thousandths(opacity), .zoom = thousandths(zoom), .rotate = thousandths(rotate),
+                           .color = color == "-" ? std::nullopt : parseColor(color), .fade = thousandths(fade),
+                           .fadeColor = parseColor(fadeColor).value_or(SDL_Color{0, 0, 0, 255}), .wipe = thousandths(wipe), .wipeShape = named(shape)};
         } else if (key == "voice") {
             int sync = -1;
             long volume = 1000;
@@ -2422,14 +2577,22 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
         const CharacterDef* def = o.character.empty() ? nullptr : script_.character(o.character);
         if (!o.character.empty() && !def) continue; // that character no longer exists
         stage_.restore(o, def);
+        // Its animations: from their start if they play again and again, else as they ended. (One no
+        // longer in the scripts: none.)
+        stage_.animate(o.tag, animation(o.animation), true, true);
+        stage_.animate(o.tag, animation(o.played), false, true);
     }
-    if (!scene.empty()) stage_.setBackground(scene, {});
+    if (!scene.empty()) {
+        stage_.setBackground(scene, nullptr, true);
+        stage_.animateBackground(animation(sceneAnimation), true, true);
+        stage_.animateBackground(animation(scenePlayed), false, true);
+    }
     chapter_ = chapter;
     chartNode_ = chartNode;
     chartOption_ = chartOption;
     stage_.setWeather(weather, 0.0f);
     stage_.setEffect(effect, true);
-    stage_.moveCamera(camera, 0.0f, Ease::InOut);
+    stage_.restoreCamera(animation(cameraOwn), animation(cameraPlayed), cameraStart);
     textboxScreen_ = textbox;
     page_ = std::move(page);
     vars_ = std::move(vars);

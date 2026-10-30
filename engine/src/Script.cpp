@@ -107,7 +107,7 @@ std::expected<std::vector<ScriptWord>, std::string> splitWords(std::string_view 
                 continue;
             }
             const auto close = line.find('"', i + 1);
-            if (close == std::string_view::npos) return std::unexpected("a quote mark (\") is opened but never closed");
+            if (close == std::string_view::npos) return std::unexpected("a quote mark (\") is opened but never closed"_tr());
             w.text += line.substr(i + 1, close - i - 1);
             i = close + 1;
         }
@@ -236,8 +236,8 @@ constexpr auto kCommands = std::to_array<CommandWord>({
     {"movie", true, false}, {"chapter", true, false}, {"chart", true, false}, {"ending", true, false}, {"message", true, false},
     {"phone", true, false},
     // Both.
-    {"scene", true, true}, {"show", true, true}, {"hide", true, true}, {"move", true, true}, {"shake", true, true},
-    {"flash", true, true}, {"effect", true, true}, {"weather", true, true}, {"camera", true, true}, {"music", true, true}, {"sound", true, true},
+    {"scene", true, true}, {"show", true, true}, {"hide", true, true},
+    {"effect", true, true}, {"weather", true, true}, {"camera", true, true}, {"music", true, true}, {"sound", true, true},
     {"voice", true, true}, {"stop", true, true}, {"jump", true, true}, {"call", true, true}, {"end", true, true},
     {"set", true, true}, {"add", true, true}, {"subtract", true, true}, {"toggle", true, true}, {"unlock", true, true},
     {"achievement", true, true}, {"tip", true, true}, {"notify", true, true}, {"open", true, true}, {"quick save", true, true},
@@ -321,18 +321,17 @@ constexpr auto kFormulaOptions = std::to_array<std::string_view>({"value", "min"
 // The player's settings: "setting NAME VALUE" (buttons), slider setting=NAME and "config default.NAME" lines.
 constexpr auto kSettingNames = std::to_array<std::string_view>({
     "fullscreen", "window_size", "scaling", "vsync", "frame_limit", "text_speed", "auto_delay", "textbox_opacity", "text_size",
-    "transitions", "master_volume", "music_volume", "sound_volume", "voice_volume", "babble", "typing_sounds", "mouths", "skip_unread",
+    "animations", "master_volume", "music_volume", "sound_volume", "voice_volume", "babble", "typing_sounds", "mouths", "skip_unread",
     "skip_after_choices", "skip_movies", "rollback", "read_aloud", "high_contrast", "language",
 });
 
 // Words that pick one of a few values.
 template <class T>
 using Choices = std::span<const std::pair<std::string_view, T>>;
-constexpr std::pair<std::string_view, Ease> kEases[]{{"linear", Ease::Linear}, {"in", Ease::In}, {"out", Ease::Out}, {"inout", Ease::InOut}};
+constexpr std::pair<std::string_view, Ease> kEases[]{{"linear", Ease::Linear}, {"in", Ease::In},         {"out", Ease::Out},
+                                                     {"inout", Ease::InOut},   {"bounce", Ease::Bounce}, {"spring", Ease::Spring},
+                                                     {"overshoot", Ease::Overshoot}};
 constexpr std::pair<std::string_view, Reveal> kReveals[]{{"letter", Reveal::Letter}, {"word", Reveal::Word}, {"line", Reveal::Line}};
-constexpr std::pair<std::string_view, TransitionKind> kTransitions[]{{"fade", TransitionKind::Fade}, {"dissolve", TransitionKind::Dissolve},
-                                                                     {"wipe", TransitionKind::Wipe}, {"slide", TransitionKind::Slide},
-                                                                     {"none", TransitionKind::None}};
 constexpr std::pair<std::string_view, Talk> kTalks[]{{"yes", Talk::Yes}, {"voice", Talk::Voice}, {"no", Talk::No}};
 constexpr std::pair<std::string_view, int> kScalings[]{{"fit", 0}, {"integer", 1}, {"stretch", 2}, {"fill", 3}};
 constexpr std::pair<std::string_view, int> kMouths[]{{"always", 0}, {"yes", 0}, {"voice", 1}, {"never", 2}, {"no", 2}};
@@ -387,7 +386,7 @@ public:
         phase_ = Phase::Story;
         block(lines);
         if (!s_.labels.contains("start"))
-            s_.errors.push_back({entry, 0, "The story needs a beginning: write  label start  in main.vnscript, then its first lines under it. The game begins there."});
+            s_.errors.push_back({entry, 0, "The story needs a beginning: a 'label start' line in main.vnscript, with its first lines under it."_tr()});
         screens();
         bindings();
         resolve();
@@ -418,8 +417,8 @@ private:
         return false;
     }
 
-    std::size_t emit(Command c, const Line& line) {
-        s_.code.push_back({std::move(c), line.file, line.number});
+    std::size_t emit(Command c, const Line& line, bool tail = false) { // (tail: see Instruction)
+        s_.code.push_back({std::move(c), line.file, line.number, tail});
         return s_.code.size() - 1;
     }
 
@@ -428,11 +427,11 @@ private:
     std::optional<Expr> formula(const Line& line, std::string_view src) {
         src = trim(src);
         if (src.empty()) {
-            error(line, "A value or a condition is missing.");
+            error(line, "A value or a condition is missing."_tr());
             return std::nullopt;
         }
         auto e = Expr::parse(src);
-        if (!e) error(line, std::format("There's a mistake in '{}': {}.", src, e.error()));
+        if (!e) error(line, "There's a mistake in '{}': {}."_tr(src, e.error()));
         return e ? std::optional<Expr>(std::move(*e)) : std::nullopt;
     }
 
@@ -441,25 +440,25 @@ private:
         const Lookup none = [](std::string_view) { return Value{0}; };
         (void)expand(text, none, [&](std::string_view tag, std::string_view name, std::size_t) { // {tip NAME}: one that's listed
             if (tag != "tip") return;
-            if (name.empty()) error(line, "{tip} needs the name of a tip.");
+            if (name.empty()) error(line, "{tip} needs the name of a tip."_tr());
             else if (!s_.record(RecordKind::Tip, name))
-                error(line, std::format("There's no tip called '{}'.", name));
+                error(line, "There's no tip called '{}'."_tr(name));
         });
     }
 
     std::optional<float> number(const Line& line, std::string_view value, std::string_view what) {
         if (auto v = parseNumber(value)) return v;
-        return fail(line, std::format("{} needs a number, not '{}'.", what, value));
+        return fail(line, "'{}' needs a number, not '{}'."_tr(what, value));
     }
 
     std::optional<bool> boolean(const Line& line, std::string_view value, std::string_view what) {
         if (auto v = parseBool(value)) return v;
-        return fail(line, std::format("{} can be yes or no, not '{}'.", what, value));
+        return fail(line, "'{}' can be yes or no, not '{}'."_tr(what, value));
     }
 
     std::optional<SDL_Color> color(const Line& line, std::string_view value) {
         if (auto c = parseColor(value, &s_.palette)) return c;
-        return fail(line, std::format("'{}' isn't a colour.", value));
+        return fail(line, "'{}' isn't a colour."_tr(value));
     }
 
     // One of a few words (case doesn't matter), else an error listing them.
@@ -470,7 +469,7 @@ private:
             if (lower(value) == choices[i].first) return choices[i].second;
             list += std::format("{}{}", i == 0 ? "" : i + 1 == choices.size() ? " or " : ", ", choices[i].first);
         }
-        error(line, std::format("{} can be {}, not '{}'.", what, list, value));
+        error(line, "'{}' can be {}, not '{}'."_tr(what, list, value));
         return std::nullopt; // (not fail(): GCC 16 takes its nullopt, copied in, for something unset)
     }
 
@@ -484,34 +483,13 @@ private:
     // Took::Bad: it is, but what follows is wrong (the error is written).
     enum class Took : std::uint8_t { No, Yes, Bad };
 
-    // "over 2 seconds" or "for 2 seconds" (moves, the camera, shake, flash), then for moves and the
-    // camera "ease=out" and "and wait".
-    Took timing(const Line& line, Cursor& c, float& seconds, Ease* ease = nullptr, bool* wait = nullptr, bool story = true) {
-        if (const std::string_view word = c.take("over") ? "over" : c.take("for") ? "for" : ""; !word.empty()) {
-            const auto n = c.number();
-            if (!n) return error(line, std::format("'{}' needs a number of seconds.", word)), Took::Bad;
-            seconds = std::max(0.0f, *n);
-        } else if (wait && c.take("and")) {
-        } else if (wait && c.take("wait")) {
-            if (!story) return error(line, "A button can't wait for this to end."), Took::Bad;
-            *wait = true;
-        } else if (ease && c.atOption("ease")) {
-            const auto e = oneOf<Ease>(line, "ease", c.option()->second, kEases);
-            if (!e) return Took::Bad;
-            *ease = *e;
-        } else {
-            return Took::No;
-        }
-        return Took::Yes;
-    }
-
     // "fade 2" or "fade=2", "volume 50%" or "volume=50%" (music, sounds, voices, videos, weather).
     Took amount(const Line& line, Cursor& c, std::string_view key, float& out) {
         std::optional<float> n;
         if (c.take(key)) n = c.number();
         else if (c.atOption(key)) n = parseNumber(c.option()->second);
         else return Took::No;
-        if (!n) return error(line, std::format("{} needs a number after it.", key)), Took::Bad;
+        if (!n) return error(line, "'{}' needs a number after it."_tr(key)), Took::Bad;
         out = key == "volume" ? std::clamp(*n, 0.0f, 1.0f) : std::max(0.0f, *n);
         return Took::Yes;
     }
@@ -531,8 +509,8 @@ private:
         if (!included_.insert(path).second) return; // each file is read once
         auto source = read_(path);
         if (!source) {
-            if (from) error(*from, std::format("There's no file '{}'.", path));
-            else s_.errors.push_back({path, 0, "This game has no scripts/main.vnscript, where every game starts."});
+            if (from) error(*from, "There's no file '{}'."_tr(path));
+            else s_.errors.push_back({path, 0, "This game has no scripts/main.vnscript, where every game starts."_tr()});
             return;
         }
         s_.hash = fnv1a(*source, s_.hash);
@@ -575,7 +553,7 @@ private:
             if (head == "if" && (exact || hasBlock)) {
                 i = ifChain(lines, i);
             } else if ((head == "else" || head == "elif") && (exact || hasBlock)) {
-                if (phase_ == Phase::Story) error(line, "This 'else' has no 'if' right above it at the same indentation.");
+                if (phase_ == Phase::Story) error(line, "This 'else' has no 'if' right above it at the same indentation."_tr());
                 block(line.children);
             } else if (head == "choice" && (exact || hasBlock)) {
                 menu(line);
@@ -604,10 +582,10 @@ private:
             std::optional<std::size_t> branch;
             if (phase_ == Phase::Story) {
                 if (isElse && !trim(afterWords(line.text, 1)).empty() && trim(afterWords(line.text, 1)) != ":")
-                    error(line, "'else' takes nothing after it.");
+                    error(line, "'else' takes nothing after it."_tr());
                 if (!isElse) branch = emit(cmd::Jump{.unless = formula(line, condition)}, line);
                 if (line.children.empty())
-                    error(line, "Nothing is indented under this line.");
+                    error(line, "Nothing is indented under this line."_tr());
             }
             block(line.children);
 
@@ -617,7 +595,7 @@ private:
                 more = (next == "else" || next == "elif") && (!capitalized(lines[i + 1].text) || !lines[i + 1].children.empty());
             }
             if (phase_ == Phase::Story) {
-                if (more) exits.push_back(emit(cmd::Jump{}, line));
+                if (more) exits.push_back(emit(cmd::Jump{}, line, true));
                 if (branch) jumpAt(*branch).target = s_.code.size();
             }
             if (!more) break;
@@ -639,7 +617,7 @@ private:
         checkTextOf(line, prompt);
         const bool meanwhile = m.lines > 0; // up while the story goes on: each option comes back when its lines are done
         if (meanwhile && !prompt.empty())
-            error(line, "A choice that's up for some lines has no question.");
+            error(line, "A choice that's up for some lines has no question."_tr());
         m.prompt = prompt;
         const std::size_t at = emit(std::move(m), line);
         std::vector<cmd::Choice> choices;
@@ -651,11 +629,11 @@ private:
             if (!option.children.empty()) {
                 choice.target = s_.code.size();
                 block(option.children);
-                if (!label.empty()) emit(cmd::Jump{.label = label}, option);
-                else if (meanwhile) emit(cmd::Return{}, option);
-                else exits.push_back(emit(cmd::Jump{}, option));
+                if (!label.empty()) emit(cmd::Jump{.label = label}, option, true);
+                else if (meanwhile) emit(cmd::Return{}, option, true);
+                else exits.push_back(emit(cmd::Jump{}, option, true));
             } else if (label.empty()) {
-                if (meanwhile) choice.target = emit(cmd::Return{}, option); // nothing to do: back to the story
+                if (meanwhile) choice.target = emit(cmd::Return{}, option, true); // nothing to do: back to the story
                 else skipped.push_back(choices.size());
             }
             choices.push_back(std::move(choice));
@@ -663,7 +641,7 @@ private:
         for (auto pc : exits) jumpAt(pc).target = s_.code.size();
         for (auto k : skipped) choices[k].target = s_.code.size();
         if (choices.empty())
-            error(line, "This choice has no options.");
+            error(line, "This choice has no options."_tr());
         auto& emitted = std::get<cmd::Menu>(s_.code[at].command);
         emitted.choices = std::move(choices);
         emitted.after = s_.code.size();
@@ -679,7 +657,7 @@ private:
         if (const auto arrow = text.rfind("->"); arrow != std::string::npos && !isQuoted(text)) {
             label = lower(trim(std::string_view(text).substr(arrow + 2)));
             text = std::string(trim(std::string_view(text).substr(0, arrow)));
-            if (!isName(label)) error(option, std::format("'{}' isn't a label name.", label));
+            if (!isName(label)) error(option, "'{}' isn't a label name."_tr(label));
         }
         bool shownLocked = false;
         std::string note;
@@ -719,7 +697,7 @@ private:
         std::vector<cmd::Say*> says;
         for (std::size_t pc = first; pc < s_.code.size(); ++pc)
             if (auto* say = std::get_if<cmd::Say>(&s_.code[pc].command)) says.push_back(say);
-        if (says.size() < 2) return error(line, "'together' needs two lines or more indented under it.");
+        if (says.size() < 2) return error(line, "'together' needs two lines or more indented under it."_tr());
         for (std::size_t k = 0; k + 1 < says.size(); ++k) says[k]->together = true;
     }
 
@@ -735,14 +713,14 @@ private:
         if (!c) return;
         const std::string text = std::get<cmd::Message>(*c).text;
         const std::size_t at = emit(std::move(*c), line);
-        const std::size_t past = emit(cmd::Jump{}, line); // the story goes past the answers' lines
+        const std::size_t past = emit(cmd::Jump{}, line, true); // the story goes past the answers' lines
         std::vector<cmd::Choice> replies;
         for (const Line& option : line.children) {
             auto [reply, label] = this->option(option, text);
             reply.target = s_.code.size();
             reply.label = label;
             block(option.children);
-            emit(label.empty() ? Command{cmd::Return{}} : Command{cmd::Jump{.label = label}}, option);
+            emit(label.empty() ? Command{cmd::Return{}} : Command{cmd::Jump{.label = label}}, option, true);
             replies.push_back(std::move(reply));
         }
         jumpAt(past).target = s_.code.size();
@@ -779,7 +757,7 @@ private:
             } else if (last.starts_with("screen=")) {
                 m.screen = last.substr(7);
                 if (!screenLines_.contains(m.screen)) {
-                    error(line, std::format("There's no screen called '{}'.", m.screen));
+                    error(line, "There's no screen called '{}'."_tr(m.screen));
                     return text;
                 }
                 cut(1);
@@ -792,7 +770,7 @@ private:
                 break;
             }
         }
-        if (m.lines > 0 && m.seconds > 0.0f) error(line, "A choice is up for some seconds or for some lines, not both.");
+        if (m.lines > 0 && m.seconds > 0.0f) error(line, "A choice is up for some seconds or for some lines, not both."_tr());
         if (returns && m.lines == 0) error(line, "return= only goes with a choice that's up for some lines.");
         return text;
     }
@@ -815,11 +793,11 @@ private:
     void label(const Line& line) {
         std::string name = lower(afterWords(line.text, 1));
         if (name.ends_with(':')) name.pop_back();
-        if (!isName(name)) return error(line, std::format("'{}' can't be a label name (one word of letters, numbers, _ and -).", name));
+        if (!isName(name)) return error(line, "'{}' can't be a label name (one word of letters, numbers, _ and -)."_tr(name));
         if (auto [it, fresh] = s_.labels.emplace(name, s_.code.size()); !fresh)
-            error(line, std::format("There are two labels called '{}'.", name));
+            error(line, "There are two labels called '{}'."_tr(name));
         else if (name == "start" && line.file != builtinFiles_)
-            error(line, "label start belongs in main.vnscript, where the story begins.");
+            error(line, "'label start' belongs in main.vnscript, where the story begins."_tr());
         currentLabel_ = name;
         lineCounts_.clear();
     }
@@ -833,7 +811,7 @@ private:
             static constexpr std::string_view kPartSettings[]{" x=", " y=", " w=", " h=", " action=", " style=", " bg=", " image=", " keys="};
             if (std::ranges::find(kKinds, std::string_view(head), &KindSpec::name) != kKinds.end() &&
                 std::ranges::any_of(kPartSettings, [&](std::string_view key) { return t.contains(key); }))
-                return error(line, std::format("'{}' is a screen part: it goes indented under a screen line.", head));
+                return error(line, "'{}' is a screen part: it goes indented under a screen line."_tr(head));
         }
         cmd::Say say;
         const auto colon = t.find(':');
@@ -858,7 +836,7 @@ private:
             } else {
                 say.speaker = prefix; // someone who isn't a defined character
             }
-            if (say.text.empty()) error(line, std::format("{} doesn't say anything.", prefix));
+            if (say.text.empty()) error(line, "{} doesn't say anything."_tr(prefix));
             if (!say.character.empty()) say.voiceId = std::format("{}_{}", currentLabel_, ++lineCounts_[say.character]);
         }
         checkTextOf(line, say.text);
@@ -876,33 +854,42 @@ private:
         Cursor& c = *cursor;
         // The command, once nothing is left after it.
         auto finished = [&](Command result) -> std::optional<Command> {
-            if (!c.done()) return fail(line, std::format("'{}' doesn't belong in this {} line.", c.peek().text, verb));
+            if (!c.done()) return fail(line, "'{}' doesn't belong in this {} line."_tr(c.peek().text, verb));
             return result;
         };
         auto screenName = [&](std::string_view what) -> std::optional<std::string> {
             const auto name = c.done() || c.at("with") || c.at("and") ? std::nullopt : c.next(); // (open with fade...: no screen yet)
-            if (!name) return fail(line, std::format("Which screen to {} is missing.", what));
-            if (!screenLines_.contains(lower(*name))) return fail(line, std::format("There's no screen called '{}'.", *name));
+            if (!name) return fail(line, "Which screen to {} is missing."_tr(what));
+            if (!screenLines_.contains(lower(*name))) return fail(line, "There's no screen called '{}'."_tr(*name));
             return lower(*name);
         };
 
-        if (verb == "scene") { // scene PICTURE | scene COLOUR [bottom=COLOUR] [with ...]
+        if (verb == "scene") { // scene PICTURE | scene COLOUR [bottom=COLOUR] [animation=NAME] [with ANIMATION]
             const auto name = c.next();
-            if (!name) return fail(line, "Which image to show is missing.");
+            if (!name) return fail(line, "Which image to show is missing."_tr());
             cmd::Scene scene{.image = *name};
             auto hex = [](SDL_Color col) { return std::format("#{:02x}{:02x}{:02x}{:02x}", col.r, col.g, col.b, col.a); };
             const auto col = parseColor(*name, &s_.palette);
             if (col) scene.image = hex(*col);
             if (const auto grad = parseGradient(*name, &s_.palette)) scene.image = hex(grad->first) + "-" + hex(grad->second); // (navy-black: fading down to another)
-            if (c.atOption("bottom")) { // (bottom=: the same, as two words)
-                const auto opt = c.option();
-                if (!col) return fail(line, "A background that fades to a colour starts with one: scene black bottom=navy.");
-                const auto bottom = color(line, opt->second);
-                if (!bottom) return std::nullopt;
-                scene.image = hex(*col) + "-" + hex(*bottom);
+            while (!c.done()) {
+                if (c.atOption("bottom")) { // (bottom=: the same, as two words)
+                    const auto opt = c.option();
+                    if (!col) return fail(line, "A background that fades to a colour starts with one: scene black bottom=navy.");
+                    const auto bottom = color(line, opt->second);
+                    if (!bottom) return std::nullopt;
+                    scene.image = hex(*col) + "-" + hex(*bottom);
+                } else if (c.atOption("animation")) { // (what it plays while it's shown; none: nothing)
+                    const auto named = animationNamed(line, c.option()->second);
+                    if (!named) return std::nullopt;
+                    scene.animation = *named;
+                } else if (const Took t = withAnimation(line, c, scene.with); t != Took::No) {
+                    if (t == Took::Bad) return std::nullopt;
+                } else {
+                    return fail(line, "'{}' doesn't belong in this {} line."_tr(c.peek().text, verb));
+                }
             }
-            if (!transition(line, c, scene.transition, true)) return std::nullopt;
-            return finished(scene);
+            return scene;
         }
         if ((verb == "show" || verb == "hide") && c.take("screen")) { // show screen NAME / hide screen NAME
             const auto name = screenName(verb + " screen");
@@ -913,63 +900,30 @@ private:
             cmd::Textbox t{.hide = true};
             if (const auto name = c.next()) {
                 t.screen = lower(*name);
-                if (!screenLines_.contains(t.screen)) return fail(line, std::format("There's no screen called '{}'.", t.screen));
+                if (!screenLines_.contains(t.screen)) return fail(line, "There's no screen called '{}'."_tr(t.screen));
             }
             return finished(t);
         }
         if (verb == "hide" && c.take("ui")) {
-            if (story) return fail(line, "'hide ui' only works in buttons and keys.");
+            if (story) return fail(line, "'hide ui' only works in buttons and keys."_tr());
             return finished(cmd::Ui{.verb = "hide ui"});
         }
-        if (verb == "show") return show(line, c);
-        if (verb == "hide" || verb == "move") { // hide NAME [with ...] / move NAME [to PLACE] [settings] [over N] [ease=] [and wait]
+        if (verb == "show") return show(line, c, story);
+        if (verb == "hide") { // hide NAME [with ANIMATION] [and wait]
             std::string tag;
             if (const CharacterDef* def = takeCharacter(c)) tag = def->key;
             else if (auto name = c.next()) tag = lower(*name);
-            else return fail(line, std::format("Who or what to {} is missing.", verb));
-            if (verb == "hide") {
-                cmd::Hide hide{.tag = tag, .transition = s_.config.hideTransition};
-                if (!transition(line, c, hide.transition)) return std::nullopt;
-                return finished(hide);
-            }
-            cmd::Move move{.tag = tag};
-            while (!c.done()) {
-                if (const Took t = timing(line, c, move.seconds, &move.ease, &move.wait, story); t != Took::No) {
+            else return fail(line, "Who or what to {} is missing."_tr(verb));
+            cmd::Hide hide{.tag = tag};
+            while (!c.done())
+                if (const Took t = withAnimation(line, c, hide.with); t != Took::No) {
                     if (t == Took::Bad) return std::nullopt;
-                } else if (c.take("to") || c.take("at")) {
-                    if (!place(line, c, move.props)) return std::nullopt;
-                } else if (auto opt = c.option()) {
-                    if (!stageProp(line, move.props, opt->first, opt->second)) return std::nullopt;
+                } else if (const Took w = andWait(line, c, hide.wait, story); w != Took::No) {
+                    if (w == Took::Bad) return std::nullopt;
                 } else {
-                    return fail(line, std::format("'{}' doesn't belong in a move line.", c.peek().text));
+                    return fail(line, "'{}' doesn't belong in this {} line."_tr(c.peek().text, verb));
                 }
-            }
-            return move;
-        }
-        if (verb == "shake" || verb == "flash") { // shake [strength=N] [for N] / flash [COLOUR] [for N]
-            const GameConfig& cfg = s_.config;
-            cmd::Shake shake{.flash = verb == "flash", .strength = cfg.shakeStrength, .color = cfg.flashColor,
-                             .seconds = verb == "flash" ? cfg.flashTime : cfg.shakeTime};
-            while (!c.done()) {
-                if (const Took t = timing(line, c, shake.seconds); t != Took::No) {
-                    if (t == Took::Bad) return std::nullopt;
-                } else if (auto col = shake.flash ? parseColor(c.peek().text, &s_.palette) : std::nullopt) {
-                    shake.color = *col;
-                    c.skip(1);
-                } else if (!shake.flash && c.atOption("strength")) {
-                    const auto n = number(line, c.option()->second, "strength");
-                    if (!n) return std::nullopt;
-                    shake.strength = *n;
-                } else if (shake.flash && c.atOption("color")) {
-                    const auto col2 = color(line, c.option()->second);
-                    if (!col2) return std::nullopt;
-                    shake.color = *col2;
-                } else {
-                    return fail(line, std::format("'{}' doesn't belong in this {} line.", c.peek().text, verb));
-                }
-            }
-            shake.seconds = std::max(0.01f, shake.seconds);
-            return shake;
+            return hide;
         }
         if (verb == "effect") { // effect NAME... [amount=50%] [fade 2] [for N seconds] | effect none [fade 2]
             cmd::Effect e;
@@ -979,7 +933,7 @@ private:
                     if (t == Took::Bad) return std::nullopt;
                 } else if (c.take("for")) {
                     const auto n = c.number();
-                    if (!n) return fail(line, "'for' needs a number of seconds.");
+                    if (!n) return fail(line, "'for' needs a number of seconds."_tr());
                     e.seconds = std::max(0.0f, *n);
                 } else if (c.atOption("amount")) {
                     const auto n = number(line, c.option()->second, "amount");
@@ -991,18 +945,18 @@ private:
                     e.looks |= 1u << (look - kStageLooks.begin());
                     c.skip(1);
                 } else {
-                    return fail(line, std::format("'{}' isn't an effect.", c.peek().text));
+                    return fail(line, "'{}' isn't an effect."_tr(c.peek().text));
                 }
             }
-            if (none && e.looks != 0) return fail(line, "'effect none' can't go with other effects.");
-            if (!none && e.looks == 0) return fail(line, "Which effect is missing.");
-            if (none && e.seconds > 0.0f) return fail(line, "'effect none' doesn't last for a time.");
+            if (none && e.looks != 0) return fail(line, "'effect none' can't go with other effects."_tr());
+            if (!none && e.looks == 0) return fail(line, "Which effect is missing."_tr());
+            if (none && e.seconds > 0.0f) return fail(line, "'effect none' doesn't last for a time."_tr());
             return e;
         }
         if (verb == "jump" || verb == "call") {
-            if (c.at("screen")) return fail(line, std::format("{} goes to a label, not a screen.", verb));
+            if (c.at("screen")) return fail(line, "'{}' goes to a label, not a screen."_tr(verb));
             const auto label = c.next();
-            if (!label || !isName(*label)) return fail(line, std::format("{} needs a label name.", verb));
+            if (!label || !isName(*label)) return fail(line, "'{}' needs a label name."_tr(verb));
             return finished(cmd::Jump{.label = lower(*label), .call = verb == "call"});
         }
         if (verb == "return") return finished(cmd::Return{});
@@ -1012,9 +966,9 @@ private:
             const RecordKind kind = verb == "unlock" ? RecordKind::Gallery : verb == "ending" ? RecordKind::Ending
                                   : verb == "achievement" ? RecordKind::Achievement : RecordKind::Tip;
             const auto name = c.next();
-            if (!name) return fail(line, std::format("{} needs a name.", verb));
+            if (!name) return fail(line, "'{}' needs a name."_tr(verb));
             if (!s_.record(kind, *name))
-                return fail(line, std::format("There's no {} called '{}'.",
+                return fail(line, "There's no {} called '{}'."_tr(
                                               kind == RecordKind::Gallery ? "gallery picture" : kRecordKinds[static_cast<std::size_t>(kind)], *name));
             return finished(cmd::Record{.kind = kind, .name = *name});
         }
@@ -1027,10 +981,10 @@ private:
                 m.mine = true;
                 who = std::string(trim(std::string_view(who).substr(3)));
             } else if (lower(who) == "me") {
-                return fail(line, "The player's own messages need who they go to.");
+                return fail(line, "The player's own messages need who they go to."_tr());
             }
             if (who.empty() || m.text.empty())
-                return fail(line, "A message needs who it's from and what it says.");
+                return fail(line, "A message needs who it's from and what it says."_tr());
             if (s_.characters.contains(lower(who))) m.character = lower(who);
             else m.sender = who;
             checkTextOf(line, m.text);
@@ -1040,7 +994,7 @@ private:
             const auto word = c.next();
             const std::string w = lower(word.value_or(""));
             if ((w != "on" && w != "off") || !c.done())
-                return fail(line, "phone can be on or off.");
+                return fail(line, "'phone' can be on or off."_tr());
             return cmd::Phone{.on = w == "on"};
         }
         if (verb == "stop") { // stop music | stop sound [NAME] | stop voice | stop weather, then [fade 2]
@@ -1052,7 +1006,7 @@ private:
             }
             if (c.take("music")) stop.track = cmd::Play::Track::Music;
             else if (c.take("voice")) stop.track = cmd::Play::Track::Voice;
-            else if (!c.take("sound")) return fail(line, "stop goes with music, sound, voice or weather.");
+            else if (!c.take("sound")) return fail(line, "'stop' goes with music, sound, voice or weather."_tr());
             if (stop.track == cmd::Play::Track::Sound && !c.done() && !c.at("fade") && !c.atOption("fade")) stop.channel = lower(*c.next());
             if (amount(line, c, "fade", stop.fade) == Took::Bad) return std::nullopt;
             return finished(stop);
@@ -1060,7 +1014,7 @@ private:
         if (verb == "wait") {
             if (c.done()) return cmd::Wait{};
             const auto n = c.number();
-            if (!n) return fail(line, "wait takes a number of seconds, or nothing.");
+            if (!n) return fail(line, "'wait' takes a number of seconds, or nothing."_tr());
             return finished(cmd::Wait{.seconds = std::max(0.0f, *n)});
         }
         if (verb == "ask") return ask(line, c);
@@ -1068,22 +1022,22 @@ private:
         if (verb == "camera") return camera(line, c, story);
         if (verb == "textbox") { // textbox NAME (or just "textbox": back to the usual one)
             cmd::Textbox t{.screen = lower(c.next().value_or("say"))};
-            if (!screenLines_.contains(t.screen)) return fail(line, std::format("There's no screen called '{}' to use as the textbox.", t.screen));
+            if (!screenLines_.contains(t.screen)) return fail(line, "There's no screen called '{}' to use as the textbox."_tr(t.screen));
             return finished(t);
         }
         if (verb == "new page") return finished(cmd::Textbox{.newPage = true});
         if (verb == "chapter" || verb == "chart") { // chapter TITLE / chart TITLE (the rest of the line; quotes are optional)
             std::string title = unquote(trim(rest));
             if (title.empty())
-                return fail(line, verb == "chapter" ? "The chapter's title is missing."
-                                                    : "The flowchart's name for this place is missing.");
+                return fail(line, verb == "chapter" ? "The chapter's title is missing."_tr()
+                                                    : "The flowchart's name for this place is missing."_tr());
             checkTextOf(line, title);
             if (verb == "chart") return cmd::Mark{.title = std::move(title)};
             return cmd::Chapter{.title = std::move(title)};
         }
         if (verb == "movie") { // movie NAME [loop] [skip=no] [volume 80%]
             cmd::Movie m{.file = c.next().value_or("")};
-            if (m.file.empty()) return fail(line, "Which video to play is missing.");
+            if (m.file.empty()) return fail(line, "Which video to play is missing."_tr());
             while (!c.done()) {
                 if (const Took t = amount(line, c, "volume", m.volume); t != Took::No) {
                     if (t == Took::Bad) return std::nullopt;
@@ -1094,7 +1048,7 @@ private:
                     if (!b) return std::nullopt;
                     m.skippable = *b;
                 } else {
-                    return fail(line, std::format("'{}' doesn't belong in a movie line.", c.peek().text));
+                    return fail(line, "'{}' doesn't belong in a movie line."_tr(c.peek().text));
                 }
             }
             if (m.loop && !m.skippable) return fail(line, "A movie with loop and skip=no would never end.");
@@ -1105,44 +1059,32 @@ private:
         cmd::Ui ui{.verb = verb};
         if (verb == "notify" || verb == "answer") { // the rest of the line (quotes are optional)
             ui.arg = unquote(rest, true);
-            if (verb == "notify" && ui.arg.empty()) return fail(line, "The message to show is missing.");
+            if (verb == "notify" && ui.arg.empty()) return fail(line, "The message to show is missing."_tr());
             checkTextOf(line, ui.arg);
             return ui;
         }
-        if (verb == "open") { // open SCREEN or open https://...
+        if (verb == "open") { // open SCREEN [with ANIMATION] [and close with ANIMATION], or open https://...
             if (const std::string target = unquote(rest, true); target.find("://") != std::string::npos || target.starts_with("www."))
                 return ui.arg = target, ui;
             const auto name = screenName("open");
-            if (!name || !transition(line, c, ui.transition)) return std::nullopt;
-            if (ui.transition.kind != TransitionKind::None && ui.transition.kind != TransitionKind::Fade)
-                return fail(line, "A screen opens at once, or with fade (with fade to white).");
-            auto thenFades = [&](Transition& t) { // then fade [SECONDS] [to COLOUR]: another fade after it
-                while (t.kind == TransitionKind::Fade && c.take("then")) {
-                    if (!c.take("fade")) return fail(line, "After then comes another fade (then fade 1 to black)."), false;
-                    Transition more{.kind = TransitionKind::Fade, .duration = s_.config.fadeTime};
-                    fadeRest(c, more);
-                    t.then.push_back(std::move(more));
-                }
-                return true;
-            };
-            if (!thenFades(ui.transition)) return std::nullopt;
-            if (c.at("and") && c.left() > 1 && lower(c.peek(1).text) == "close") { // and close with fade ...: how it goes when it closes
+            if (!name) return std::nullopt;
+            if (withAnimation(line, c, ui.opening) == Took::Bad) return std::nullopt;
+            if (c.at("and") && c.left() > 1 && lower(c.peek(1).text) == "close") { // and close with ANIMATION: how it goes when it closes
                 c.skip(2);
-                if (!c.at("with")) return fail(line, "After and close comes how it closes: and close with fade 1.");
-                if (!transition(line, c, ui.closing)) return std::nullopt;
-                if (ui.closing.kind != TransitionKind::Fade) return fail(line, "A screen closes with fade (and close with fade to white).");
-                if (!thenFades(ui.closing)) return std::nullopt;
+                const Took t = withAnimation(line, c, ui.closing);
+                if (t == Took::No) return fail(line, "'and close' needs with and an animation after it."_tr());
+                if (t == Took::Bad) return std::nullopt;
             }
             ui.arg = *name;
             return finished(ui);
         }
         if (verb == "setting") { // setting NAME VALUE: a player setting (the window's size: bigger or smaller; the language: next, previous or one by name)
             const auto name = c.next();
-            if (!name) return fail(line, "Which setting to change is missing.");
+            if (!name) return fail(line, "Which setting to change is missing."_tr());
             const std::string setting = lower(*name);
-            if (!std::ranges::contains(kSettingNames, setting)) return fail(line, std::format("There's no player setting called '{}'.", *name));
+            if (!std::ranges::contains(kSettingNames, setting)) return fail(line, "There's no player setting called '{}'."_tr(*name));
             const auto value = c.next();
-            if (!value) return fail(line, std::format("What to set {} to is missing.", setting));
+            if (!value) return fail(line, "What to set {} to is missing."_tr(setting));
             const std::string word = lower(*value);
             std::optional<int> n;
             if (setting == "window_size" && (word == "bigger" || word == "smaller")) n = word == "bigger" ? 1 : -1;
@@ -1151,7 +1093,7 @@ private:
                 if (!c.done())
                     if (const auto second = c.next()) h = parseNumber(*second);
                 const auto w = parseNumber(word);
-                if (!w || !h || *w < 1.0f || *h < 1.0f) return fail(line, "The window's size is a width and a height in pixels, or bigger or smaller.");
+                if (!w || !h || *w < 1.0f || *h < 1.0f) return fail(line, "The window's size is a width and a height in pixels, or bigger or smaller."_tr());
                 ui.arg = std::format("window_size {} {}", static_cast<int>(*w), static_cast<int>(*h));
                 return finished(ui);
             }
@@ -1178,10 +1120,10 @@ private:
         return std::nullopt;
     }
 
-    // show NAME [expression] [at POSITION] [as TAG] [x= y= zoom= ...] [with TRANSITION]
-    std::optional<Command> show(const Line& line, Cursor& c) {
-        cmd::Show show{.transition = s_.config.showTransition};
-        auto keyword = [&] { return c.at("at") || c.at("to") || c.at("as") || c.at("with") || c.peek().text.find('=') != std::string::npos; };
+    // show NAME [expression] [at POSITION] [as TAG] [x= y= zoom= ...] [animation=NAME] [with ANIMATION] [and wait]
+    std::optional<Command> show(const Line& line, Cursor& c, bool story) {
+        cmd::Show show;
+        auto keyword = [&] { return c.at("at") || c.at("to") || c.at("as") || c.at("with") || c.at("and") || c.peek().text.find('=') != std::string::npos; };
         if (const CharacterDef* def = takeCharacter(c)) {
             show.character = show.tag = def->key;
             if (!c.done() && !keyword()) show.expression = *c.next();
@@ -1189,21 +1131,27 @@ private:
             show.image = *name;
             show.tag = lower(*name);
         } else {
-            return fail(line, "Who or what to show is missing.");
+            return fail(line, "Who or what to show is missing."_tr());
         }
         while (!c.done()) {
             if (c.take("at") || c.take("to")) {
                 if (!place(line, c, show.props)) return std::nullopt;
             } else if (c.take("as")) {
                 const auto tag = c.next();
-                if (!tag) return fail(line, "'as' needs a name after it.");
+                if (!tag) return fail(line, "'as' needs a name after it."_tr());
                 show.tag = lower(*tag);
-            } else if (c.at("with")) {
-                if (!transition(line, c, show.transition)) return std::nullopt;
+            } else if (const Took t = withAnimation(line, c, show.with); t != Took::No) {
+                if (t == Took::Bad) return std::nullopt;
+            } else if (const Took w = andWait(line, c, show.wait, story); w != Took::No) {
+                if (w == Took::Bad) return std::nullopt;
+            } else if (c.atOption("animation")) { // (what it plays while it's shown; none: nothing)
+                const auto named = animationNamed(line, c.option()->second);
+                if (!named) return std::nullopt;
+                show.animation = *named;
             } else if (auto opt = c.option()) {
                 if (!stageProp(line, show.props, opt->first, opt->second)) return std::nullopt;
             } else {
-                return fail(line, std::format("'{}' doesn't belong in a show line.", c.peek().text));
+                return fail(line, "'{}' doesn't belong in a show line."_tr(c.peek().text));
             }
         }
         return show;
@@ -1225,44 +1173,40 @@ private:
     // at / to POSITION: a name from a "position" line, or a number from -1 (left) to 1 (right).
     bool place(const Line& line, Cursor& c, StageProps& props) {
         const auto word = c.next();
-        if (!word) return error(line, "'at' needs a place on the stage."), false;
+        if (!word) return error(line, "'at' needs a place on the stage."_tr()), false;
         if (auto n = stageCoordinate(*word, false)) props.x = *n;
         else if (auto it = positions_.find(lower(*word)); it != positions_.end()) props.x = it->second;
         else {
-            return error(line, std::format("There's no position called '{}'.", *word)), false;
+            return error(line, "There's no position called '{}'."_tr(*word)), false;
         }
         return true;
     }
 
-    // with fade|dissolve|wipe|slide|none [seconds] [to COLOUR] (scenes: with wipe PICTURE, shaped by it)
-    bool transition(const Line& line, Cursor& c, Transition& t, bool scene = false) {
-        if (!c.take("with")) return true;
-        const auto kind = oneOf<TransitionKind>(line, "A transition", c.next().value_or(""), kTransitions);
-        if (!kind) return false;
-        t = {.kind = *kind,
-             .duration = *kind == TransitionKind::Dissolve ? s_.config.dissolveTime
-                       : *kind == TransitionKind::None     ? 0.0f
-                                                           : s_.config.fadeTime};
-        if (*kind == TransitionKind::Wipe && !c.done() && !parseNumber(c.peek().text) && !c.at("at") && !c.at("as") && !c.at("to") &&
-            !c.peek().text.contains('=')) {
-            if (!scene) return error(line, "Only a scene line can wipe with an image."), false;
-            t.shape = pictureName(*c.next());
-        }
-        fadeRest(c, t);
-        return true;
+    // An animation the scripts have, by the name a line gives it ("none": none, an empty name); a mistake
+    // when there's none by that name.
+    std::optional<std::string> animationNamed(const Line& line, std::string_view name) {
+        const std::string animation = lower(name);
+        if (animation == "none") return std::string{};
+        if (!s_.animations.contains(animation)) return error(line, "There's no animation called '{}'."_tr(name)), std::nullopt;
+        return animation;
     }
-    // A transition's length and colour: [SECONDS] [to COLOUR] (or the other way round).
-    void fadeRest(Cursor& c, Transition& t) {
-        bool timed = false;
-        if (auto n = c.number()) t.duration = std::max(0.0f, *n), timed = true;
-        const std::size_t through = c.at("to") ? 1 : 0; // "with fade to white"
-        if (c.left() > through)
-            if (auto col = parseColor(c.peek(through).text, &s_.palette)) {
-                t.color = *col;
-                c.skip(through + 1);
-            }
-        if (!timed)
-            if (auto n = c.number()) t.duration = std::max(0.0f, *n); // ("with fade to white 2")
+    // with ANIMATION: one of the scripts' animations (none: none) that the line plays.
+    Took withAnimation(const Line& line, Cursor& c, std::optional<std::string>& out) {
+        if (!c.take("with")) return Took::No;
+        const auto name = c.next();
+        if (!name) return error(line, "'with' needs an animation after it."_tr()), Took::Bad;
+        const auto named = animationNamed(line, *name);
+        if (!named) return Took::Bad;
+        out = *named;
+        return Took::Yes;
+    }
+    // and wait: the story waits for what the line does to end (a button's action can't).
+    Took andWait(const Line& line, Cursor& c, bool& wait, bool story) {
+        if (!c.at("and") || c.left() < 2 || lower(c.peek(1).text) != "wait") return Took::No;
+        c.skip(2);
+        if (!story) return error(line, "A button can't wait for this to end."_tr()), Took::Bad;
+        wait = true;
+        return Took::Yes;
     }
 
     // x= y= zoom= opacity= rotate= flip= layer= tint=
@@ -1275,17 +1219,17 @@ private:
         if (key == "tint") return (p.tint = color(line, value)).has_value();
         static constexpr auto keys = std::to_array<std::string_view>({"x", "y", "zoom", "opacity", "rotate", "layer"});
         if (!std::ranges::contains(keys, key))
-            return error(line, std::format("'{}' isn't a picture setting.", key)), false;
+            return error(line, "A show line has no setting '{}'."_tr(key)), false;
         if (key == "x" || key == "y") {
             const auto n = stageCoordinate(value, key == "y");
-            if (!n) return error(line, key == "x" ? std::format("x needs a number from -1 (the left edge) to 1 (the right edge), not '{}'.", value)
-                                                  : std::format("y needs a number from -1 (the bottom) to 1 (the top), not '{}'.", value)),
+            if (!n) return error(line, key == "x" ? "'x' needs a number from -1 (the left edge) to 1 (the right edge), not '{}'."_tr(value)
+                                                  : "'y' needs a number from -1 (the bottom) to 1 (the top), not '{}'."_tr(value)),
                           false;
             (key == "x" ? p.x : p.y) = *n;
             return true;
         }
         const auto n = parseNumber(value);
-        if (!n) return error(line, std::format("{} needs a number, not '{}'.", key, value)), false;
+        if (!n) return error(line, "'{}' needs a number, not '{}'."_tr(key, value)), false;
         if (key == "zoom") p.zoom = *n;
         else if (key == "opacity") p.opacity = *n;
         else if (key == "rotate") p.rotate = *n;
@@ -1310,7 +1254,7 @@ private:
             } else if (lower(firstWord(value)) == "to") {
                 value = afterWords(value, 1);
             } else {
-                return fail(line, "set needs a name, 'to' and a value.");
+                return fail(line, "'set' needs a name, 'to' and a value."_tr());
             }
         } else if (verb == "toggle") {
             set.variable = lower(rest);
@@ -1318,13 +1262,13 @@ private:
             const std::string_view word = verb == "add" ? " to " : " from ";
             const auto at = lower(rest).rfind(word);
             if (at == std::string::npos)
-                return fail(line, verb == "add" ? "add needs a value, 'to' and a name."
-                                                : "subtract needs a value, 'from' and a name.");
+                return fail(line, verb == "add" ? "'add' needs a value, 'to' and a name."_tr()
+                                                : "'subtract' needs a value, 'from' and a name."_tr());
             value = rest.substr(0, at);
             set.variable = lower(trim(rest.substr(at + word.size())));
         }
         if (!isVariable(set.variable))
-            return fail(line, std::format("'{}' can't be a variable name (one word of letters, numbers and _).",
+            return fail(line, "'{}' can't be a variable name (one word of letters, numbers and _)."_tr(
                                           set.variable));
         if (set.op != '!') {
             set.value = formula(line, value);
@@ -1339,8 +1283,8 @@ private:
                     .loop = verb == "music"};
         const auto file = c.next();
         if (!file)
-            return fail(line, "Which file to play is missing.");
-        if (lower(*file) == "stop") return fail(line, "'stop' isn't a file to play.");
+            return fail(line, "Which file to play is missing."_tr());
+        if (lower(*file) == "stop") return fail(line, "'stop' isn't a file to play."_tr());
         p.file = *file;
         while (!c.done()) {
             if (const Took t = amount(line, c, "fade", p.fade); t != Took::No) {
@@ -1353,7 +1297,7 @@ private:
                 p.loop = true;
             } else if (verb == "sound" && c.take("as")) {
                 const auto channel = c.next();
-                if (!channel) return fail(line, "'as' needs a name after it.");
+                if (!channel) return fail(line, "'as' needs a name after it."_tr());
                 p.channel = lower(*channel);
             } else if (verb == "voice" && c.take("sync")) { // the next line types out with the voice
                 p.sync = true;
@@ -1361,7 +1305,7 @@ private:
                 c.skip(2);
                 p.sync = false;
             } else {
-                return fail(line, std::format("'{}' doesn't belong in this {} line.", c.peek().text, verb));
+                return fail(line, "'{}' doesn't belong in this {} line."_tr(c.peek().text, verb));
             }
         }
         if (p.track == cmd::Play::Track::Sound && p.loop && p.channel.empty()) p.channel = lower(*file); // so it can be stopped
@@ -1373,14 +1317,14 @@ private:
         static constexpr auto kinds = std::to_array<std::string_view>({"rain", "snow", "petals", "leaves", "embers"});
         cmd::Weather w{.kind = lower(c.next().value_or(""))};
         if (!std::ranges::contains(kinds, std::string_view(w.kind)))
-            return fail(line, std::format("'{}' isn't a kind of weather.", w.kind));
+            return fail(line, "'{}' isn't a kind of weather."_tr(w.kind));
         while (!c.done()) {
             if (const Took t = amount(line, c, "fade", w.fade); t != Took::No) {
                 if (t == Took::Bad) return std::nullopt;
                 continue;
             }
             const auto opt = c.option();
-            if (!opt) return fail(line, std::format("'{}' doesn't belong in a weather line.", c.peek().text));
+            if (!opt) return fail(line, "'{}' doesn't belong in a weather line."_tr(c.peek().text));
             const auto& [key, value] = *opt;
             if (key == "image") {
                 w.image = pictureName(value);
@@ -1395,7 +1339,7 @@ private:
                 if (!n) return std::nullopt;
                 (key == "amount" ? w.amount : key == "speed" ? w.speed : w.wind) = *n;
             } else {
-                return fail(line, std::format("weather has no setting '{}'.", key));
+                return fail(line, "'weather' has no setting '{}'."_tr(key));
             }
         }
         w.amount = std::clamp(w.amount, 0.0f, 10.0f);
@@ -1403,29 +1347,23 @@ private:
         return w;
     }
 
-    // camera [zoom=150%] [x=30%] [y=40%] [rotate=5] [over N] [ease=out] [and wait] | camera reset ...
+    // camera [animation=NAME] [with NAME] [and wait]
     std::optional<Command> camera(const Line& line, Cursor& c, bool story) {
-        cmd::Camera cam{.reset = c.take("reset")};
+        cmd::Camera cam;
         while (!c.done()) {
-            if (const Took t = timing(line, c, cam.seconds, &cam.ease, &cam.wait, story); t != Took::No) {
+            if (c.atOption("animation")) { // (what it keeps playing; none: nothing)
+                const auto named = animationNamed(line, c.option()->second);
+                if (!named) return std::nullopt;
+                cam.animation = *named;
+            } else if (const Took t = withAnimation(line, c, cam.with); t != Took::No) {
                 if (t == Took::Bad) return std::nullopt;
-                continue;
-            }
-            const auto opt = c.option();
-            if (!opt) return fail(line, std::format("'{}' doesn't belong in a camera line.", c.peek().text));
-            const auto& [key, value] = *opt;
-            if (key == "x" || key == "y") {
-                const auto n = stageCoordinate(value, key == "y");
-                if (!n) return fail(line, std::format("{} needs a place on the stage from -1 to 1.", key));
-                (key == "x" ? cam.x : cam.y) = *n;
-            } else if (key == "zoom" || key == "rotate") {
-                const auto n = number(line, value, key);
-                if (!n) return std::nullopt;
-                (key == "zoom" ? cam.zoom : cam.rotate) = key == "zoom" ? std::max(0.1f, *n) : *n;
+            } else if (const Took w = andWait(line, c, cam.wait, story); w != Took::No) {
+                if (w == Took::Bad) return std::nullopt;
             } else {
-                return fail(line, std::format("camera has no setting '{}'.", key));
+                return fail(line, "'{}' doesn't belong in a camera line."_tr(c.peek().text));
             }
         }
+        if (!cam.animation && !cam.with) return fail(line, "A camera line needs an animation."_tr());
         return cam;
     }
 
@@ -1433,18 +1371,18 @@ private:
     std::optional<Command> ask(const Line& line, Cursor& c) {
         cmd::Ask a;
         const auto name = c.next();
-        if (!name || !isVariable(lower(*name))) return fail(line, "ask needs a variable name and a question.");
+        if (!name || !isVariable(lower(*name))) return fail(line, "'ask' needs a variable name and a question."_tr());
         a.variable = lower(*name);
         while (!c.done()) {
             if (auto opt = c.option()) {
                 if (opt->first == "default") a.fallback = opt->second;
                 else if (opt->first == "max" && parseNumber(opt->second)) a.max = std::max(1, static_cast<int>(*parseNumber(opt->second)));
-                else return fail(line, std::format("ask has no setting '{}'.", opt->first));
+                else return fail(line, "'ask' has no setting '{}'."_tr(opt->first));
             } else {
                 a.prompt += (a.prompt.empty() ? "" : " ") + *c.next();
             }
         }
-        if (a.prompt.empty()) return fail(line, "The question to ask is missing.");
+        if (a.prompt.empty()) return fail(line, "The question to ask is missing."_tr());
         checkTextOf(line, a.prompt);
         return a;
     }
@@ -1466,7 +1404,7 @@ private:
                 if (part.empty()) continue;
                 const std::string verb = commandOf(part, false);
                 if (verb.empty()) {
-                    error(line, std::format("'{}' isn't something a button can do.", firstWord(part)));
+                    error(line, "'{}' isn't something a button can do."_tr(firstWord(part)));
                     continue;
                 }
                 auto c = command(line, verb, false, part);
@@ -1474,7 +1412,7 @@ private:
                 const auto* jump = std::get_if<cmd::Jump>(&*c);
                 const auto* ui = std::get_if<cmd::Ui>(&*c);
                 const std::string label = jump ? jump->label : ui && ui->verb == "start" ? ui->arg : std::string{};
-                if (!label.empty() && !s_.labels.contains(label)) error(line, std::format("There's no label called '{}'.", label));
+                if (!label.empty() && !s_.labels.contains(label)) error(line, "There's no label called '{}'."_tr(label));
                 out.push_back(std::move(*c));
             }
         }
@@ -1496,6 +1434,9 @@ private:
                     const bool lenient = capitalized(line->text) && line->children.empty();
                     if (!attempt(lenient, [&] { define(*line, kind); })) asText_.insert(line);
                 }
+        for (const auto& [key, line] : animationConfigs_) // (config show_animation and hide_animation: animations the scripts have)
+            if (const std::string& name = key == "show_animation" ? s_.config.showAnimation : s_.config.hideAnimation; !name.empty() && !s_.animations.contains(name))
+                error(*line, "There's no animation called '{}'."_tr(name));
     }
 
     void define(const Line& line, std::string_view kind) {
@@ -1503,46 +1444,46 @@ private:
         if (!cursor) return;
         Cursor& c = *cursor;
         if (kind != "screen" && kind != "atlas" && kind != "animation" && !line.children.empty())
-            error(line, "Lines indented under this one don't belong to it.");
+            error(line, "Lines indented under this one don't belong to it."_tr());
 
         if (kind == "color") {
             const auto name = c.next();
             const auto value = c.next();
             const auto col = value ? parseColor(*value, &s_.palette) : std::nullopt;
-            if (!name || !col || !c.done()) return error(line, "A color line needs a name and a colour.");
+            if (!name || !col || !c.done()) return error(line, "A color line needs a name and a colour."_tr());
             s_.palette.insert_or_assign(lower(*name), *col);
         } else if (kind == "variable") { // variable NAME [VALUE] ["what it's for"]
             const auto name = c.next();
             const bool valid = name && !name->empty() && (letterByte((*name)[0]) || (*name)[0] == '_') &&
                                std::ranges::all_of(*name, [](char ch) { return letterOrDigitByte(ch) || ch == '_' || ch == '.'; });
-            if (!valid) return error(line, "A variable line needs the variable's name: one word (letters, numbers and _).");
+            if (!valid) return error(line, "A variable line needs the variable's name: one word (letters, numbers and _)."_tr());
             Value start = 0;
             if (!c.done()) {
                 const ScriptWord& w = c.peek();
                 if (w.quoted) start = w.text;
                 else if (const auto e = Expr::parse(w.text)) start = e->eval({});
-                else return error(line, std::format("'{}' isn't a value a variable can start with: a number, yes or no, or \"text\".", w.text));
+                else return error(line, "'{}' isn't a value a variable can start with: a number, yes or no, or \"text\"."_tr(w.text));
                 c.skip(1);
             }
             if (!c.done() && c.peek().quoted) c.skip(1); // (what it's for)
-            if (!c.done()) return error(line, "A variable line is its name, the value it starts with, and what it's for, in quotes.");
+            if (!c.done()) return error(line, "A variable line is its name, the value it starts with, and what it's for, in quotes."_tr());
             s_.startValues.insert_or_assign(lower(*name), std::move(start));
         } else if (kind == "position") { // position NAME VALUE (or NAME=VALUE)
             const auto [name, value] = nameValue(c);
             const auto n = value ? stageCoordinate(*value, false) : std::nullopt;
-            if (!name || !n || !c.done()) return error(line, "A position line needs a name and a number from -1 to 1.");
+            if (!name || !n || !c.done()) return error(line, "A position line needs a name and a number from -1 to 1."_tr());
             positions_.insert_or_assign(lower(*name), *n);
         } else if (kind == "font") { // font [NAME] FILE [STYLE]
             const auto a = c.next(), b = c.next(), style = c.next();
             if (!a || !c.done())
-                return error(line, "A font line needs a font file.");
+                return error(line, "A font line needs a font file."_tr());
             if (b) s_.fonts.insert_or_assign(lower(*a), Script::FontFile{*b, style.value_or("")});
             else s_.fonts.insert_or_assign("default", Script::FontFile{*a, ""});
         } else if (kind == "config") { // config SETTING VALUE... (or SETTING=VALUE)
             if (line.file > builtinFiles_) // (the built-in menus' come before main.vnscript)
-                return error(line, "config lines belong in main.vnscript, with the game's other settings.");
+                return error(line, "'config' lines belong in main.vnscript, with the game's other settings."_tr());
             const auto [key, value] = nameValue(c);
-            if (!key) return error(line, "A config line needs a setting and a value.");
+            if (!key) return error(line, "A config line needs a setting and a value."_tr());
             std::vector<std::string> values;
             if (value) values.push_back(*value);
             while (auto v = c.next()) values.push_back(*v);
@@ -1557,7 +1498,7 @@ private:
             character(line, c);
         } else if (kind == "style") {
             const auto name = c.next();
-            if (!name) return error(line, "A style line needs a name.");
+            if (!name) return error(line, "A style line needs a name."_tr());
             styleLines_[lower(*name)].push_back(&line);
         } else if (kind == "control") {
             control(line, c);
@@ -1565,7 +1506,7 @@ private:
             this->record(line, static_cast<RecordKind>(record - kRecordKinds.begin()), c);
         } else if (kind == "screen") {
             const auto name = c.next();
-            if (!name) return error(line, "A screen line needs a name.");
+            if (!name) return error(line, "A screen line needs a name."_tr());
             screenLines_.insert_or_assign(lower(*name), &line);
         }
     }
@@ -1577,16 +1518,16 @@ private:
     void atlas(const Line& line, Cursor& c) {
         const auto name = c.next();
         if (!name || !isName(*name))
-            return error(line, "An atlas line needs a name.");
+            return error(line, "An atlas line needs a name."_tr());
         Atlas a{.name = lower(*name), .image = *name};
         std::vector<std::pair<std::string, std::string>> options;
         while (!c.done()) {
             auto opt = c.option();
-            if (!opt) return error(line, std::format("'{}' doesn't belong in an atlas line.", c.peek().text));
+            if (!opt) return error(line, "'{}' doesn't belong in an atlas line."_tr(c.peek().text));
             if (opt->first == "like") { // the same frames as an atlas above (its settings come first)
                 const auto other = std::ranges::find(s_.atlases, lower(opt->second), &Atlas::name);
                 if (other == s_.atlases.end())
-                    return error(line, std::format("There's no atlas called '{}' above this line.", opt->second));
+                    return error(line, "There's no atlas called '{}' above this line."_tr(opt->second));
                 a.columns = other->columns;
                 a.expressions = other->expressions;
                 a.eyes = other->eyes;
@@ -1601,10 +1542,10 @@ private:
             } else if (key == "columns") {
                 const auto n = number(line, value, key);
                 if (!n) return;
-                if (*n < 1.0f) return error(line, std::format("columns needs a number from 1 up, not {}.", *n));
+                if (*n < 1.0f) return error(line, "'columns' needs a number from 1 up, not '{}'."_tr(*n));
                 a.columns = static_cast<int>(*n);
             } else {
-                return error(line, std::format("Atlases have no setting '{}'.", key));
+                return error(line, "Atlases have no setting '{}'."_tr(key));
             }
         }
         for (const Line& part : line.children) {
@@ -1616,7 +1557,7 @@ private:
             const std::string what = lower(*w->next());
             std::vector<std::string>* list = what == "expressions" ? &a.expressions : what == "eyes" ? &a.eyes : what == "mouth" ? &a.mouth : nullptr;
             if (!list) {
-                error(part, std::format("'{}' isn't part of an atlas.", what));
+                error(part, "'{}' isn't part of an atlas."_tr(what));
                 continue;
             }
             // The names, then (for eyes and mouth) image= x= y= when they're a part drawn on top.
@@ -1625,7 +1566,7 @@ private:
             while (!w->done()) {
                 if (auto opt = w->option()) {
                     if (list == &a.expressions || (opt->first != "image" && opt->first != "x" && opt->first != "y")) {
-                        error(part, std::format("'{}' has no setting '{}'.", what, opt->first));
+                        error(part, "'{}' has no setting '{}'."_tr(what, opt->first));
                         break;
                     }
                     if (!layer) layer.emplace();
@@ -1636,8 +1577,8 @@ private:
                 }
             }
             if (!names.empty()) *list = std::move(names); // (like= may have given the names already)
-            if (list->empty()) error(part, std::format("'{}' needs a name for each frame.", what));
-            if (layer && layer->image.empty()) error(part, std::format("Which image holds the {} is missing.", what));
+            if (list->empty()) error(part, "'{}' needs a name for each frame."_tr(what));
+            if (layer && layer->image.empty()) error(part, "Which image holds the {} is missing."_tr(what));
             if (list == &a.eyes) a.eyesPart = layer;
             if (list == &a.mouth) a.mouthPart = layer;
         }
@@ -1645,77 +1586,150 @@ private:
         s_.atlases.push_back(std::move(a));
     }
 
-    // animation NAME [loop], with a step on each line under it:
-    //     x=-10 opacity=40% over 1 second ease=out
+    // animation NAME [loop [N times]], with what it changes on the lines under it:
+    //     x=-2 opacity=0
+    //     x=home over 1 second ease=out
+    //     opacity=100% from 0 to 0.5 seconds
+    //     up=5% at 2 seconds
     //     wait 0.5 seconds
     void animation(const Line& line, Cursor& c) {
         const auto name = c.next();
-        if (!name || !isName(*name)) return error(line, "An animation line needs a name.");
+        if (!name || !isName(*name)) return error(line, "An animation line needs a name."_tr());
         Animation a{.name = lower(*name)};
-        while (!c.done())
-            if (!c.take("loop")) return error(line, std::format("'{}' doesn't belong in an animation line (its steps go on the lines under it).", c.peek().text));
-            else a.loop = true;
+        if (c.take("loop")) {
+            a.times = 0;
+            if (!c.done()) { // (loop 3 times)
+                const auto n = parseNumber(c.peek().text);
+                if (!n || *n < 1.0f || *n != std::floor(*n)) return error(line, "After 'loop' can only come how many times it plays."_tr());
+                c.skip(1);
+                if (!c.take("times") && !c.take("time")) return error(line, "After 'loop' can only come how many times it plays."_tr());
+                a.times = static_cast<int>(*n);
+            }
+        }
+        if (!c.done()) return error(line, "'{}' doesn't belong in an animation line (what it changes goes on the lines under it)."_tr(c.peek().text));
+        float ended = 0.0f; // where the line before ended
         for (const Line& part : line.children) {
             auto w = words(part, part.text);
             if (!w) continue;
-            Animation::Step step;
+            if (w->take("wait")) {
+                const auto n = w->number();
+                if (!n || !w->done()) {
+                    error(part, "'wait' needs a number of seconds."_tr());
+                    continue;
+                }
+                ended += std::max(0.0f, *n);
+                a.length = std::max(a.length, ended);
+                continue;
+            }
+            std::vector<Animation::Change> changes;
+            std::optional<float> start, seconds;
+            std::optional<std::string> shape; // (shape=: the line's wipe's)
+            Ease ease = Ease::InOut;
             bool easeSaid = false; // (a fade without one is linear, as a screen's fade is)
             bool ok = true;
             while (ok && !w->done()) {
-                if (w->take("wait")) {
+                if (w->take("over") || w->take("for")) {
                     const auto n = w->number();
-                    if (!n) error(part, "'wait' needs a number of seconds."), ok = false;
-                    else step.seconds = std::max(0.0f, *n);
-                    continue;
+                    if (!n) error(part, "'over' needs a number of seconds."_tr()), ok = false;
+                    else seconds = std::max(0.0f, *n);
+                } else if (w->take("from")) { // from 0.5 to 1 second
+                    const auto begins = w->number();
+                    const auto ends = begins && w->take("to") ? w->number() : std::nullopt;
+                    if (!begins || !ends) error(part, "'from' needs when it starts and when it ends."_tr()), ok = false;
+                    else if (*ends < *begins) error(part, "It ends before it starts: from {} to {} seconds."_tr(*begins, *ends)), ok = false;
+                    else start = std::max(0.0f, *begins), seconds = *ends - std::max(0.0f, *begins);
+                } else if (w->take("at")) { // at 2 seconds: at once, then
+                    const auto n = w->number();
+                    if (!n) error(part, "'at' needs a number of seconds."_tr()), ok = false;
+                    else start = std::max(0.0f, *n), seconds = 0.0f;
+                } else if (w->atOption("ease")) {
+                    const auto e = oneOf<Ease>(part, "ease", w->option()->second, kEases);
+                    if (!e) ok = false;
+                    else ease = *e, easeSaid = true;
+                } else if (w->atOption("shape")) { // shape=PICTURE: where the wipe on this line shows it first
+                    shape = pictureName(w->option()->second);
+                } else if (const auto opt = w->option()) {
+                    const auto& [key, value] = *opt;
+                    using V = Animation::Value;
+                    Animation::Change change;
+                    if (key == "color") {
+                        change.what = V::Color;
+                        const auto col = color(part, value);
+                        if (!col) ok = false;
+                        else change.color = *col;
+                    } else if (key == "fade") { // fade=COLOUR: covered with it by the end; fade=none: uncovered again
+                        change.what = V::Fade;
+                        const auto col = lower(value) == "none" ? std::optional<SDL_Color>(SDL_Color{0, 0, 0, 0}) : color(part, value);
+                        if (!col) ok = false;
+                        else change.color = *col;
+                    } else if (key == "x" || key == "y") { // places, as the stage's (home: its own)
+                        change.what = key == "x" ? V::X : V::Y;
+                        if (lower(value) == "home") change.to = std::numeric_limits<float>::quiet_NaN();
+                        else if (const auto n = number(part, value, key)) change.to = *n;
+                        else ok = false;
+                    } else if (key == "left" || key == "right" || key == "up" || key == "down") { // by a share of the screen, from its own place
+                        change.what = key == "left" || key == "right" ? V::X : V::Y;
+                        change.by = true;
+                        if (const auto n = number(part, value, key)) change.to = key == "left" || key == "down" ? -*n : *n;
+                        else ok = false;
+                    } else if (key == "opacity" || key == "zoom" || key == "rotate") {
+                        change.what = key == "opacity" ? V::Opacity : key == "zoom" ? V::Zoom : V::Rotate;
+                        if (const auto n = number(part, value, key)) change.to = *n;
+                        else ok = false;
+                    } else if (key == "wipe") { // how much of it shows (100%: all of it), from the left or as shape= has it
+                        change.what = V::Wipe;
+                        if (const auto n = number(part, value, key)) change.to = std::clamp(*n, 0.0f, 1.0f);
+                        else ok = false;
+                    } else {
+                        error(part, "An animation can change x, y, left, right, up, down, opacity, zoom, rotate, color, fade and wipe, not '{}'."_tr(key)), ok = false;
+                    }
+                    if (ok) changes.push_back(change);
+                } else {
+                    error(part, "'{}' doesn't belong in an animation's line."_tr(w->peek().text)), ok = false;
                 }
-                if (w->peek().text.starts_with("ease=")) easeSaid = true;
-                if (const Took t = timing(part, *w, step.seconds, &step.ease); t != Took::No) {
-                    ok = t == Took::Yes;
-                    continue;
-                }
-                const auto opt = w->option();
-                if (!opt) {
-                    error(part, std::format("'{}' isn't part of an animation's step.", w->peek().text)), ok = false;
-                    break;
-                }
-                const auto& [key, value] = *opt;
-                std::optional<float>* to = key == "x" ? &step.x : key == "y" ? &step.y : key == "opacity" ? &step.opacity : key == "zoom" ? &step.zoom
-                                         : key == "rotate" ? &step.rotate : nullptr;
-                if (key == "color") step.color = color(part, value), ok = step.color.has_value();
-                else if (key == "fade") { // fade=COLOUR: the screen covered with it by the end; fade=none: uncovered again
-                    if (lower(value) == "none") step.fade = SDL_Color{0, 0, 0, 0};
-                    else step.fade = color(part, value), ok = step.fade.has_value();
-                }
-                else if (!to) error(part, std::format("An animation's step can change x, y, opacity, zoom, rotate, color and fade, not '{}'.", key)), ok = false;
-                else if ((key == "x" || key == "y") && lower(value) == "home") *to = std::numeric_limits<float>::quiet_NaN(); // (its own place)
-                else if (const auto n = number(part, value, key)) *to = *n;
-                else ok = false;
             }
-            if (step.fade && !easeSaid) step.ease = Ease::Linear;
-            if (ok) a.steps.push_back(step);
+            if (ok && shape) { // (the wipe's shape)
+                const auto wipe = std::ranges::find(changes, Animation::Value::Wipe, &Animation::Change::what);
+                if (wipe == changes.end()) error(part, "'shape=' goes with a wipe on its line."_tr()), ok = false;
+                else wipe->shape = *shape;
+            }
+            if (!ok) continue;
+            if (changes.empty()) {
+                error(part, "This line needs what it changes."_tr());
+                continue;
+            }
+            for (Animation::Change& change : changes) {
+                change.start = start.value_or(ended);
+                change.seconds = seconds.value_or(0.0f);
+                change.ease = change.what == Animation::Value::Fade && !easeSaid ? Ease::Linear : ease;
+                a.changes.push_back(change);
+            }
+            ended = start.value_or(ended) + seconds.value_or(0.0f);
+            a.length = std::max(a.length, ended);
         }
-        if (a.steps.empty()) return error(line, "An animation needs its steps, each on a line under it (like: opacity=0.5 over 1 second).");
+        std::ranges::stable_sort(a.changes, {}, &Animation::Change::start);
+        if (a.changes.empty()) return error(line, "An animation needs what it changes, on the lines under it."_tr());
         s_.animations.insert_or_assign(a.name, std::move(a)); // the last one wins
     }
 
     // picture NAME image=FILE x=N y=N w=N h=N: a part of a picture, shown by its own name.
     void subPicture(const Line& line, Cursor& c) {
         const auto name = c.next();
-        if (!name || !isName(*name)) return error(line, "A picture line needs a name.");
+        if (!name || !isName(*name)) return error(line, "A picture line needs a name."_tr());
         SubPicture p{.name = lower(*name)};
         while (!c.done()) {
             const auto opt = c.option();
-            if (!opt) return error(line, std::format("'{}' doesn't belong in a picture line.", c.peek().text));
+            if (!opt) return error(line, "'{}' doesn't belong in a picture line."_tr(c.peek().text));
             const auto& [key, value] = *opt;
             float* at = key == "x" ? &p.rect.x : key == "y" ? &p.rect.y : key == "w" ? &p.rect.w : key == "h" ? &p.rect.h : nullptr;
             if (key == "image") p.image = pictureName(value);
-            else if (!at) return error(line, std::format("A picture line has no setting '{}'.", key));
+            else if (!at) return error(line, "A picture line has no setting '{}'."_tr(key));
             else if (const auto n = number(line, value, key)) *at = *n;
             else return;
         }
         if (p.image.empty() || p.rect.w <= 0.0f || p.rect.h <= 0.0f)
             return error(line, "A picture line needs the picture it's cut from and the part: image=FILE x= y= w= h=.");
-        if (lower(p.image) == p.name) return error(line, "A picture can't be cut from itself: give it a name of its own.");
+        if (lower(p.image) == p.name) return error(line, "A picture can't be cut from itself: give it a name of its own."_tr());
         std::erase_if(s_.subPictures, [&](const SubPicture& other) { return other.name == p.name; }); // the last one wins
         s_.subPictures.push_back(std::move(p));
     }
@@ -1740,11 +1754,11 @@ private:
     // control NAME keys="space mouse_left" action="..." [everywhere=yes] [if=CONDITION]
     void control(const Line& line, Cursor& c) {
         const auto name = c.next();
-        if (!name || !isName(*name)) return error(line, "A control line needs a name.");
+        if (!name || !isName(*name)) return error(line, "A control line needs a name."_tr());
         ControlLine control{.line = &line, .name = lower(*name)};
         while (!c.done()) {
             const auto opt = c.option();
-            if (!opt) return error(line, std::format("'{}' doesn't belong in a control line.", c.peek().text));
+            if (!opt) return error(line, "'{}' doesn't belong in a control line."_tr(c.peek().text));
             const auto& [key, value] = *opt;
             if (key == "keys" || key == "key") {
                 std::string list(value);
@@ -1753,7 +1767,7 @@ private:
                 for (const auto& w : keyWords.value_or(std::vector<ScriptWord>{})) {
                     const auto chord = parseKeyChord(w.text);
                     if (!chord)
-                        return error(line, std::format("'{}' isn't a key name.", w.text));
+                        return error(line, "'{}' isn't a key name."_tr(w.text));
                     control.keys.push_back(*chord);
                 }
             } else if (key == "action") {
@@ -1763,7 +1777,7 @@ private:
             } else if (key == "if") {
                 control.condition = value;
             } else {
-                return error(line, std::format("Controls have no setting '{}'.", key));
+                return error(line, "Controls have no setting '{}'."_tr(key));
             }
         }
         if (control.action.empty()) return error(line, "A control needs action=.");
@@ -1774,7 +1788,7 @@ private:
     // character NAME setting=value ...
     void character(const Line& line, Cursor& c) {
         const auto name = c.next();
-        if (!name) return error(line, "A character line needs a name.");
+        if (!name) return error(line, "A character line needs a name."_tr());
         const GameConfig& cfg = s_.config;
         CharacterDef def{.key = lower(*name), .name = *name, .image = imageName(*name), .babbleSpeed = cfg.babbleSpeed,
                          .blink = cfg.blink, .blinkEvery = cfg.blinkEvery, .talk = cfg.talk, .talkSpeed = cfg.talkSpeed};
@@ -1782,7 +1796,7 @@ private:
         std::optional<Talk> faceTalk;
         while (!c.done()) {
             const auto opt = c.option();
-            if (!opt) return error(line, std::format("'{}' doesn't belong in a character line.", c.peek().text));
+            if (!opt) return error(line, "'{}' doesn't belong in a character line."_tr(c.peek().text));
             const auto& [key, value] = *opt;
             // Each sets its field when the value is right, and says whether it was.
             auto flag = [&](bool& out) { return set(out, boolean(line, value, key)); };
@@ -1799,7 +1813,7 @@ private:
                     if (word == "expression") out.expression = true;
                     else if (word == "blink") out.blink = true;
                     else if (word == "talk") out.talk = true;
-                    else return error(line, std::format("face_sync can be yes, no, or what the face copies (expression, blink, talk), not '{}'.", written)), false;
+                    else return error(line, "'face_sync' can be yes, no, or what the face copies (expression, blink, talk), not '{}'."_tr(written)), false;
                 }
                 return true;
             };
@@ -1823,7 +1837,7 @@ private:
                 if (height != std::end(heights)) def.babble = height->second;
                 else if (parseBool(value) == false) def.babble = 0.0f;
                 else if (const auto hz = parseNumber(value); hz && *hz >= 50.0f && *hz <= 600.0f) def.babble = *hz;
-                else return error(line, std::format("babble can be high, medium, low, deep, no or a pitch, not '{}'.", value));
+                else return error(line, "'babble' can be high, medium, low, deep, no or a pitch, not '{}'."_tr(value));
             }
             else if (key == "babble_speed") ok = within(def.babbleSpeed, 0.25f, 4.0f);
             else if (key == "blink") ok = flag(def.blink);
@@ -1832,14 +1846,14 @@ private:
             else if (key == "talk_speed") ok = within(def.talkSpeed, 0.5f, 20.0f);
             else if (key == "face") def.face = value; // a picture name, or yes / no
             else if (key == "face_side") {
-                if (!isName(value)) return error(line, std::format("face_side is one word, not '{}'.", value));
+                if (!isName(value)) return error(line, "'face_side' is one word, not '{}'."_tr(value));
                 def.faceSide = lower(value);
             }
             else if (key == "face_sync") ok = sync(def.faceSync);
             else if (key == "face_flip") ok = flag(def.faceFlip);
             else if (key == "face_blink") ok = (faceBlink = boolean(line, value, key)).has_value();
             else if (key == "face_talk") ok = (faceTalk = talk(line, key, value)).has_value();
-            else return error(line, std::format("Characters have no setting '{}'.", key));
+            else return error(line, "Characters have no setting '{}'."_tr(key));
             if (!ok) return;
         }
         if (const auto yes = parseBool(def.face)) def.face = *yes ? def.image + "_face" : ""; // face=yes: images/<image>_face.png
@@ -1861,7 +1875,7 @@ private:
     // | tip NAME "Title" "Description"
     void record(const Line& line, RecordKind kind, Cursor& c) {
         const auto name = c.next();
-        if (!name || (kind != RecordKind::Gallery && !isName(*name))) return error(line, std::format("{} needs a name.", kRecordKinds[static_cast<std::size_t>(kind)]));
+        if (!name || (kind != RecordKind::Gallery && !isName(*name))) return error(line, "'{}' needs a name."_tr(kRecordKinds[static_cast<std::size_t>(kind)]));
         Script::Record r{.name = *name, .title = c.next().value_or(*name)};
         if (r.title.empty()) r.title = *name; // (a title left empty, "": the name)
         while (!c.done()) {
@@ -1869,14 +1883,14 @@ private:
             else if (kind == RecordKind::Ending && c.atOption("hint")) r.text = c.option()->second;
             else if ((kind == RecordKind::Achievement || kind == RecordKind::Tip) && r.text.empty() && (c.peek().quoted || !c.peek().text.contains('=')))
                 r.text = *c.next();
-            else return error(line, std::format("'{}' doesn't belong in this {} line.", c.peek().text, kRecordKinds[static_cast<std::size_t>(kind)]));
+            else return error(line, "'{}' doesn't belong in this {} line."_tr(c.peek().text, kRecordKinds[static_cast<std::size_t>(kind)]));
         }
         auto& list = s_.lists[static_cast<std::size_t>(kind)];
         std::erase_if(list, [&](const Script::Record& other) { return sameName(other.name, r.name); }); // the last one wins
         list.push_back(std::move(r));
     }
 
-    // config SETTING VALUE (one value, or two for resolution, cursor_hotspot and the transitions)
+    // config SETTING VALUE (one value, or two for resolution and cursor_hotspot)
     void config(const Line& line, const std::string& key, const std::vector<std::string>& v) {
         GameConfig& c = s_.config;
         struct Number {
@@ -1886,10 +1900,9 @@ private:
         };
         static constexpr std::array numbers{
             Number{"skip_delay", &GameConfig::skipDelay, 0.0f, 10.0f},     Number{"auto_per_char", &GameConfig::autoPerChar, 0.0f, 10.0f},
-            Number{"fade_time", &GameConfig::fadeTime, 0.0f, 60.0f},       Number{"dissolve_time", &GameConfig::dissolveTime, 0.0f, 60.0f},
             Number{"sprite_height", &GameConfig::spriteHeight, 0.05f, 10.0f}, Number{"move_time", &GameConfig::moveTime, 0.0f, 60.0f},
-            Number{"shake_strength", &GameConfig::shakeStrength, 0.0f, 1000.0f}, Number{"shake_time", &GameConfig::shakeTime, 0.01f, 60.0f},
-            Number{"flash_time", &GameConfig::flashTime, 0.01f, 60.0f},    Number{"notify_time", &GameConfig::notifyTime, 0.1f, 600.0f},
+
+            Number{"notify_time", &GameConfig::notifyTime, 0.1f, 600.0f},
             Number{"music_crossfade", &GameConfig::musicCrossfade, 0.0f, 60.0f},
             Number{"glide_speed", &GameConfig::glideSpeed, 0.0f, 10.0f},      Number{"glide_distance", &GameConfig::glideDistance, 0.05f, 10.0f},
             Number{"scrollbar_size", &GameConfig::scrollbarSize, 1.0f, 64.0f}, Number{"fade_size", &GameConfig::fadeSize, 0.0f, 1000.0f},
@@ -1912,7 +1925,7 @@ private:
             {"autosave", &GameConfig::autosave}, {"voice_sync", &GameConfig::voiceSync}, {"developer", &GameConfig::developer}, {"glide", &GameConfig::glide},
             {"blink", &GameConfig::blink}, {"resizable", &GameConfig::resizable}};
         static const std::map<std::string_view, SDL_Color GameConfig::*> colors{
-            {"flash_color", &GameConfig::flashColor}, {"narrator_color", &GameConfig::narratorColor},
+            {"narrator_color", &GameConfig::narratorColor},
             {"letterbox_color", &GameConfig::letterboxColor}};
         static const std::map<std::string_view, std::string GameConfig::*> texts{
             {"title", &GameConfig::title}, {"version", &GameConfig::version}, {"save_id", &GameConfig::saveId}, {"icon", &GameConfig::icon},
@@ -1924,16 +1937,8 @@ private:
         const std::size_t needs = key == "resolution" && v.size() == 1 && v[0].contains('x') ? 1
                                 : key == "resolution" || key == "cursor_hotspot"               ? 2
                                                                                                : 1;
-        if (v.size() < needs) return error(line, std::format("config {} needs {} value{}.", key, needs, needs == 1 ? "" : "s"));
+        if (v.size() < needs) return error(line, needs == 1 ? "'config {}' needs 1 value."_tr(key) : "'config {}' needs {} values."_tr(key, needs));
         const std::string& value = v[0];
-        auto transition = [&](Transition& out) {
-            const auto kind = oneOf<TransitionKind>(line, key, value, kTransitions);
-            if (!kind) return;
-            out.kind = *kind;
-            if (v.size() > 1)
-                if (auto x = number(line, v[1], key)) out.duration = std::max(0.0f, *x);
-        };
-
         if (const auto n = std::ranges::find(numbers, std::string_view(key), &Number::key); n != numbers.end()) {
             if (auto x = number(line, value, key)) c.*(n->field) = std::clamp(*x, n->lo, n->hi);
         } else if (const auto w = std::ranges::find(wholes, std::string_view(key), &Whole::key); w != wholes.end()) {
@@ -1963,15 +1968,17 @@ private:
             set(c.talk, talk(line, key, value));
         } else if (key == "reveal") {
             set(c.reveal, oneOf<Reveal>(line, key, value, kReveals));
-        } else if (key == "show_transition" || key == "hide_transition") {
-            transition(key == "show_transition" ? c.showTransition : c.hideTransition);
+        } else if (key == "show_animation" || key == "hide_animation") { // what show and hide lines play when they name none (checked once the animations are read)
+            (key == "show_animation" ? c.showAnimation : c.hideAnimation) = lower(value) == "none" ? std::string{} : lower(value);
+            std::erase_if(animationConfigs_, [&](const auto& kept) { return kept.first == key; });
+            animationConfigs_.emplace_back(key, &line);
         } else if (key.starts_with("default.")) { // a player setting's starting value: a number, yes / no, or (scaling, mouths) its word
             const std::string setting = key.substr(8);
             if (!std::ranges::contains(kSettingNames, setting) || setting == "window_size" || setting == "language")
-                return error(line, std::format("There's no player setting called '{}'.", setting));
+                return error(line, "There's no player setting called '{}'."_tr(setting));
             if (const auto start = settingNumber(line, setting, key, value)) c.settingDefaults[setting] = *start;
         } else {
-            error(line, std::format("There's no config setting called '{}'.", key));
+            error(line, "There's no config setting called '{}'."_tr(key));
         }
     }
 
@@ -2014,7 +2021,7 @@ private:
         else if (key == "image") s.image = std::string(value);
         else if (key == "align" || key == "valign") {
             if (auto a = toAlign(value)) (key == "align" ? s.align : s.valign) = *a;
-            else error(line, std::format("{} can be left, center or right (top, center or bottom for valign), not '{}'.", key, value));
+            else error(line, "'{}' can be left, center or right (top, center or bottom for valign), not '{}'."_tr(key, value));
         }
         else if (key == "padding") set(s.padding, at(0.0f));
         else if (key == "opacity") {
@@ -2037,7 +2044,7 @@ private:
         const auto raw = styleLines_.find(name);
         if (raw == styleLines_.end()) return std::nullopt;
         if (depth > 16) {
-            error(user, std::format("Style '{}' is its own parent.", name));
+            error(user, "Style '{}' is its own parent."_tr(name));
             return Style{};
         }
         std::vector<std::pair<const Line*, std::pair<std::string, std::string>>> props;
@@ -2049,7 +2056,7 @@ private:
                     if (line->file < builtinFiles_) scaleBuiltIn(*opt);
                     props.emplace_back(line, std::move(*opt));
                 } else {
-                    error(*line, std::format("'{}' doesn't belong in a style line.", *c->next()));
+                    error(*line, "'{}' doesn't belong in a style line."_tr(*c->next()));
                 }
             }
         }
@@ -2059,11 +2066,11 @@ private:
         Style s;
         if (!parent.empty()) {
             if (auto base = style(parent, *raw->second.front(), depth + 1)) s = *base;
-            else if (parent != "default") error(*raw->second.front(), std::format("There's no style called '{}'.", parent));
+            else if (parent != "default") error(*raw->second.front(), "There's no style called '{}'."_tr(parent));
         }
         for (const auto& [line, kv] : props)
             if (kv.first != "parent" && !styleProp(s, kv.first, kv.second, *line))
-                error(*line, std::format("Styles have no setting '{}'.", kv.first));
+                error(*line, "Styles have no setting '{}'."_tr(kv.first));
         return styles_.emplace(name, s).first->second;
     }
 
@@ -2075,7 +2082,7 @@ private:
             while (c && !c->done()) {
                 const auto opt = c->option();
                 if (!opt) {
-                    error(*line, std::format("'{}' doesn't belong in a screen line.", *c->next()));
+                    error(*line, "'{}' doesn't belong in a screen line."_tr(*c->next()));
                     continue;
                 }
                 const auto& [key, value] = *opt;
@@ -2087,7 +2094,7 @@ private:
                 else if (key == "show_animation" || key == "hide_animation") {
                     if (const auto a = s_.animations.find(lower(value)); a != s_.animations.end())
                         (key == "show_animation" ? def.showAnimation : def.hideAnimation) = std::make_shared<const Animation>(a->second);
-                    else error(*line, std::format("There's no animation called '{}'.", value));
+                    else error(*line, "There's no animation called '{}'."_tr(value));
                 }
                 else if (key == "keep") def.keep = boolean(*line, value, key).value_or(false);
                 else if (key == "text_speed") def.textSpeed = std::max(0.05f, number(*line, value, key).value_or(1.0f));
@@ -2095,14 +2102,14 @@ private:
                 else if (key == "stop_music_on_close") def.stopOnClose.music = boolean(*line, value, key).value_or(false);
                 else if (key == "stop_voice_on_open") def.stopOnOpen.voice = boolean(*line, value, key).value_or(false);
                 else if (key == "stop_voice_on_close") def.stopOnClose.voice = boolean(*line, value, key).value_or(false);
-                else error(*line, std::format("Screens have no setting '{}'.", key));
+                else error(*line, "Screens have no setting '{}'."_tr(key));
             }
             def.keyboard = keyboard.value_or(def.modal);
             elements(def, line->children, -1);
             s_.screens.insert_or_assign(name, std::move(def));
         }
         for (const auto& [line, screen] : textboxes_)
-            if (!s_.screens.contains(screen)) error(*line, std::format("There's no screen called '{}' to use as a textbox.", screen));
+            if (!s_.screens.contains(screen)) error(*line, "There's no screen called '{}' to use as a textbox."_tr(screen));
     }
 
     // A screen's parts, each followed by the ones in it (indented under it: their places are in its box).
@@ -2123,7 +2130,7 @@ private:
         const std::string kind = lower(*c.next());
         const auto spec = std::ranges::find(kKinds, std::string_view(kind), &KindSpec::name);
         if (spec == kKinds.end()) {
-            error(line, std::format("'{}' isn't a screen part.", kind));
+            error(line, "'{}' isn't a screen part."_tr(kind));
             return std::nullopt;
         }
         Element el{.kind = spec->kind, .file = line.file, .line = line.number};
@@ -2131,7 +2138,7 @@ private:
         std::vector<std::pair<std::string, std::string>> props;
         while (!c.done()) {
             if (auto opt = c.option()) props.push_back(std::move(*opt));
-            else error(line, std::format("'{}' isn't a setting.", *c.next()));
+            else error(line, "'{}' isn't a setting."_tr(*c.next()));
         }
         if (line.file < builtinFiles_) // (written for 1280 x 720)
             for (auto& kv : props) scaleBuiltIn(kv);
@@ -2142,7 +2149,7 @@ private:
         for (const auto& [k, v] : props)
             if (k == "style") {
                 styleName = lower(v);
-                if (!styleLines_.contains(styleName)) error(line, std::format("There's no style called '{}'.", v));
+                if (!styleLines_.contains(styleName)) error(line, "There's no style called '{}'."_tr(v));
             }
         el.style = style(styleName, line).value_or(Style{});
 
@@ -2151,10 +2158,10 @@ private:
         };
         for (const auto& [k, v] : props) {
             if (k == "style" || k == "name") continue; // (name=: what the editor calls it)
-            if (k == "animation" || (allowed(k) && k == "click_animation")) { // (any part; a button's when it's clicked)
+            if (k == "animation" || k == "hover_animation" || (allowed(k) && k == "click_animation")) { // (any part's; a button's when it's clicked)
                 if (const auto a = s_.animations.find(lower(v)); a != s_.animations.end())
-                    (k == "animation" ? el.animation : el.clickAnimation) = std::make_shared<const Animation>(a->second);
-                else error(line, std::format("There's no animation called '{}'.", v));
+                    (k == "animation" ? el.animation : k == "hover_animation" ? el.hoverAnimation : el.clickAnimation) = std::make_shared<const Animation>(a->second);
+                else error(line, "There's no animation called '{}'."_tr(v));
             } else if (k == "x" || k == "y" || k == "w" || k == "h") { // (places from -1 to 1, shares of its box)
                 if (auto n = number(line, v, k)) (k == "x" ? el.placeX : k == "y" ? el.placeY : k == "w" ? el.shareW : el.shareH) = *n;
             } else if (k == "if") {
@@ -2169,18 +2176,18 @@ private:
                 if (auto e = formula(line, v)) el.exprs.insert_or_assign(k, std::move(*e));
             } else if (allowed(k) && k == "key") {
                 el.key = parseKeyChord(v);
-                if (!el.key) error(line, std::format("'{}' isn't a key name.", v));
+                if (!el.key) error(line, "'{}' isn't a key name."_tr(v));
             } else if (allowed(k) && (k == "enabled" || k == "selected")) {
                 (k == "enabled" ? el.enabled : el.selected) = formula(line, v);
             } else if (allowed(k) && k.ends_with("_style")) {
                 if (auto s = style(lower(v), line)) el.substyles.insert_or_assign(k, *s);
-                else error(line, std::format("There's no style called '{}'.", v));
+                else error(line, "There's no style called '{}'."_tr(v));
             } else if (allowed(k) && std::ranges::contains(kColorOptions, k)) {
                 if (auto col = color(line, v)) el.colors.insert_or_assign(k, *col);
             } else if (allowed(k)) {
                 el.props.insert_or_assign(k, k == "var" ? lower(v) : v);
             } else if (!styleProp(el.style, k, v, line)) {
-                error(line, std::format("'{}' has no setting '{}'.", kind, k));
+                error(line, "'{}' has no setting '{}'."_tr(kind, k));
             }
         }
         if (el.kind == ElementKind::Text || el.kind == ElementKind::Button) checkTextOf(line, el.text);
@@ -2188,26 +2195,26 @@ private:
         switch (el.kind) {
         case ElementKind::Key:
             el.key = parseKeyChord(el.text);
-            if (!el.key) error(line, std::format("'{}' isn't a key name.", el.text));
+            if (!el.key) error(line, "'{}' isn't a key name."_tr(el.text));
             if (el.actions.empty()) error(line, "A key needs action=.");
             break;
         case ElementKind::Image: // (a picture by name, a colour, or a box of its style's background; one fading down with bottom=)
-            if (el.text.empty() && !el.colors.contains("bottom") && el.style.bg.a == 0) error(line, "Which image to show is missing.");
+            if (el.text.empty() && !el.colors.contains("bottom") && el.style.bg.a == 0) error(line, "Which image to show is missing."_tr());
             break;
         case ElementKind::Movie:
-            if (el.text.empty()) error(line, "Which video to play is missing.");
+            if (el.text.empty()) error(line, "Which video to play is missing."_tr());
             break;
         case ElementKind::Input:
         case ElementKind::Slider:
             if (el.kind == ElementKind::Slider && !el.option("setting").empty()) { // (a player setting: a volume, the text's speed...)
                 const SettingControl* setting = findSettingControl(lower(el.option("setting")));
-                if (!setting) error(line, std::format("'{}' isn't a player setting a slider can change.", el.option("setting")));
+                if (!setting) error(line, "'{}' isn't a player setting a slider can change."_tr(el.option("setting")));
                 if (!el.option("var").empty()) error(line, "A slider changes a variable (var=) or a player setting (setting=), not both.");
                 break;
             }
             if (el.kind == ElementKind::Slider && el.option("var").empty()) error(line, "A slider needs var=, the variable it changes, or setting=, the player setting.");
             if (!el.option("var").empty() && !isVariable(el.option("var")))
-                error(line, std::format("'{}' can't be a variable name.", el.option("var")));
+                error(line, "'{}' can't be a variable name."_tr(el.option("var")));
             break;
         case ElementKind::Bar:
             if (!el.exprs.contains("value")) error(line, "A bar needs value=.");
@@ -2215,8 +2222,8 @@ private:
         case ElementKind::Control:
             el.text = lower(el.text);
             if (std::ranges::none_of(controlLines_, [&](const ControlLine& known) { return known.name == el.text; }))
-                error(line, std::format("There's no control called '{}'.", el.text));
-            if (el.number("slot", 1.0f) < 1.0f) error(line, std::format("slot needs a number from 1 up, not {}.", el.number("slot", 1.0f)));
+                error(line, "There's no control called '{}'."_tr(el.text));
+            if (el.number("slot", 1.0f) < 1.0f) error(line, "'slot' needs a number from 1 up, not '{}'."_tr(el.number("slot", 1.0f)));
             break;
         default:
             break;
@@ -2246,7 +2253,7 @@ private:
             const Line where{.file = ins.file, .number = ins.line};
             auto fix = [&](const std::string& label, std::size_t& target) {
                 if (auto pc = s_.findLabel(label)) target = *pc;
-                else error(where, std::format("There's no label called '{}'.", label));
+                else error(where, "There's no label called '{}'."_tr(label));
             };
             if (auto* jump = std::get_if<cmd::Jump>(&ins.command); jump && !jump->label.empty()) fix(jump->label, jump->target);
             if (auto* menu = std::get_if<cmd::Menu>(&ins.command))
@@ -2262,9 +2269,11 @@ private:
     std::set<std::string> included_;
     std::vector<const Line*> defs_;
     std::set<const Line*> asText_; // capitalized lines that didn't work as definitions
-    // Places for "show NAME at PLACE": these, and the game's "position" lines.
+    std::vector<std::pair<std::string, const Line*>> animationConfigs_; // config show_animation / hide_animation, and where
+    // Places for "show NAME at PLACE": these, and the game's "position" lines, as the stage has them (as
+    // stageCoordinate gives them: 0 at the left edge, 1 at the right; left is -0.6 in a position line).
     std::map<std::string, float, std::less<>> positions_{
-        {"farleft", -1.0f}, {"left", -0.6f}, {"center", 0.0f}, {"middle", 0.0f}, {"right", 0.6f}, {"farright", 1.0f}};
+        {"farleft", 0.0f}, {"left", 0.2f}, {"center", 0.5f}, {"middle", 0.5f}, {"right", 0.8f}, {"farright", 1.0f}};
     std::map<std::string, std::vector<const Line*>, std::less<>> styleLines_; // repeated definitions merge
     std::map<std::string, Style, std::less<>> styles_;
     std::map<std::string, const Line*, std::less<>> screenLines_;             // the last definition wins

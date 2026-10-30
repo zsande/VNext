@@ -23,8 +23,9 @@ std::string listOfChoices(const StoryEditor::Field& f) {
     const auto words = wordsOf(f.choices), labels = wordsOf(f.labels, '|');
     std::string text;
     for (std::size_t i = 0; i < words.size(); ++i) {
-        std::string said(i < labels.size() ? labels[i] : words[i]);
-        if (!said.empty()) said[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(said[0]))); // (as a list says things)
+        const std::string_view english = i < labels.size() ? labels[i] : words[i];
+        std::string said(tr(english)); // (a translation as it is; English as a list says things)
+        if (!said.empty() && said == english) said[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(said[0])));
         text += std::format("{}{}:{}", text.empty() ? "" : "|", words[i], said);
     }
     return text;
@@ -39,28 +40,30 @@ std::size_t nextLetter(const std::string& s, std::size_t i) {
 
 } // namespace
 
-TextBlock& DeveloperUi::block() {
-    if (d.used == d.texts.size()) d.texts.emplace_back();
-    return d.texts[d.used++];
+TextBlock& DeveloperUi::block(const Font& font, std::string_view s, float wrap) {
+    d.textKey.clear();
+    std::format_to(std::back_inserter(d.textKey), "{}|{}|{}", static_cast<const void*>(&font), wrap, s);
+    auto kept = d.texts.find(d.textKey);
+    if (kept == d.texts.end()) {
+        kept = d.texts.try_emplace(d.textKey).first;
+        kept->second.block.set(font, s, wrap);
+    }
+    kept->second.drawn = d.textFrame;
+    return kept->second.block;
 }
 
 SDL_FPoint DeveloperUi::text(std::string_view s, float x, float y, float size, SDL_Color color, float wrap) {
-    TextBlock& b = block();
-    b.set(font(size), s, wrap);
+    TextBlock& b = block(font(size), s, wrap);
     b.draw(r, x, y, color);
     return b.size();
 }
 
 float DeveloperUi::width(std::string_view s, float size) {
-    TextBlock& b = block();
-    b.set(font(size), s);
-    return b.size().x;
+    return block(font(size), s).size().x;
 }
 
 SDL_FPoint DeveloperUi::measure(std::string_view s, float size, float wrap) {
-    TextBlock& b = block();
-    b.set(font(size), s, wrap);
-    return b.size();
+    return block(font(size), s, wrap).size();
 }
 
 std::string DeveloperUi::fitted(std::string_view s, float size, float room) {
@@ -167,8 +170,7 @@ void DeveloperUi::formTitle(std::string_view title, float x, float y, SDL_Color 
 }
 
 void DeveloperUi::textIn(std::string_view s, const SDL_FRect& box, float size, SDL_Color color) {
-    TextBlock& b = block();
-    b.set(font(size), s);
+    TextBlock& b = block(font(size), s);
     const Clip clipped(*this, box);
     b.drawIn(r, box, 0.5f, 0.5f, color);
 }
@@ -224,7 +226,7 @@ std::optional<std::size_t> DeveloperUi::list(const SDL_FRect& box, float& scroll
         text(label(i), item.x + layout::listPad * k, item.y + 5 * k, layout::listText, faint && faint(i) ? theme::dim : theme::text);
         if (over(box) && click(item)) clicked = i;
     }
-    if (count == 0) text("Empty", box.x + layout::listPad * k, box.y + 5 * k, layout::listText, theme::dim);
+    if (count == 0) text("Empty"_tr, box.x + layout::listPad * k, box.y + 5 * k, layout::listText, theme::dim);
     return clicked;
 }
 
@@ -271,7 +273,7 @@ DeveloperUi::ListEvent DeveloperUi::editList(const std::string& id, const SDL_FR
         if (deletes) {
             draw::rect(r, cross, armed ? SDL_Color{150, 50, 64, 255} : over(cross) ? kButtonHover : kButton);
             draw::outline(r, cross, armed ? kBad : kEdge);
-            textIn(armed ? "Delete" : "x", cross, layout::smallButtonText, theme::text);
+            textIn(armed ? std::string_view("Delete"_tr) : std::string_view("x"), cross, layout::smallButtonText, theme::text);
         }
         if (renaming || !d.clicked || !pointed) continue;
         d.clicked = false;
@@ -293,7 +295,7 @@ DeveloperUi::ListEvent DeveloperUi::editList(const std::string& id, const SDL_FR
         const float in = depth ? static_cast<float>(*depth) * items.indentStep : 0.0f;
         draw::rect(r, {box.x + in, box.y + static_cast<float>(*slot) * itemH - scroll - 2 * k, box.w - in, 3 * k}, kAccent);
     }
-    if (items.count == 0) textAround("Empty", box.x + layout::listPad * k, box.y + itemH / 2, layout::listText, theme::dim);
+    if (items.count == 0) textAround("Empty"_tr, box.x + layout::listPad * k, box.y + itemH / 2, layout::listText, theme::dim);
     if (dragging && !d.held) {
         if (slot) event = {.kind = Event::Moved, .item = d.listDrag->item, .to = *slot, .name = {}, .depth = depth.value_or(0)};
         d.listDrag.reset();
@@ -331,7 +333,7 @@ std::vector<SDL_FRect> DeveloperUi::flow(const std::vector<std::string_view>& la
     std::vector<SDL_FRect> out;
     const std::size_t n = labels.size();
     std::vector<float> widths(n);
-    for (std::size_t i = 0; i < n; ++i) widths[i] = std::min(w, width(labels[i], size) + pad * k); // (snug, like a form's choices: more to a row)
+    for (std::size_t i = 0; i < n; ++i) widths[i] = std::min(w, width(tr(labels[i]), size) + pad * k); // (as shown: snug, like a form's choices, more to a row)
     auto joined = [&](std::size_t i) { return i > 0 && i < n && ((i < with.size() && with[i]) || pairedButtons(labels[i - 1], labels[i])); };
     float x = 0.0f, y = 0.0f;
     for (std::size_t i = 0; i < n;) {
@@ -365,9 +367,10 @@ DeveloperUi::ChoiceButtons DeveloperUi::choiceButtons(const SDL_FRect& box, cons
         if (labels.size() == 2) std::ranges::reverse(labels);
     }
     float widest = 0.0f;
+    std::vector<std::string> english; // (as written: pairs are found by those)
     for (std::size_t i = 0; i < words.size(); ++i) {
-        std::string label = i < labels.size() && !f.labels.empty() ? std::string(labels[i]) : std::string(words[i]);
-        label = upperFirst(spaced(label));
+        english.push_back(upperFirst(spaced(i < labels.size() && !f.labels.empty() ? labels[i] : words[i])));
+        std::string label(tr(english.back()));
         widest = std::max(widest, width(label, layout::buttonText) + layout::choicePad * k);
         shown.push_back(std::move(label));
     }
@@ -396,7 +399,7 @@ DeveloperUi::ChoiceButtons DeveloperUi::choiceButtons(const SDL_FRect& box, cons
         for (std::size_t i = 0; i < n; ++i) {
             const float bw = widthOf(i);
             bool wrap = i > rowStart && x + gap + bw > box.w;
-            if (!wrap && i > rowStart && i + 1 < n && pairedButtons(shown[i], shown[i + 1])) wrap = x + gap + bw + gap + widthOf(i + 1) > box.w; // (its pair comes along)
+            if (!wrap && i > rowStart && i + 1 < n && pairedButtons(english[i], english[i + 1])) wrap = x + gap + bw + gap + widthOf(i + 1) > box.w; // (its pair comes along)
             if (wrap) {
                 finish(i);
                 rowStart = i;
@@ -449,8 +452,7 @@ bool DeveloperUi::tab(const SDL_FRect& box, std::string_view label, bool chosen,
 }
 
 void DeveloperUi::textAround(std::string_view s, float x, float middle, float size, SDL_Color color, float wrap) {
-    TextBlock& b = block();
-    b.set(font(size), s, wrap);
+    TextBlock& b = block(font(size), s, wrap);
     b.draw(r, x, middle - b.size().y / 2, color);
 }
 
@@ -591,8 +593,7 @@ std::optional<std::string> DeveloperUi::field(const std::string& id, const SDL_F
     const bool hinted = !focused && value.empty() && !hint.empty();
     const float shift = focused ? shiftOf(d.buffer, d.caret) : 0.0f; // (the caret stays in sight)
     const float x0 = box.x + pad - shift;
-    TextBlock& whole = block();
-    whole.set(font(size), hinted ? std::string(hint) : text.empty() ? std::string(" ") : text);
+    TextBlock& whole = block(font(size), hinted ? std::string(tr(hint)) : text.empty() ? std::string(" ") : text);
     const float ty = box.y + (box.h - whole.size().y) / 2;
     const Clip clipped(*this, box);
     if (focused && d.anchor != d.caret) { // what's chosen
@@ -608,8 +609,7 @@ std::optional<std::string> DeveloperUi::field(const std::string& id, const SDL_F
             std::size_t j = tag ? text.find('}', i) : text.find('{', i);
             j = j == npos ? text.size() : tag ? j + 1 : j;
             const std::string_view run = std::string_view(text).substr(i, j - i);
-            TextBlock& b = block();
-            b.set(font(size), run);
+            TextBlock& b = block(font(size), run);
             b.draw(r, x, ty, tag ? theme::dim : theme::text);
             x += b.size().x;
             i = j;
@@ -657,8 +657,8 @@ std::optional<std::string> DeveloperUi::listButton(const std::string& id, const 
     return picked;
 }
 
-float DeveloperUi::swatch(float x, float middle, SDL_Color color, bool dim, std::optional<SDL_Color> bottom) const {
-    const float side = layout::swatch * k;
+float DeveloperUi::swatch(float x, float middle, SDL_Color color, bool dim, std::optional<SDL_Color> bottom, float size) const {
+    const float side = size * k;
     const SDL_FRect box{x, std::round(middle - side / 2), side, side};
     if (dim) color.a = static_cast<Uint8>(color.a / 2);
     if (bottom) { // (a gradient: fading down in the square too)
@@ -691,14 +691,14 @@ std::optional<std::string> DeveloperUi::colorField(const std::string& id, const 
     // own, or for a code what it's called or most like (never the code). A picture's name or
     // other words: as they are.
     const std::string_view text = value.empty() ? f.hint : std::string_view(value);
-    std::string said(text);
+    std::string said(value.empty() ? tr(text) : text);
     float tx = box.x + 8 * k;
     if (const auto color = text.empty() ? std::nullopt : parseColor(text, &engine_.palette())) {
         const auto grad = parseGradient(text, &engine_.palette());
-        said = colorWords(text, &engine_.palette()); // (its name, a code's likeness, "navy down to black")
+        said = std::string(tr(colorWords(text, &engine_.palette()))); // (its name, a code's likeness, "navy down to black"; None in the tools' language)
         tx = swatch(tx, box.y + box.h / 2, *color, value.empty(), grad ? std::optional(grad->second) : std::nullopt); // (dimmed: its default's)
     }
-    textAround(said, tx, box.y + box.h / 2, size, value.empty() ? theme::dim : theme::text, std::max(0.0f, arrow.x - tx - 4 * k));
+    textAround(fitted(said, size, std::max(0.0f, arrow.x - tx - 4 * k)), tx, box.y + box.h / 2, size, value.empty() ? theme::dim : theme::text); // (one line: cut to fit)
     draw::rect(r, arrow, shown ? kChosen : over(arrow) ? kButtonHover : kButton);
     draw::outline(r, arrow, kEdge);
     triangle(arrow.x + arrow.w / 2, arrow.y + arrow.h / 2, 5 * k, shown ? Pointing::Up : Pointing::Down, theme::text);

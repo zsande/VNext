@@ -206,6 +206,12 @@ SDL_AppResult Engine::init(int argc, char** argv) {
         }
     }
     SDL_SetAppMetadata("VNext", kVersion, "dev.vnext.engine");
+    if (!dataArg.empty()) {
+        SDL_CreateDirectory(dataArg.c_str());
+        prefPath_ = withSlash(dataArg);
+        dataFolder_ = true;
+    }
+    developer_.startToolsLanguage(); // (before the scripts are read: what's said about their mistakes is in it)
 
     // The script comes first: it decides the save folder, resolution and default settings.
     gameRoot_ = findGame(gameArg);
@@ -233,11 +239,6 @@ SDL_AppResult Engine::init(int argc, char** argv) {
         return SDL_APP_FAILURE;
     }
 
-    if (!dataArg.empty()) {
-        SDL_CreateDirectory(dataArg.c_str());
-        prefPath_ = withSlash(dataArg);
-        dataFolder_ = true;
-    }
     loadPlayerData();
     logFile_ = prefPath_ + "log.txt";
     log_.open(logFile_);
@@ -313,6 +314,7 @@ void Engine::loadPlayerData() {
     loadPersistent();
     chart_.read(readProgress("chart.txt").value_or(""));
     developer_.loadReached();
+    developer_.loadStops();
 }
 
 // What the player shows first: the splash screen, then label start (or --label's label). In developer
@@ -588,20 +590,20 @@ std::string Engine::packPath() const {
 }
 
 // What packing says, a sentence or two a line (the developer tools' window shows the lines apart, the log
-// on one line).
+// on one line), in the developer tools' language (on the command line, English).
 namespace {
-constexpr std::string_view kPackedAlready = "Can't pack the game: it's a pack already.\nOpen its game folder to pack it again.";
-constexpr std::string_view kScriptsWrong = "Can't pack the game: its scripts have mistakes.\nThe Story tab and the log say where.";
+std::string packedAlready() { return "Can't pack the game: it's a pack already."_tr() + "\n" + "Open its game folder to pack it again."_tr(); }
+std::string scriptsWrong() { return "Can't pack the game: its scripts have mistakes."_tr() + "\n" + "The Story tab and the log say where."_tr(); }
 } // namespace
 
 // Packs the game into `file`, and writes the licenses of what's built into the player next to it
 // (licenses.txt), to go out with them.
 std::expected<std::string, std::string> Engine::pack(const std::string& file) const {
-    if (packed_) return std::unexpected(std::string(kPackedAlready));
-    if (!script_.ok()) return std::unexpected(std::string(kScriptsWrong));
+    if (packed_) return std::unexpected(packedAlready());
+    if (!script_.ok()) return std::unexpected(scriptsWrong());
     const auto holds = packInto(file);
     if (!holds) return holds;
-    return std::format("Packed the game into '{}', with 'licenses.txt' next to it.\n{}", file, *holds);
+    return "Packed the game into '{}', with 'licenses.txt' next to it."_tr(file) + "\n" + *holds;
 }
 
 // The pack written as `file`, with licenses.txt next to it: what it holds and how long it took to make.
@@ -611,10 +613,10 @@ std::expected<std::string, std::string> Engine::packInto(const std::string& file
     if (!report) return std::unexpected(report.error());
     const std::string notices = file.substr(0, file.find_last_of("/\\") + 1) + "licenses.txt";
     if (!SDL_SaveFile(notices.c_str(), licenses().data(), licenses().size()))
-        return std::unexpected(std::format("Packed the game, but can't write '{}': {}.", notices, SDL_GetError()));
-    return std::format("The pack holds {} ({:.1f} MB) in {:.1f} MB, made in {:.1f} seconds.",
-                       report->files == 1 ? std::string("1 file") : std::format("{} files", report->files), megabytes(report->bytes),
-                       megabytes(report->packed), static_cast<double>(SDL_GetTicksNS() - start) / 1e9);
+        return std::unexpected("Packed the game, but can't write '{}': {}."_tr(notices, SDL_GetError()));
+    const double size = megabytes(report->bytes), packed = megabytes(report->packed), took = static_cast<double>(SDL_GetTicksNS() - start) / 1e9;
+    return report->files == 1 ? "The pack holds 1 file ({:.1f} MB) in {:.1f} MB, made in {:.1f} seconds."_tr(size, packed, took)
+                              : "The pack holds {} files ({:.1f} MB) in {:.1f} MB, made in {:.1f} seconds."_tr(report->files, size, packed, took);
 }
 
 // Pack the game: next to the game folder, a folder named after the game with game.vnext (the game in
@@ -622,16 +624,15 @@ std::expected<std::string, std::string> Engine::packInto(const std::string& file
 // next to game.vnext: VNext.app, VNext.exe or VNext-Linux.AppImage, from VNext's releases on GitHub. One made before
 // goes to the Trash first.
 std::expected<std::string, std::string> Engine::finishGame() const {
-    if (packed_) return std::unexpected(std::string(kPackedAlready));
-    if (!script_.ok()) return std::unexpected(std::string(kScriptsWrong));
+    if (packed_) return std::unexpected(packedAlready());
+    if (!script_.ok()) return std::unexpected(scriptsWrong());
     const std::string folder = finishedFolder();
-    if (SDL_GetPathInfo(folder.c_str(), nullptr) && !moveToTrash(folder)) return std::unexpected(std::format("Can't replace '{}': move it away first.", folder));
-    if (!SDL_CreateDirectory(folder.c_str())) return std::unexpected(std::format("Can't make '{}': {}.", folder, SDL_GetError()));
+    if (SDL_GetPathInfo(folder.c_str(), nullptr) && !moveToTrash(folder)) return std::unexpected("Can't replace '{}': move it away first."_tr(folder));
+    if (!SDL_CreateDirectory(folder.c_str())) return std::unexpected("Can't make '{}': {}."_tr(folder, SDL_GetError()));
     const auto holds = packInto(folder + "/" + std::string(kPackName));
     if (!holds) return holds;
-    return std::format("Packed the game: 'game.vnext' and 'licenses.txt' are in '{}'.\n{}\n"
-                       "To play it, put VNext next to 'game.vnext': VNext.app, VNext.exe or VNext-Linux.AppImage, from VNext's releases on GitHub.",
-                       folder, *holds);
+    return "Packed the game: 'game.vnext' and 'licenses.txt' are in '{}'."_tr(folder) + "\n" + *holds + "\n" +
+           "To play it, put VNext next to 'game.vnext': VNext.app, VNext.exe or VNext-Linux.AppImage, from VNext's releases on GitHub."_tr();
 }
 
 std::string Engine::finishedFolder() const {
@@ -713,9 +714,11 @@ void Engine::configure() {
 }
 
 std::unique_ptr<Game> Engine::makeGame() {
-    return std::make_unique<Game>(Context{renderer_.get(), *assets_, audio_, settings_, readLog_, persistent_, chart_, canvas_,
-                                          [this](std::string_view name) { return builtin(name); }},
-                                  script_);
+    auto game = std::make_unique<Game>(Context{renderer_.get(), *assets_, audio_, settings_, readLog_, persistent_, chart_, canvas_,
+                                               [this](std::string_view name) { return builtin(name); }},
+                                       script_);
+    game->stopWhere([this](std::size_t pc) { return developerMode() && developer_.stopsBefore(pc); }); // (Stop here, Next line)
+    return game;
 }
 
 // Names the engine knows: usable in conditions and {texts} like variables.
@@ -877,7 +880,6 @@ void Engine::leaveStory(bool keepSound) {
 void Engine::openTitle(bool keepSound) {
     leaveStory(keepSound);
     for (const auto& [name, value] : beforeTitle_) game_->setVariable(name, value); // (its buttons see what was picked before it)
-    titleClosing_.reset();
     hasSave_ = saves_.newest().has_value();
     if (ScreenView* title = view("title")) {
         title->reset();
@@ -905,57 +907,20 @@ void Engine::newGame(std::string_view label, bool subroutine) {
     startAt(pc.value_or(0), subroutine, mode_ == Mode::Title && name != "start" ? &beforeTitle_ : nullptr);
 }
 
-void Engine::veiled(const Transition& t, std::function<void()> then) {
-    const bool fast = mode_ == Mode::Game && game_->skipping();
-    float seconds = t.duration; // (a first fade of 0 seconds goes straight to its colour: the ones after it still fade)
-    for (const Transition& more : t.then) seconds += std::max(0.0f, more.duration);
-    if (t.kind != TransitionKind::Fade || seconds <= 0.0f || !settings_.transitions || fast || veil_) return then();
-    veil_ = Veil{.fades = {{t.color, t.duration}}, .time = 0.0f, .then = std::move(then)};
-    for (const Transition& more : t.then) veil_->fades.emplace_back(more.color, std::max(0.0f, more.duration));
-}
-
-float Engine::Veil::opensAt() const {
-    float at = 0.0f;
-    for (const auto& [color, seconds] : fades) at += seconds / 2;
-    return at;
-}
-
-SDL_Color Engine::Veil::color() const {
-    auto mix = [](SDL_Color a, SDL_Color b, float f) {
-        auto m = [&](Uint8 x, Uint8 y) { return static_cast<Uint8>(std::lround(static_cast<float>(x) + (static_cast<float>(y) - static_cast<float>(x)) * f)); };
-        return SDL_Color{m(a.r, b.r), m(a.g, b.g), m(a.b, b.b), m(a.a, b.a)};
-    };
-    float t = time;
-    for (std::size_t i = 0; i < fades.size(); ++i) { // (to each one's colour, from the last one's: the first from nothing)
-        const float half = fades[i].second / 2;
-        if (t < half) {
-            const SDL_Color to = fades[i].first;
-            const SDL_Color from = i == 0 ? SDL_Color{to.r, to.g, to.b, 0} : fades[i - 1].first;
-            return mix(from, to, half > 0.0f ? t / half : 1.0f);
-        }
-        t -= half;
-    }
-    const SDL_Color last = fades.empty() ? SDL_Color{} : fades.back().first; // (then away from it)
-    const float half = fades.empty() ? 0.0f : fades.back().second / 2;
-    return mix(last, SDL_Color{last.r, last.g, last.b, 0}, half > 0.0f ? std::clamp(t / half, 0.0f, 1.0f) : 1.0f);
-}
-
 // The title screen goes when a game starts or is loaded: its on_hide runs (stop music...).
 void Engine::leaveTitle() {
-    titleClosing_.reset();
     if (!std::exchange(titleShown_, false)) return;
     if (ScreenView* title = view("title")) screenHook(title->def(), false);
 }
 
-// Its hide_animation= first, then its closing fade (when the story opened it "and close with fade").
+// Its hide animation first (its own, or the one the story opened it to close with).
 void Engine::fromTitle(std::function<void()> then) {
     if (mode_ != Mode::Title) return then();
-    if (ScreenView* title = view("title"); title && title->def().hideAnimation && !title->hasLeft() && !viewsFrom_) {
+    if (ScreenView* title = view("title"); title && title->hideAnimation() && !title->hasLeft() && !viewsFrom_) {
         title->leave();
         leaving_.push_back({"title", [this, then = std::move(then)]() mutable { fromTitle(std::move(then)); }});
         return;
     }
-    if (titleClosing_) return veiled(*std::exchange(titleClosing_, std::nullopt), std::move(then));
     then();
 }
 
@@ -1005,33 +970,35 @@ ScreenView* Engine::topView() {
     return !overlays_.empty() ? view(overlays_.back()) : mode_ == Mode::Title ? view("title") : nullptr;
 }
 
-bool Engine::open(const std::string& name) {
+bool Engine::open(const std::string& name, ScreenView::Played opening, ScreenView::Played closing) {
     ScreenView* v = view(name);
     if (!v) {
         logWarn("There's no screen called '{}' to open.", name);
         return false;
     }
     if (!overlays_.empty() && overlays_.back() == name) return true;
-    // Animations wait for each other: a screen whose show_animation= starts covered (fade=) opens once the
-    // one under it has faded out with its hide_animation= (ending covered), not over it at once.
+    // Animations wait for each other: a screen whose show animation starts covered (fade=) opens once the
+    // one under it has faded out with its hide animation (ending covered), not over it at once.
+    v->playWith(opening, closing); // (what it plays this time, to know)
     if (v->startsCovered() && !viewsFrom_)
         if (ScreenView* under = topView(); under && under != v && under->endsCovered() && !under->hasLeft()) {
             under->leave();
-            leaving_.push_back({!overlays_.empty() ? overlays_.back() : std::string("title"), [this, name] { openNow(name); }});
+            leaving_.push_back({!overlays_.empty() ? overlays_.back() : std::string("title"),
+                                [this, name, opening, closing] { openNow(name, opening, closing); }});
             return true;
         }
-    return openNow(name);
+    return openNow(name, std::move(opening), std::move(closing));
 }
 
-bool Engine::openNow(const std::string& name) {
+bool Engine::openNow(const std::string& name, ScreenView::Played opening, ScreenView::Played closing) {
     ScreenView* v = view(name);
     if (!v) return false;
     if (!overlays_.empty() && overlays_.back() == name) return true;
-    closingFades_.erase(name);
     for (const auto& el : v->def().elements)
         if (el.kind == ElementKind::Slots)
             slots_.open(el.option("mode", name == "save" ? "save" : "load") == "save" ? SlotBrowser::Mode::Save : SlotBrowser::Mode::Load);
     v->reset();
+    v->playWith(std::move(opening), std::move(closing));
     backTo_.reset(); // (something opening over the rest: no longer going back)
     overlays_.push_back(name);
     screenHook(v->def(), true);
@@ -1044,29 +1011,15 @@ void Engine::close(bool fade) {
     const std::string name = overlays_.back();
     ScreenView* v = view(name);
     if (v && v->hasLeft()) return; // (going already)
-    if (v && v->def().hideAnimation && !viewsFrom_) { // its hide_animation= plays, and then it closes
+    if (v && v->hideAnimation() && !viewsFrom_) { // its hide animation plays, and then it closes
         v->leave();
         leaving_.push_back({name, [this, name] {
                                 if (overlays_.empty() || overlays_.back() != name) return;
                                 const ScreenView* gone = view(name);
                                 coveredClose_ = gone && gone->endsCovered(); // (everything covered: what was under it comes back into view)
-                                closeFaded();
+                                closeNow();
                             }});
         return;
-    }
-    closeFaded();
-}
-
-void Engine::closeFaded() {
-    if (overlays_.empty()) return;
-    const std::string name = overlays_.back();
-    if (const auto it = closingFades_.find(name); it != closingFades_.end()) { // (opened "and close with fade": it fades first)
-        const Transition t = std::move(it->second);
-        closingFades_.erase(it);
-        if (!veil_)
-            return veiled(t, [this, name] {
-                if (!overlays_.empty() && overlays_.back() == name) closeNow();
-            });
     }
     closeNow();
 }
@@ -1103,7 +1056,7 @@ void Engine::closeTowards() {
 
 void Engine::left(const std::string& name) {
     ScreenView* v = view(name);
-    if (!v || !v->def().hideAnimation || viewsFrom_) return;
+    if (!v || !v->hideAnimation() || viewsFrom_) return;
     v->leave();
     std::erase_if(leaving_, [&](const Leaving& l) { return l.name == name; });
     leaving_.push_back({name, {}});
@@ -1112,7 +1065,6 @@ void Engine::left(const std::string& name) {
 void Engine::closeAll() {
     overlays_.clear();
     backTo_.reset();
-    closingFades_.clear();
     contact_.clear();
     confirmYes_ = {};
     calledDepth_ = 0;
@@ -1170,9 +1122,7 @@ void Engine::ui(const cmd::Ui& c) {
         if (c.arg.find("://") != std::string::npos || c.arg.starts_with("www.")) SDL_OpenURL(c.arg.c_str());
         else if (!overlays_.empty() && overlays_.back() == c.arg) close(); // open already, on top: put it away, so one key opens and closes it
         else if (std::ranges::contains(overlays_, c.arg) || (c.arg == "title" && titleShown_)) backTo(c.arg); // open under others: back to it
-        else veiled(c.transition, [this, name = c.arg, closing = c.closing] {
-            if (open(name) && closing.kind == TransitionKind::Fade) closingFades_.insert_or_assign(name, closing);
-        });
+        else open(c.arg, ScreenView::animationIn(&script_, c.opening), ScreenView::animationIn(&script_, c.closing)); // (with NAME, and close with NAME: this time)
     }
     else if (v == "close") { // (the title screen, with nothing over it: the story goes on, as with New Game)
         if (overlays_.empty() && mode_ == Mode::Title) fromTitle([this] { newStory(); });
@@ -1954,6 +1904,7 @@ SDL_AppResult Engine::event(SDL_Event& e) {
     }
     useView(developer_.isOpen()); // (clicks are read in the view they're for)
     SDL_ConvertEventToRenderCoordinates(renderer_.get(), &e);
+    if (e.type == SDL_EVENT_MOUSE_MOTION) ++pointerMoves_;
     switch (e.type) {
     case SDL_EVENT_QUIT:
         return SDL_APP_SUCCESS;
@@ -1998,9 +1949,6 @@ SDL_AppResult Engine::event(SDL_Event& e) {
         return done();
     }
 
-    if (veil_ && (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_WHEEL ||
-                  e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN))
-        return done(); // (a screen fading in)
     if (rebinding_ && captureKey(e)) return done(); // the Controls screen is waiting for a key
 
     // Controls with everywhere=yes work on every screen (fullscreen, screenshot, reload...).
@@ -2089,11 +2037,6 @@ SDL_AppResult Engine::iterate() {
         if (Commands kept = v.takeChosen(); !kept.empty()) pressed.emplace_back(std::move(kept), std::string{});
     }
     for (const auto& [commands, confirm] : pressed) run(commands, confirm);
-    if (veil_) { // (the screen opens at the last fade's colour)
-        veil_->time += dt;
-        if (veil_->then && veil_->time >= veil_->opensAt()) std::exchange(veil_->then, {})();
-        if (veil_ && veil_->time >= veil_->length()) veil_.reset();
-    }
 
     assets_->beginFrame();
     ++frameNumber_;
@@ -2129,29 +2072,24 @@ SDL_AppResult Engine::iterate() {
             developer_.recordReached();
             if (game_->takeAutosaveRequest() && !splash_ && !opening_) autosave();
         }
+        if (game_->stoppedThere() && !developer_.isOpen()) developer_.storyStopped(); // (Stop here, Next line: the developer tools at that line)
         for (const auto& request : game_->takeRequests()) ui(request); // notify, open... from the story
     }
     if (mode_ == Mode::Game) {
         if (game_->takeScreenRequest()) { // "open", "ask", a chapter's title card: show it and wait
             const ScreenRequest& request = game_->request();
             if (!request.prompt.empty()) question_ = request.prompt;
-            const Game* asked = game_.get();
             if (request.name == "title") { // the story opens the title screen: New Game goes on from the next line
                 opening_ = true; // (not saved: Continue doesn't come back to it)
-                veiled(request.transition, [this, asked, start = game_->here() + 1, closing = request.closing] {
-                    if (game_.get() != asked || mode_ != Mode::Game) return;
-                    storyStart_ = start;
-                    beforeTitle_ = game_->variables();
-                    openTitle(true);
-                    if (closing.kind == TransitionKind::Fade) titleClosing_ = closing;
-                });
+                const ScreenView::Played opening = ScreenView::animationIn(&script_, request.opening), closing = ScreenView::animationIn(&script_, request.closing);
+                storyStart_ = game_->here() + 1;
+                beforeTitle_ = game_->variables();
+                openTitle(true);
+                if (ScreenView* title = view("title")) title->playWith(opening, closing);
+            } else if (!open(request.name, ScreenView::animationIn(&script_, request.opening), ScreenView::animationIn(&script_, request.closing))) {
+                game_->screenClosed(std::nullopt);
             } else {
-                veiled(request.transition, [this, asked, name = request.name, closing = request.closing] {
-                    if (game_.get() != asked || mode_ != Mode::Game) return;
-                    if (!open(name)) return game_->screenClosed(std::nullopt);
-                    calledDepth_ = overlays_.size();
-                    if (closing.kind == TransitionKind::Fade) closingFades_.insert_or_assign(name, closing);
-                });
+                calledDepth_ = overlays_.size();
             }
         }
         if (mode_ == Mode::Game) syncShownScreens();
@@ -2178,7 +2116,7 @@ SDL_AppResult Engine::iterate() {
     if (const std::string top = overlays_.empty() ? std::string() : overlays_.back(); top != topScreen_) {
         topScreen_ = top;
         topSince_ = time_;
-    } else if (const ScreenDef* def = top.empty() ? nullptr : script_.screen(top); def && def->closeAfter > 0.0f && time_ - topSince_ >= def->closeAfter && !veil_) {
+    } else if (const ScreenDef* def = top.empty() ? nullptr : script_.screen(top); def && def->closeAfter > 0.0f && time_ - topSince_ >= def->closeAfter) {
         close();
     }
     if (musicBeforeSongs_ && !songsOpen()) { // the music room closed: back to what played before
@@ -2211,7 +2149,6 @@ SDL_AppResult Engine::iterate() {
         if (ScreenView* v = view(name)) v->draw(r);
     for (const Leaving& l : leaving_) // ("show screen" ones hidden, going: the others are drawn where they are)
         if (ScreenView* v = !l.then && !std::ranges::contains(overlays_, l.name) ? view(l.name) : nullptr) v->draw(r);
-    if (veil_) draw::rect(r, {0.0f, 0.0f, canvas_.w, canvas_.h}, veil_->color());
     if (ScreenView* v = view("notify"); v && noticeTime_ > 0.0f) v->draw(r, std::min(1.0f, noticeTime_ * 2.0f));
     if (developer_.isOpen()) {
         useView(true); // (the tools lay themselves out in the window's own size)

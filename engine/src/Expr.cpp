@@ -102,7 +102,7 @@ std::expected<std::vector<Token>, std::string> lex(std::string_view src) {
             }
             int v = 0;
             if (std::from_chars(src.data() + start, src.data() + i, v).ec != std::errc{})
-                return std::unexpected(std::format("the number {} is too big", src.substr(start, i - start)));
+                return std::unexpected("the number {} is too big"_tr(src.substr(start, i - start)));
             out.push_back({Token::Type::Number, std::string(src.substr(start, i - start)), v});
         } else if (c == '"' || c == '\'') {
             std::string text;
@@ -113,7 +113,7 @@ std::expected<std::vector<Token>, std::string> lex(std::string_view src) {
                 if (ch == c) { closed = true; break; }
                 text += ch;
             }
-            if (!closed) return std::unexpected(std::format("a text starting with {} is never closed", c));
+            if (!closed) return std::unexpected("a text starting with {} is never closed"_tr(c));
             out.push_back({Token::Type::String, std::move(text), 0});
         } else if (std::isalpha(static_cast<unsigned char>(c)) || c == '_' || static_cast<unsigned char>(c) >= 0x80) {
             const auto start = i;
@@ -125,7 +125,7 @@ std::expected<std::vector<Token>, std::string> lex(std::string_view src) {
             for (auto t : twoChar)
                 if (src.substr(i, 2) == t) sym = std::string(t);
             if (sym.size() == 1 && std::string_view("+-*/%<>!(),=").find(c) == std::string_view::npos)
-                return std::unexpected(std::format("'{}' can't be used here", c));
+                return std::unexpected("'{}' can't be used here"_tr(c));
             i += sym.size();
             out.push_back({Token::Type::Symbol, sym == "=" ? std::string("==") : std::move(sym), 0});
         }
@@ -244,7 +244,7 @@ public:
     std::expected<void, std::string> run() {
         expr_.root_ = binary(1);
         if (error_.empty() && peek().type != Token::Type::End)
-            error_ = std::format("'{}' is out of place", peek().text);
+            error_ = "'{}' is out of place"_tr(peek().text);
         if (!error_.empty()) return std::unexpected(error_);
         return {};
     }
@@ -324,24 +324,24 @@ private:
             if (!accept(")")) {
                 do call.args.push_back(binary(1));
                 while (error_.empty() && accept(","));
-                if (error_.empty() && !accept(")")) error_ = "a ')' is missing";
+                if (error_.empty() && !accept(")")) error_ = "a ')' is missing"_tr();
             }
             const auto fn = std::ranges::find(kFunctions, std::string_view(call.name), &Function::name);
-            if (fn == kFunctions.end()) error_ = std::format("there is no function called {}()", call.name);
+            if (fn == kFunctions.end()) error_ = "there's no function called {}()"_tr(call.name);
             else if (static_cast<int>(call.args.size()) < fn->minArgs || static_cast<int>(call.args.size()) > fn->maxArgs)
-                error_ = std::format("{}() was given the wrong number of values", call.name);
+                error_ = "{}() was given the wrong number of values"_tr(call.name);
             return add(std::move(call));
         }
         case Token::Type::Symbol:
             if (t.text == "(") {
                 const int inner = binary(1);
-                if (!accept(")")) error_ = "a ')' is missing";
+                if (!accept(")")) error_ = "a ')' is missing"_tr();
                 return inner;
             }
-            error_ = std::format("'{}' is out of place", t.text);
+            error_ = "'{}' is out of place"_tr(t.text);
             return -1;
         case Token::Type::End:
-            error_ = "it ends too early";
+            error_ = "it ends too early"_tr();
             return -1;
         }
         return -1;
@@ -546,7 +546,7 @@ std::string checkText(std::string_view text) {
         const std::string_view inner = text.substr(i + 1, close - i - 1);
         i = close;
         if (isTextTag(inner)) continue;
-        if (auto e = Expr::parse(inner); !e) return std::format("There's a mistake in {{{}}}: {}", inner, e.error());
+        if (auto e = Expr::parse(inner); !e) return "There's a mistake in {{{}}}: {}"_tr(inner, e.error());
     }
     return {};
 }

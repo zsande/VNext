@@ -9,7 +9,9 @@
 #include "Script.hpp"
 #include "System.hpp"
 
+#include <algorithm>
 #include <cstdint>
+#include <format>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -18,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -71,8 +74,8 @@ inline constexpr float markW = 4;            // a row's mark at its left (a mist
 inline constexpr float smallButtonH = 22;    // (Save as a text file, a preview's buttons, a jump's x)
 inline constexpr float mediumButtonH = 28;   // (the Map's + New scene, Line up and Spread evenly)
 inline constexpr float bigButtonH = 34;      // (Make it the game's own, the first + New scene)
-inline constexpr float wideButtonW = 120;    // the least for: Play, Replace..., Import... (DeveloperUi::buttonWidth)
-inline constexpr float widerButtonW = 160;   // the least for: + Font, + Sub-image, Go to the line
+inline constexpr float wideButtonW = 120;    // the least for: Play, Replace..., Import..., Replace all (DeveloperUi::buttonWidth)
+inline constexpr float widerButtonW = 160;   // the least for: + Font, + Sub-image, Go to the line, Move to the Trash, Make it the game's own, Only untranslated
 inline constexpr float optionButtonW = 140;  // the least for: + Option, + Answer, + Else, the Map's + New scene
 inline constexpr float listenW = 64;         // the voice row's Play
 inline constexpr float buttonText = 14, smallButtonText = 13;
@@ -93,15 +96,18 @@ inline constexpr float pairLabelPart = 0.28f; // the second's label: at most thi
 // The Settings tab, the Translate tab's table, the Map and the log.
 inline constexpr float settingRowH = 42, settingHeadH = 44, settingNoteH = 60, settingHeadNoteH = 22, settingOtherH = 24;
 inline constexpr float settingLabelW = 200, settingLabelPart = 0.22f, settingFieldW = 340, settingFieldPart = 0.32f, settingHelpGap = 16;
-inline constexpr float settingHeadText = 17, settingLabelText = 15; // a group's heading, a setting's label
 inline constexpr float mapPadX = 20, mapPadY = 40, mapNoteY = 22;   // the Map: where its grid starts, and its note over the unreached column
-inline constexpr float tableRowH = 40, languageW = 360, onlyW = 170;
+inline constexpr float tableRowH = 40, languageW = 360;
 inline constexpr float nodeW = 170, nodeH = 36, nodeGapX = 90, nodeGapY = 16, mapStep = 60;
 inline constexpr float logRowH = 21;
 // What's shown over a Library form (at most this high, or this much of the room), and a list's popup.
 inline constexpr float sampleStyleH = 110, sampleAtlasH = 230, sampleAnimationH = 240, sampleSubPictureH = 380;
 inline constexpr float sampleText = 12;      // words drawn over a sample (an atlas's expression, how to mark a sub-image)
-inline constexpr float sampleStylePart = 0.25f, sampleAtlasPart = 0.42f, sampleAnimationPart = 0.4f, sampleSubPicturePart = 0.55f;
+inline constexpr float sampleStylePart = 0.25f, sampleAtlasPart = 0.42f, sampleAnimationPart = 0.25f, sampleSubPicturePart = 0.55f;
+// An animation's timeline: its rows' names, the seconds over them, a row; a change at once (a diamond),
+// a bar's ends (to drag), how near a moment a drag snaps to it, the least room for each second marked.
+inline constexpr float timelineLabelW = 110, timelineRulerH = 22, timelineRowH = 22, timelineDiamond = 12, timelineEdge = 6, timelineSnap = 6,
+                       timelineTickW = 48, timelineSwatch = 12; // (and a colour's square on a bar)
 inline constexpr float popupShadow = 3, popupMargin = 8, popupGap = 2;
 } // namespace layout
 
@@ -115,7 +121,7 @@ public:
     // shows or hides someone (or a picture); an Option is one of a choice's, or an answer to a message;
     // Game is quick save, fullscreen, screenshot or quit. Other is any line without a form (a mistake).
     enum class Kind : std::uint8_t { Line, Character, Background, Choice, Option, If, Else, Set, Jump, End, Music, Sound, Voice, Stop, Wait,
-                                     Move, Shake, Effect, Weather, Camera, Movie, Screen, Notify, Textbox, NewPage, Together, Chapter,
+                                     Effect, Weather, Camera, Movie, Screen, Notify, Textbox, NewPage, Together, Chapter,
                                      Unlock, Message, Phone, Ask, Game, Note, Other };
     // The names a field lists (Expressions: of the character in the field's context; Records: the
     // endings, achievements, tips or gallery pictures, by the context's word). Shown: characters and
@@ -124,7 +130,7 @@ public:
     // mouse and controller names; SettingValues: a player setting and a value for it ("fullscreen yes"), as
     // buttons set them; Settings: the players' settings sliders change;
     // Conditions: the variables, and the words screens' conditions know; PictureFiles: images/NAME.png.
-    enum class Pick : std::uint8_t { None, Characters, Shown, Pictures, Sounds, Places, Transitions, Scenes, VariableNames, Expressions, Screens,
+    enum class Pick : std::uint8_t { None, Characters, Shown, Pictures, Sounds, Places, Scenes, VariableNames, Expressions, Screens,
                                      Movies, Records, Fonts, Styles, Colors, PicturesOrColors, Bases, Channels, FontNames, Keys, Languages,
                                      VoiceFolders, Settings, Controls, Conditions, PictureFiles, Animations };
     // Every box a form has is of a kind, defined once (kindOf): what it lists to pick from, the values it
@@ -137,13 +143,14 @@ public:
         Text,  // plain text: a title, a question, a note, what a tab says
         Name,  // one word that names something: a style, a character, a part
         Picture, // a picture, or a colour (every picture's box takes either)
+        Shape,   // a picture alone, for its shape: where it's darkest (a wipe's)
         PictureFile, Colour, Sound, Movie, FontFile, Font, Style, Character, Shown, Expression, Scene, Screen, Variable,
         Setting, Animation, Key, Place, Channel, Record, VoiceFolder, Control, Base, Language,
-        Across, Down, Layer, Speed, Zoom, Opacity, Volume, Percent, Rotation, Seconds,
+        Across, Down, Layer, Speed, Zoom, Opacity, Wipe, Volume, Percent, Rotation, Seconds,
         Pixels, Count, Number, PerSecond, LineSpacing, TextSpeed, Pause, Wind, WidthHeight, Point, // (numbers: a size, how many, a rate...)
-        FontStyle, Babble, VariableValue, Action, Change, Playing, KeySlot, SaveMode, TimedTransition,      // (lists of words)
-        YesNo, YesNoStyle, YesNoSettings, YesNoSame, Easing,
-        Condition, Transition, Fading, Fit, Reveal, Talk, ImageFilter, SkipHold, WindowFill, Mouths,
+        FontStyle, Babble, VariableValue, Action, Playing, KeySlot, SaveMode,      // (lists of words)
+        YesNo, YesNoStyle, YesNoSettings, YesNoSame, Easing, Plays,
+        Condition, Fit, Reveal, Talk, ImageFilter, SkipHold, WindowFill, Mouths,
         Sync, Side, FaceCopies, FaceTalk, Align, VAlign, Operation, Joiner, ShowHide, Visibility, SetVerb, Sent, Anchor, Repeat, Scroll, Effects, WeatherKind,
         Edges, ContainerFit,
         ScreenAction, VariableAction, StoryAction, SoundAction, SaveAction, SettingAction, GalleryAction, // (an action's kind, by what it's about)
@@ -152,7 +159,9 @@ public:
     struct BoxKind {
         Box box = Box::None;
         Pick pick = Pick::None;
-        std::string_view suggest, choices, labels;
+        ToolsSuggestions suggest;
+        ToolsChoices choices;
+        ToolsLabels labels;
         bool rich = false;     // text with bold, colours, pauses... (buttons for them under the box)
         bool percent = false;  // written as one (50%), however it's typed (0.5, 50)
         bool wheel = false;    // a colour's box: the colour as a square, and a wheel with the code to type when it opens
@@ -252,6 +261,7 @@ public:
     };
     [[nodiscard]] std::vector<Found> find(std::string_view what) const;
     [[nodiscard]] std::optional<std::string> lineText(std::string_view path, std::size_t line) const; // a line (trimmed) of the script at `path`
+    [[nodiscard]] const std::vector<std::string>* fileLines(std::string_view path) const; // all of them, as they are (none: no such script)
     [[nodiscard]] bool mentions(std::string_view word) const; // some script line has the word (whole, case aside)
     // What a line is part of, as the found lines say: its scene, its screen ("screen title"), a
     // character, a definition ("style button"), Settings, or else its file.
@@ -364,9 +374,31 @@ public:
     };
     [[nodiscard]] const std::vector<Definition>& definitions(std::string_view kind) const;
     [[nodiscard]] std::vector<std::string> linesOf(const Definition& d) const; // (without their indentation)
-    // A definition as a form, and the lines a form makes (an atlas: its line and the ones under it).
+    // A definition as a form, and the lines a form makes (an atlas: its line and the ones under it; an
+    // animation: its line, with how often it plays: the lines under it are the timeline's).
     [[nodiscard]] std::vector<Field> fields(std::string_view kind, const Definition& d) const;
     [[nodiscard]] std::vector<std::string> linesOf(std::string_view kind, const std::vector<Field>& fields) const;
+    // An animation's lines as the Library's timeline shows them: each change a bar on the row of what
+    // it changes (timelineRow), from when it begins for as long as it takes, with what it goes to as
+    // written (left=5% is "5% left" on the Across row) and its easing; and one time through. Not `ok`:
+    // a line it can't read (then it's only shown). stepsOf(): the lines again, in the order the bars
+    // begin, the ones beginning and ending together on one line ("over" when one begins as the line
+    // before ends, else "from ... to" or "at"; a "wait" at the end for any time after the last).
+    struct Bar {
+        std::string key, value; // what it changes and to what, as written: x=home, left=5%, opacity=40%
+        float start = 0.0f, seconds = 0.0f;
+        std::string ease; // (inout, linear...: a fade's is linear unless it says)
+        std::string shape; // a wipe's picture (shape=): where it shows first; none: from the left
+    };
+    struct Timeline {
+        std::vector<Bar> bars;
+        float length = 0.0f;
+        bool ok = true;
+    };
+    static constexpr std::size_t kTimelineRowCount = 8; // across, up or down, opacity, zoom, rotation, colour, cover, wipe
+    [[nodiscard]] static std::size_t timelineRow(std::string_view key); // (kTimelineRowCount: none)
+    [[nodiscard]] static Timeline timelineOf(std::span<const std::string> steps);
+    [[nodiscard]] static std::vector<std::string> stepsOf(const Timeline& timeline);
     std::size_t addDefinition(std::string_view kind, const std::vector<std::string>& lines); // gives its index
     void setDefinition(const Definition& d, const std::vector<std::string>& lines, const std::string& key);
     void removeDefinition(const Definition& d);
@@ -548,7 +580,12 @@ struct DeveloperTools {
     std::vector<Translation> translateUndo, translateRedo; // its files before each change (and each undo)
     std::string translateKey;                              // (typing into one box: one step)
     bool untranslatedOnly = false;
-    std::map<std::string, std::pair<SDL_Time, std::string>> languageLabels; // the Translate tab: each file's language as its list says it, and when it was read
+    struct LanguageLabel { // the Translate tab: each file's language as its list says it, when the file was read, and the list of files then
+        SDL_Time read = 0;
+        std::string label;
+        std::uint64_t generation = 0;
+    };
+    std::map<std::string, LanguageLabel> languageLabels;
     std::map<std::string, bool, std::less<>> spelling;                        // "language|word": spelt right (the system's dictionary, asked once)
     std::map<std::string, std::vector<std::string>, std::less<>> spellingGuesses; // "language|word": what it may be instead
     float translateScroll = 0.0f;
@@ -632,10 +669,11 @@ struct DeveloperTools {
     std::vector<std::string> previewOverlays; // the screens its buttons opened over it (the top last)
     std::vector<std::string> previewLeaving;  // the ones its buttons closed, drawn while their hide_animation= plays
     std::string previewPending;               // one a button opened, opening once the screen under it has faded out
+    std::pair<ScreenView::Played, ScreenView::Played> previewPendingWith; // ...playing these (with NAME and close with NAME)
     std::vector<std::string> previewScreens;  // the screens on it last frame (their on_show= and on_hide= run as they come and go)
     std::optional<std::pair<std::string, std::size_t>> previewAt; // playing on: the file and line it's at
     std::optional<std::size_t> previewRow;                        // (the row lit for it in the list, kept in view)
-    struct PlaceDrag {           // the chosen line's character (or the camera), dragged on it
+    struct PlaceDrag {           // the chosen line's character, dragged on it
         float x = 0.0f, y = 0.0f;           // where the mouse was pressed
         float across = 0.0f, up = 0.0f;     // where they were then (-1 to 1: the left edge to the right, the bottom to the top)
         float perX = 0.0f, perY = 0.0f;     // how far those go for each pixel the mouse moves
@@ -696,6 +734,33 @@ struct DeveloperTools {
     // second, and when files are imported, renamed or thrown away), not every frame.
     std::map<std::string, std::pair<std::uint64_t, std::vector<std::string>>> fileLists;
     bool saidNoGame = false; // (the hint that there's no game yet went to the log: once)
+    // The developer tools' language (About): the translations in "editor languages" next to the player
+    // (each file's name without .vnscript, its language's name and code), as of that folder's list of
+    // files; and the one in use (empty: English).
+    struct ToolsLanguage {
+        std::string id, name, code;
+    };
+    std::vector<ToolsLanguage> toolsLanguages;
+    std::vector<std::string> toolsLanguageFiles;
+    std::string toolsLanguage;
+    // Stop here: the lines the story stops just before when it's played (the developer tools open at
+    // them), each by its file, line and words; kept in stops.txt with the player's data, and moved with
+    // their lines as the scripts change (`stopsSeen`: the lines of the files they're in, as they were).
+    struct StopMark {
+        std::string path;
+        std::size_t line = 0;
+        std::string text;
+    };
+    std::vector<StopMark> stops;
+    std::map<std::string, std::vector<std::string>, std::less<>> stopsSeen;
+    std::set<std::pair<std::string, std::size_t>> runLines; // the lines with a command of their own (Stop here is for them), as of `checked`
+    // Next line: the story stops at the next line it gets to after `stepFrom` (a scene's line: one of
+    // `rowStarts`, as of `rowStartsVersion`). `passing`: the line it stopped at, done first when it goes on.
+    bool stepping = false;
+    std::pair<std::string, std::size_t> stepFrom;
+    std::set<std::pair<std::string, std::size_t>> rowStarts;
+    std::size_t rowStartsVersion = SIZE_MAX;
+    std::optional<std::pair<std::string, std::size_t>> passing;
 
     // A character's name colour, when it has one (the lists that name characters show it as a square).
     [[nodiscard]] std::optional<SDL_Color> characterColor(const Palette& palette, std::string_view name);
@@ -703,8 +768,12 @@ struct DeveloperTools {
     // every frame.
     [[nodiscard]] const std::string& cachedAudio(const Assets& assets, const std::string& name);
     [[nodiscard]] std::optional<std::string> cachedFoundAudio(const Assets& assets, const std::string& name);
-    // The files in a folder with an ending, as listed once a generation (see filesGeneration).
+    // The files in a folder with an ending, as listed once a generation (see filesGeneration); and whether
+    // a file is there, as of that generation too: not looked for on disk every frame.
     [[nodiscard]] const std::vector<std::string>& cachedFiles(const std::string& folder, std::string_view ext);
+    [[nodiscard]] bool cachedExists(const std::string& path);
+    std::map<std::string, bool, std::less<>> filesThere;
+    std::uint64_t filesThereGeneration = 0;
     // The mistake the scripts have on a line, if any; whether they have one on a line of `file` from
     // `from` up to `end` (not `end` itself); which scenes have one, as of this version of the scripts.
     [[nodiscard]] const ScriptError* problemAt(std::size_t file, std::size_t line) const;
@@ -723,15 +792,13 @@ struct DeveloperTools {
     void saidRenamed(bool ok, std::string_view mistake);
     std::uint64_t filesGeneration = 1;
     // The Voices list: the lines characters with voices say, as of the scripts read (`checked`), and
-    // whether each one's file is there (in a translation's folder too), as of the list of files.
+    // whether each one's file is there (in a translation's folder too: cachedExists).
     struct VoicedLine {
         std::string file, who, text, path;
         int line = 0;
     };
     std::vector<VoicedLine> voiced;
     std::size_t voicedVersion = SIZE_MAX;
-    std::map<std::string, bool, std::less<>> voiceThere;
-    std::uint64_t voiceThereGeneration = 0;
     // What Find found, and the lines a variable is used in: looked for again when what's looked for (or
     // the scripts) change, not every frame.
     struct Looked {
@@ -748,10 +815,12 @@ struct DeveloperTools {
     std::unique_ptr<Game> sample; // the story at its first line (or choice), for the textboxes in screens
     bool sampleMade = false;
     std::string tryScreen; // (tried: the screen whose on_show= ran; its on_hide= runs when another is tried)
+    std::string triedStatus; // (what Try it said last: taken away when it stops)
     std::vector<std::string> tryOverlays; // the screens the tried one's buttons opened over it (the top last), as in the game
     std::vector<std::string> tryLeaving;  // (closed: drawn while their hide_animation= plays)
     bool tryClosing = false;              // the tried screen closed itself: its hide_animation= plays, then Try it stops
     std::string tryPending;               // one a button opened, opening once the screen under it has faded out
+    std::pair<ScreenView::Played, ScreenView::Played> tryPendingWith; // ...playing these (with NAME and close with NAME)
     std::unique_ptr<ScreenView> screenView; // the screen open, as the game draws it
     float screensScroll = 0.0f, partsScroll = 0.0f;
     // The Library's atlas: the expression its frame shows, and its eyes or mouth being dragged there.
@@ -770,8 +839,25 @@ struct DeveloperTools {
         float x = 0.0f, y = 0.0f;
     };
     std::optional<CutDrag> cutDrag;
-    // The Library's animation: its sample plays from this time (again when another is chosen).
-    std::pair<std::string, float> animationSince;
+    // The Library's animation: where its timeline's playhead is (seconds into one time through), whether it
+    // plays on (from when, by the tools' clock), and the change chosen on it (its place in the timeline's
+    // bars); a bar, one of its ends, the playhead or the end being dragged (where the pointer took it, in
+    // seconds, and the bar and the end as they were then; the seconds the timeline showed then).
+    struct AnimationView {
+        std::string name; // (another chosen: it starts again)
+        float playhead = 0.0f, playedAt = 0.0f;
+        bool playing = true;
+        std::optional<std::size_t> bar;
+        enum class Drag : std::uint8_t { None, Bar, Start, End, Playhead, Length };
+        Drag drag = Drag::None;
+        float grab = 0.0f, span = 0.0f, wasLength = 0.0f;
+        StoryEditor::Bar was;
+    };
+    AnimationView animation;
+    Wiper sampleWiper; // (its sample's wipe)
+    bool pickingAnimation = false; // + New animation: the animations to start from show (the one pointed at playing, since `startShownAt`)
+    std::size_t startShown = 0;
+    float startShownAt = 0.0f;
     // The Library's sample of a style: the scripts with a screen of a button and a text in it, at an
     // editor version.
     std::unique_ptr<Script> styleScript;
@@ -805,9 +891,15 @@ struct DeveloperTools {
         styleOf = {SIZE_MAX, {}};
         previewViews.clear();
     }
-    // Text drawn this frame, kept so it isn't laid out again every frame.
-    std::vector<TextBlock> texts;
-    std::size_t used = 0;
+    // Text the tools draw, laid out once and kept by what it is (DeveloperUi::block: its font, the width
+    // it wraps at and its words), wherever in a frame it's drawn; one not drawn for a while goes.
+    struct KeptText {
+        TextBlock block;
+        std::uint64_t drawn = 0; // (the frame it was drawn in last)
+    };
+    std::unordered_map<std::string, KeptText, StringHash, std::equal_to<>> texts;
+    std::string textKey;         // (one buffer for the key looked for)
+    std::uint64_t textFrame = 0; // the frames drawn
 };
 
 // The developer tools: what the player shows over its game in developer mode (F10), and what they do
@@ -840,6 +932,14 @@ public:
     void loadReached();   // the script lines the game ran in the developer's plays (reached.txt), and
     void recordReached(); // the ones it ran since last frame
     void recordReached(Game& game, const Script& script); // (the preview's too: a line run there has run)
+    void loadStops(); // Stop here's lines (stops.txt, with the player's data)
+    // Whether the story stops just before command `pc` of the game's scripts: a line with Stop here, or
+    // the next line after Next line. And when it has: the developer tools, at that line.
+    [[nodiscard]] bool stopsBefore(std::size_t pc);
+    void storyStopped();
+    // The developer tools' language as they start: the one chosen in About (language.txt in their own
+    // folder; empty: English), else the computer's, when there's a translation for it.
+    void startToolsLanguage();
     void openDeveloper();
     void closeDeveloper(); // (the game reads the scripts again if the editor changed them)
     void backToGame();     // or Play, when no game is going on
@@ -918,7 +1018,14 @@ private:
     void drawStyleSample(DeveloperUi& ui, const std::string& style, const SDL_FRect& box);
     void drawAtlas(DeveloperUi& ui, const StoryEditor::Definition& def, const SDL_FRect& box); // its frames, and its eyes and mouth to drag
     void drawSubPicture(DeveloperUi& ui, const StoryEditor::Definition& def, const SDL_FRect& box); // the picture it's cut from, to cut it out on
-    float drawAnimationSample(DeveloperUi& ui, const StoryEditor::Definition& def, const SDL_FRect& room); // a square playing it: how tall it is
+    // An animation in the Library: how it looks at its timeline's playhead, then how often it plays, its
+    // timeline (drawTimeline: a row for each thing it changes, a bar for each change) and the chosen
+    // change's form. The sample: a square in the middle of the game's screen, as a part there would
+    // be (where it's drawn).
+    void drawAnimation(DeveloperUi& ui, const StoryEditor::Definition& def, const SDL_FRect& room);
+    SDL_FRect drawAnimationSample(DeveloperUi& ui, const Animation& a, float seconds, const SDL_FRect& room);
+    void drawNewAnimationForm(DeveloperUi& ui, const SDL_FRect& right); // + New animation: the ones to start from
+    float drawTimeline(DeveloperUi& ui, const StoryEditor::Definition& def, const StoryEditor::Timeline& timeline, float x, float y, float w);
     void drawDefinition(DeveloperUi& ui, const std::string& kind, const StoryEditor::Definition& def, const SDL_FRect& right); // as a form
     void drawRecordTitle(DeveloperUi& ui, std::string_view kind, const std::string& name, float x, float w, float& y); // in the gallery or music room
     void drawTranslations(DeveloperUi& ui, const SDL_FRect& area);
@@ -939,9 +1046,30 @@ private:
     // A sound file's Play button: it plays the file while every other sound waits, and is Stop while
     // it plays (`small`: > and a square). The sound stops when its button isn't drawn any more.
     void listenButton(DeveloperUi& ui, const SDL_FRect& at, const std::string& path, bool small = false);
-    // A form's title row: the As text / As a form button at its right (`rightEdge`); and, as text,
-    // the line as the script has it, in a box to change it: what's typed there, once it isn't empty.
-    void asTextButton(DeveloperUi& ui, float rightEdge, float y);
+    // A form's title row: the As text / As a form button at its right (`rightEdge`), and how wide it is;
+    // and, as text, the line as the script has it, in a box to change it: what's typed there, once it
+    // isn't empty.
+    float asTextButton(DeveloperUi& ui, float rightEdge, float y);
+    // Stop here, for a line of the scripts: whether it has it, it on or off (and saved), and the stops
+    // moved with their lines after the scripts changed. stopHereButton: the button (lit while it's on)
+    // at a form's title row, ending at `rightEdge`: how wide it is.
+    [[nodiscard]] bool hasStop(std::string_view path, std::size_t line) const;
+    void toggleStop(const std::string& path, std::size_t line);
+    void saveStops();
+    void followStops();
+    float stopHereButton(DeveloperUi& ui, const std::string& path, std::size_t line, float rightEdge, float y);
+    // Where the story is (the file and line of its command), when the developer tools were opened over it.
+    [[nodiscard]] std::optional<std::pair<std::string, std::size_t>> storyAt() const;
+    // The developer tools' language: their own folder (where the one chosen is kept), the folder of the
+    // translations ("editor languages", next to the player), the translations there, one put in use
+    // (empty: English), and About's row for them: how tall it is. writeToolsTranslation: a file with every
+    // text the tools show to translate, or the texts the one in use doesn't have yet added to its file.
+    [[nodiscard]] std::string toolsFolder() const;
+    [[nodiscard]] std::string toolsLanguagesFolder() const;
+    void findToolsLanguages();
+    void useToolsLanguage(const std::string& id);
+    float drawToolsLanguage(DeveloperUi& ui, const SDL_FRect& area);
+    void writeToolsTranslation();
     std::optional<std::string> drawRawLine(DeveloperUi& ui, const std::string& id, const std::string& line, float x, float w, float& y);
     void makeSample(bool choice); // the story at its first line, or its first choice
     bool paintCanvas(const std::function<void()>& paint); // into developer_.canvas, as big as the canvas

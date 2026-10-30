@@ -99,8 +99,8 @@ void Developer::drawMap(DeveloperUi& ui, const SDL_FRect& area) {
         (sideways ? d.mapX : d.mapY) -= turns * layout::mapStep * k;
     }
     // + New scene (in the column of scenes nothing jumps to, to draw a jump to).
-    const float newW = ui.buttonWidth("+ New scene", layout::buttonText, layout::optionButtonW);
-    if (ui.button({area.x + area.w - newW - 10 * k, area.y + layout::gap * k, newW, layout::mediumButtonH * k}, "+ New scene", false, true, layout::buttonText)) {
+    const float newW = ui.buttonWidth("+ New scene"_tr, layout::buttonText, layout::optionButtonW);
+    if (ui.button({area.x + area.w - newW - 10 * k, area.y + layout::gap * k, newW, layout::mediumButtonH * k}, "+ New scene"_tr, false, true, layout::buttonText)) {
         d.scene = editor.addScene(d.scene < scenes.size() ? scenes[d.scene].file : 0);
         d.row.reset();
         d.character.reset();
@@ -122,15 +122,15 @@ void Developer::drawMap(DeveloperUi& ui, const SDL_FRect& area) {
     if (mapLetGo(f)) return;
     // What the arrows mean, the column of scenes nothing jumps to, and what can be done.
     float lx = area.x + 12 * k;
-    for (const auto& [label, color] : {std::pair{"Jump", kEdge}, {"Call (dashed)", kWarn}, {"Option", kOptionArrow}}) {
+    for (const auto& [label, color] : {std::pair{"Jump"_tr, kEdge}, {"Call (dashed)"_tr, kWarn}, {"Option"_tr, kOptionArrow}}) {
         draw::rect(r, {lx, area.y + 14 * k, 18 * k, 3 * k}, color);
         lx += 24 * k + ui.text(label, lx + 24 * k, area.y + 6 * k, layout::smallText, theme::dim).x + 14 * k;
     }
-    ui.text("Drag a scene to move it, or its dot to another to jump there. Click an arrow to take it away; double-click a scene to open it.", lx + 10 * k,
+    ui.text("Drag a scene to move it, or its dot to another to jump there. Click an arrow to take it away; double-click a scene to open it."_tr, lx + 10 * k,
             area.y + 6 * k, layout::noteText, theme::dim, area.x + area.w - 170 * k - lx);
     const float nodeW = layout::nodeW * k, gapX = layout::nodeGapX * k;
     if (f.unreachedLaidOut && f.reached < static_cast<int>(scenes.size()))
-        ui.text("Nothing jumps to these", area.x + layout::mapPadX * k + static_cast<float>(f.reached) * (nodeW + gapX) - d.mapX, area.y + layout::mapNoteY * k - d.mapY,
+        ui.text("Nothing jumps to these"_tr, area.x + layout::mapPadX * k + static_cast<float>(f.reached) * (nodeW + gapX) - d.mapX, area.y + layout::mapNoteY * k - d.mapY,
                 layout::smallText, theme::dim);
 }
 
@@ -205,8 +205,9 @@ bool Developer::removeMapArrow(const MapFrame& f) {
     editor.removeLink(link);
     d.mapArrow.reset();
     d.failed = false;
-    d.status = link.option ? std::format("An option in '{}' goes on after its choice now, instead of to '{}'.", from, link.to)
-                           : std::format("'{}' no longer {} '{}'.", from, link.call ? "calls" : "jumps to", link.to);
+    d.status = link.option ? "An option in '{}' goes on after its choice now, instead of to '{}'."_tr(from, link.to)
+             : link.call   ? "'{}' no longer calls '{}'."_tr(from, link.to)
+                           : "'{}' no longer jumps to '{}'."_tr(from, link.to);
     return true;
 }
 
@@ -330,7 +331,7 @@ void Developer::drawMapScenes(const MapFrame& f) {
         const std::string id = std::format("map:rename:{}", i);
         if (d.focus == id) { // (renamed as it's typed: the jumps to it follow)
             if (const auto name = ui.field(id, boxes[i], scenes[i].name, layout::listText)) {
-                d.saidRenamed(editor.renameScene(i, std::string(trim(*name)), std::format("map-name:{}:{}", i, d.focusCount)), "A scene's name is one word (letters, numbers, _ and -) that no other scene has.");
+                d.saidRenamed(editor.renameScene(i, std::string(trim(*name)), std::format("map-name:{}:{}", i, d.focusCount)), "A scene's name is one word (letters, numbers, _ and -) that no other scene has."_tr);
             }
             continue;
         }
@@ -359,7 +360,7 @@ bool Developer::mapLetGo(const MapFrame& f) {
         const std::string from = scenes[p.from].name, to = scenes[*target].name;
         const bool changed = editor.jumpAtEnd(p.from, to);
         d.failed = false;
-        d.status = changed ? std::format("'{}' jumps to '{}' at its end now, instead of what it did.", from, to) : std::format("'{}' jumps to '{}' at its end now.", from, to);
+        d.status = changed ? "'{}' jumps to '{}' at its end now, instead of what it did."_tr(from, to) : "'{}' jumps to '{}' at its end now."_tr(from, to);
         return true;
     }
     if (!p.dot && p.moving) { // (it stays where it was put)

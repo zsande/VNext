@@ -19,7 +19,7 @@ public:
     SDL_Renderer* const r;
     DeveloperTools& d;
 
-    TextBlock& block();
+    TextBlock& block(const Font& font, std::string_view s, float wrap = 0.0f); // (laid out, kept by what it is: DeveloperTools::texts)
     Font& font(float size) { return fonts_.get("", size * k); } // (the system's: not the game's own)
     SDL_FPoint text(std::string_view s, float x, float y, float size, SDL_Color color, float wrap = 0.0f);
     float width(std::string_view s, float size);
@@ -156,7 +156,7 @@ public:
     std::optional<std::string> listButton(const std::string& id, const SDL_FRect& box, std::string_view label, const StoryEditor::Field& given);
     // A colour as a small square at `x`, centred on `middle` (dim: half seen, for a default); gives
     // the x after it. Every colour shows this way: in a box, a list, a popup's entry.
-    float swatch(float x, float middle, SDL_Color color, bool dim = false, std::optional<SDL_Color> bottom = std::nullopt) const;
+    float swatch(float x, float middle, SDL_Color color, bool dim = false, std::optional<SDL_Color> bottom = std::nullopt, float size = layout::swatch) const;
     // A colour's box: the colour and its name or code, not typed into. A click opens its wheel under it,
     // with the colour's code to type and the game's colours to pick. Gives what's picked there.
     std::optional<std::string> colorField(const std::string& id, const SDL_FRect& box, const StoryEditor::Field& f, float size);

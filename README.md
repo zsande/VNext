@@ -9,7 +9,7 @@ Open VNext in developer mode and you get an editor that fits any window size, wi
 - **Story**: scenes and their lines as forms, with a live preview of what players see at each line, and "Play from this line".
 - **Map**: every scene as a box, with arrows where the story branches and jumps.
 - **Screens**: the title screen, menus and textbox, designed by dragging their parts around, with "Try it" to click through them.
-- **Library**: images, audio, videos and fonts, and the styles, animations and gallery entries a game uses.
+- **Library**: images, audio, videos and fonts, and the styles, animations (on a timeline) and gallery entries a game uses.
 - **Settings** and **Translate**: the game's options, and its translations, with a spreadsheet for translators.
 
 Games made with it can have voices and made-up "speech" sounds, videos, timed and locked choices, phone-style messages, a story flowchart, a gallery, music room and achievements, saving, loading and rewinding, controller and touch support, text read aloud, high-contrast and text-size options, and right-to-left languages. A finished game packs into one file, game.vnext, which also keeps its players' saves and progress: with VNext next to it, it plays on Windows, macOS and Linux.

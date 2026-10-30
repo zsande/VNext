@@ -14,8 +14,8 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
     if (!d.previewOn) { // (off: its heading, with the button that turns it on)
         if (d.preview) d.dropPreviews();
         PreviewHead head(ui, box); // (all there is of it)
-        if (head.button("Preview off", false)) d.previewOn = true;
-        head.title("Preview");
+        if (head.button("Preview off"_tr, false)) d.previewOn = true;
+        head.title("Preview"_tr);
         d.previewShown = {};
         return;
     }
@@ -28,32 +28,30 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
     const float scale = std::min(box.w / engine.canvas().w, box.h / engine.canvas().h);
     const SDL_FRect shown{box.x, box.y + box.h - engine.canvas().h * scale, engine.canvas().w * scale, engine.canvas().h * scale};
     d.previewShown = shown;
-    // The chosen line shows or moves someone: dragging them on the preview puts them there (their place
-    // and height), and the wheel zooms them. A camera line: dragging moves what it looks at.
-    const bool camera = row && row->kind == Kind::Camera;
-    const bool placing = d.preview && row && !d.previewPlaying &&
-                         ((row->kind == Kind::Character && lower(firstWord(row->text)) == "show") || row->kind == Kind::Move || camera);
+    // The chosen line shows someone (or moves the one there): dragging them on the preview puts them
+    // there (their place and height), and the wheel zooms them.
+    const bool placing = d.preview && row && !d.previewPlaying && row->kind == Kind::Character && lower(firstWord(row->text)) == "show";
     if (!placing) d.placeDrag.reset();
     // Its buttons, from the right: off, its sound (only while no game is going on behind the tools: it
     // would cut into that one's), and back to the line after it has played on; then its title, in the room left.
     PreviewHead head(ui, PreviewHead::over(shown, k));
-    if (head.button("Preview on", true)) {
+    if (head.button("Preview on"_tr, true)) {
         d.previewOn = false;
         d.dropPreviews();
         return;
     }
-    if (engine.waiting_ && head.button(d.previewSound ? "Audio on" : "Audio off", d.previewSound)) {
+    if (engine.waiting_ && head.button(d.previewSound ? "Audio on"_tr : "Audio off"_tr, d.previewSound)) {
         d.previewSound = !d.previewSound;
         d.dropPreviews(); // (made again, heard or not)
         return;
     }
-    if (d.previewPlaying && head.button("Reset", false)) { // (back to the line)
+    if (d.previewPlaying && head.button("Reset"_tr, false)) { // (back to the line)
         d.dropPreviews();
         return;
     }
-    head.title(d.preview && !d.previewReached ? "Preview (not reached from the start)" // (short, to fit beside the buttons)
-               : placing                      ? (camera ? "Preview: drag the view; the wheel zooms" : "Preview: drag them; the wheel zooms")
-                                              : "Preview");
+    head.title(d.preview && !d.previewReached ? "Preview (not reached from the start)"_tr // (short, to fit beside the buttons)
+               : placing                      ? "Preview: drag them; the wheel zooms"_tr
+                                              : "Preview"_tr);
     draw::rect(r, shown, kBox);
     if (d.preview) {
         // It takes the mouse and the keys as the game does (previewEvent): its buttons, choices and
@@ -93,6 +91,7 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
                     if (ScreenView* u = under(); !u || !u->leaving())
                         if (ScreenView* v = engine.view(d.previewPending)) {
                             v->reset();
+                            v->playWith(d.previewPendingWith.first, d.previewPendingWith.second);
                             d.previewOverlays.push_back(std::exchange(d.previewPending, {}));
                         }
                 for (const std::string& name : d.previewLeaving)
@@ -106,14 +105,13 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
             auto fields = d.editor.fields(*row);
             auto field = [&](std::string_view name) -> std::string& { return std::ranges::find(fields, name, &StoryEditor::Field::name)->value; };
             auto write = [&](const std::string& key) { d.editor.setText(scene, *row, d.editor.lineOf(row->kind, fields), key); };
-            const std::string across = camera ? "Across" : row->kind == Kind::Move ? "To" : "Place";
-            const std::string who = camera ? std::string{} : lower(row->kind == Kind::Character && !field("Called").empty() ? field("Called") : field("Who"));
+            const std::string who = lower(!field("Called").empty() ? field("Called") : field("Who"));
             const auto objects = d.preview->onStage();
             const auto object = std::ranges::find_if(objects, [&](const Stage::ObjectState& o) { return lower(o.tag) == who || lower(o.character) == who; });
-            const bool found = camera || object != objects.end();
+            const bool found = object != objects.end();
             if (const float turns = found ? ui.wheelOver(shown) : 0.0f; turns != 0.0f) {
                 const std::string& zoom = field("Zoom");
-                const float current = camera ? d.preview->camera().zoom : object->zoom;
+                const float current = object->zoom;
                 const float was = zoom.ends_with('%') ? parseNumber(zoom.substr(0, zoom.size() - 1)).value_or(current * 100.0f) / 100.0f
                                                       : parseNumber(zoom).value_or(current);
                 field("Zoom") = std::format("{}%", std::lround(std::clamp(was + turns * 0.1f, 0.1f, 4.0f) * 100.0f));
@@ -123,25 +121,18 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
                 const float perPixel = engine.canvas().w / shown.w; // (the engine.canvas()'s pixels a pixel of the preview is)
                 DeveloperTools::PlaceDrag g{.x = d.mouseX, .y = d.mouseY, .across = 0.0f, .up = 0.0f, .perX = 0.0f, .perY = 0.0f, .moving = false,
                                             .key = ++d.focusCount};
-                if (camera) {
-                    const Stage::Camera c = d.preview->camera();
-                    g.across = c.x * 2.0f - 1.0f;
-                    g.up = 1.0f - c.y * 2.0f;
-                    g.perX = -2.0f * perPixel / (engine.canvas().w * std::max(c.zoom, 0.1f));
-                    g.perY = 2.0f * perPixel / (engine.canvas().h * std::max(c.zoom, 0.1f));
-                } else { // (its picture lines up with the screen as much as its place is across: it moves by the room left beside it)
-                    const Stage::ObjectState& o = *object;
-                    std::string key = o.image;
-                    const CharacterDef* def = o.character.empty() || !d.script ? nullptr : d.script->character(o.character);
-                    if (def) key = def->pictureOf(o.expression);
-                    const Picture pic = engine.assets().picture(key);
-                    const float sized = (def && pic ? std::min(1.0f, engine.canvas().h * (d.script ? d.script->config.spriteHeight : 0.95f) / pic.h()) : 1.0f) * o.zoom;
-                    const float w = pic ? pic.w() * sized : engine.canvas().w * 0.5f * o.zoom, h = pic ? pic.h() * sized : engine.canvas().h * 0.5f * o.zoom;
-                    g.across = o.x * 2.0f - 1.0f;
-                    g.up = 1.0f - o.y * 2.0f;
-                    g.perX = 2.0f * perPixel / (std::abs(engine.canvas().w - w) > 1.0f ? engine.canvas().w - w : engine.canvas().w);
-                    g.perY = -2.0f * perPixel / (std::abs(engine.canvas().h - h) > 1.0f ? engine.canvas().h - h : engine.canvas().h);
-                }
+                // (its picture lines up with the screen as much as its place is across: it moves by the room left beside it)
+                const Stage::ObjectState& o = *object;
+                std::string key = o.image;
+                const CharacterDef* def = o.character.empty() || !d.script ? nullptr : d.script->character(o.character);
+                if (def) key = def->pictureOf(o.expression);
+                const Picture pic = engine.assets().picture(key);
+                const float sized = (def && pic ? std::min(1.0f, engine.canvas().h * (d.script ? d.script->config.spriteHeight : 0.95f) / pic.h()) : 1.0f) * o.zoom;
+                const float w = pic ? pic.w() * sized : engine.canvas().w * 0.5f * o.zoom, h = pic ? pic.h() * sized : engine.canvas().h * 0.5f * o.zoom;
+                g.across = o.x * 2.0f - 1.0f;
+                g.up = 1.0f - o.y * 2.0f;
+                g.perX = 2.0f * perPixel / (std::abs(engine.canvas().w - w) > 1.0f ? engine.canvas().w - w : engine.canvas().w);
+                g.perY = -2.0f * perPixel / (std::abs(engine.canvas().h - h) > 1.0f ? engine.canvas().h - h : engine.canvas().h);
                 d.placeDrag = g;
             }
             if (d.placeDrag) {
@@ -152,7 +143,7 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
                     auto step = [](float v) { return std::clamp(std::round(v * 20.0f) / 20.0f, -1.0f, 1.0f); };
                     auto text = [](float v) { return std::format("{}", v == 0.0f ? 0.0f : v); };
                     bool changed = false;
-                    for (const auto& [name, from, by] : {std::tuple{across, g.across, g.perX * dx}, {std::string("Height"), g.up, g.perY * dy}})
+                    for (const auto& [name, from, by] : {std::tuple{std::string("Place"), g.across, g.perX * dx}, {std::string("Height"), g.up, g.perY * dy}})
                         if (step(from + by) != step(from) && field(name) != text(step(from + by))) {
                             field(name) = text(step(from + by));
                             changed = true;
@@ -198,7 +189,7 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
         previewHooks();
         previewDid(); // (a button whose click animation is over)
     } else {
-        ui.textAround(d.problems.empty() ? "Nothing to show here yet." : "The preview shows once the mistakes are fixed.", shown.x + 14 * k,
+        ui.textAround(d.problems.empty() ? "Nothing to show here yet."_tr : "The preview shows once the scripts' mistakes are fixed."_tr, shown.x + 14 * k,
                       shown.y + shown.h / 2, layout::noteText, theme::dim, shown.w - 28 * k);
     }
     draw::outline(r, shown, kEdge);
@@ -325,11 +316,15 @@ void Developer::previewDid() {
                 } else if (ScreenView* screen = engine.view(u->arg)) {
                     std::erase(d.previewLeaving, u->arg); // (still closing: open again)
                     ScreenView* under = !d.previewOverlays.empty() ? engine.view(d.previewOverlays.back()) : d.preview->openingScreen() ? engine.view(d.preview->request().name) : nullptr;
+                    const std::pair with{ScreenView::animationIn(d.script.get(), u->opening), ScreenView::animationIn(d.script.get(), u->closing)}; // (with NAME, and close with NAME: this time)
+                    screen->playWith(with.first, with.second);
                     if (screen->startsCovered() && under && under != screen && under->endsCovered() && !under->hasLeft()) { // (animations wait for each other: the one under fades out first)
                         under->leave();
                         d.previewPending = u->arg;
+                        d.previewPendingWith = with;
                     } else {
                         screen->reset();
+                        screen->playWith(with.first, with.second);
                         d.previewOverlays.push_back(u->arg);
                     }
                 } else {
@@ -339,7 +334,7 @@ void Developer::previewDid() {
                 if (!d.previewOverlays.empty()) {
                     const std::string name = d.previewOverlays.back();
                     d.previewOverlays.pop_back();
-                    if (ScreenView* screen = engine.view(name); screen && screen->def().hideAnimation) { // (its hide_animation= plays, as in the game: drawn until it's over)
+                    if (ScreenView* screen = engine.view(name); screen && screen->hideAnimation()) { // (its hide animation plays, as in the game: drawn until it's over)
                         screen->leave();
                         d.previewLeaving.push_back(name);
                     }
@@ -354,7 +349,7 @@ void Developer::previewDid() {
     }
     if (!said.empty()) {
         d.failed = false;
-        d.status = "In the game, that would " + joined(said) + ".";
+        d.status = "In the game, that would {}."_tr(joined(said)); // (what it would do, as the scripts say it)
     }
 }
 
@@ -364,6 +359,11 @@ void Developer::makePreview(const StoryEditor::Scene& scene, const StoryEditor::
     const bool heard = d.previewSound && engine.waiting_;
     if (heard) d.heard = &engine.audio();
     d.preview = playedTo(*d.script, scene, row ? std::optional(row->line) : std::nullopt, heard ? engine.audio() : d.silence, d.previewReached);
+    if (d.preview && d.preview->openingScreen()) { // (the screen the line opens: with NAME and close with NAME, as in the game)
+        const SetFor previewViews(engine.viewsFrom_, d.script.get());
+        if (ScreenView* v = engine.view(d.preview->request().name))
+            v->playWith(ScreenView::animationIn(d.script.get(), d.preview->request().opening), ScreenView::animationIn(d.script.get(), d.preview->request().closing));
+    }
 }
 
 std::unique_ptr<Game> Developer::playedTo(const Script& s, const StoryEditor::Scene& scene, std::optional<std::size_t> line, Audio& audio, bool& reached,

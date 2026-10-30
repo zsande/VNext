@@ -627,6 +627,80 @@ SDL_Color hsv(float h, float s, float v, Uint8 alpha) {
 
 } // namespace draw
 
+void Wiper::draw(SDL_Renderer* r, Assets& assets, SDL_FPoint canvas, const SDL_FRect& box, float shown, const std::string& shape,
+                 const std::function<void()>& paint) {
+    if (shown >= 0.999f) return paint();
+    if (shown <= 0.0f || box.w <= 0.0f || box.h <= 0.0f) return;
+    int outW = 0, outH = 0;
+    SDL_GetCurrentRenderOutputSize(r, &outW, &outH);
+    const float k = std::clamp(static_cast<float>(outW) / canvas.x, 1.0f, 4.0f); // (the layer: as sharp as where it goes)
+    const int w = static_cast<int>(std::ceil(canvas.x * k)), h = static_cast<int>(std::ceil(canvas.y * k));
+    if (Mask* mask = shape.empty() ? nullptr : maskOf(r, assets, shape)) {
+        if (!layer_ || layerW_ != w || layerH_ != h) {
+            layer_.reset(SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, w, h));
+            layerW_ = w, layerH_ = h;
+            if (layer_) SDL_SetTextureBlendMode(layer_.get(), SDL_BLENDMODE_BLEND);
+        }
+        if (layer_) {
+            if (mask->shown != shown) { // how far in each pixel of the shape is: it shows once the wipe passes its brightness, softly over `soft`
+                constexpr float soft = 0.15f;
+                std::vector<SDL_Color> pixels(mask->brightness.size());
+                for (std::size_t i = 0; i < pixels.size(); ++i) {
+                    const float a = std::clamp((shown * (1.0f + soft) - static_cast<float>(mask->brightness[i]) / 255.0f) / soft, 0.0f, 1.0f);
+                    pixels[i] = {255, 255, 255, static_cast<Uint8>(a * 255.0f)};
+                }
+                SDL_UpdateTexture(mask->texture.get(), nullptr, pixels.data(), mask->w * 4);
+                mask->shown = shown;
+            }
+            { // (only the box: emptied, drawn in, and cut as the mask has it; outside it nothing of it shows)
+                const RenderTarget _(r, layer_.get(), k);
+                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
+                SDL_SetRenderDrawColor(r, 0, 0, 0, 0);
+                SDL_RenderFillRect(r, &box);
+                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+                {
+                    const RenderClip inside(r, box);
+                    paint();
+                }
+                SDL_RenderTexture(r, mask->texture.get(), nullptr, &box);
+            }
+            const SDL_FRect from{box.x * k, box.y * k, box.w * k, box.h * k};
+            SDL_RenderTexture(r, layer_.get(), &from, &box);
+            return;
+        }
+    }
+    const RenderClip _(r, {box.x, box.y, box.w * shown, box.h}); // (straight, from the left)
+    paint();
+}
+
+Wiper::Mask* Wiper::maskOf(SDL_Renderer* r, Assets& assets, const std::string& shape) {
+    if (const auto it = masks_.find(shape); it != masks_.end()) return it->second.texture ? &it->second : nullptr;
+    if (masks_.size() >= 8) masks_.clear(); // (the few in use are read again)
+    Mask& m = masks_[shape];
+    const SurfacePtr pixels = assets.pixels(shape);
+    if (!pixels) {
+        logWarn("There's no image called '{}' to wipe with, so the wipe is a straight one.", shape);
+        return nullptr;
+    }
+    const int step = std::max(1, (pixels->w + 479) / 480);
+    m.w = pixels->w / step;
+    m.h = pixels->h / step;
+    m.brightness.reserve(static_cast<std::size_t>(m.w) * static_cast<std::size_t>(m.h));
+    for (int y = 0; y < m.h; ++y) {
+        const auto* row = reinterpret_cast<const SDL_Color*>(static_cast<const Uint8*>(pixels->pixels) + static_cast<std::ptrdiff_t>(y * step) * pixels->pitch);
+        for (int x = 0; x < m.w; ++x) {
+            const SDL_Color c = row[x * step];
+            m.brightness.push_back(static_cast<Uint8>((c.r * 299 + c.g * 587 + c.b * 114) / 1000));
+        }
+    }
+    m.texture.reset(SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, m.w, m.h));
+    // (laid over what's drawn: keeps its colours, and as much of it as the mask is opaque)
+    static const SDL_BlendMode cut = SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_ADD, SDL_BLENDFACTOR_ZERO,
+                                                                SDL_BLENDFACTOR_SRC_ALPHA, SDL_BLENDOPERATION_ADD);
+    if (m.texture && !SDL_SetTextureBlendMode(m.texture.get(), cut)) m.texture.reset();
+    return m.texture ? &m : nullptr;
+}
+
 // ---------------------------------------------------------------------------
 // Screens
 // ---------------------------------------------------------------------------
@@ -1011,11 +1085,15 @@ void ScreenView::reset() {
         st.scroll = 0.0f;
         st.since.reset(); // (animations start again)
         st.clicked.reset();
+        st.hover = 0.0f;
+        st.hoverAt.reset();
         st.movie.reset(); // videos start again
         st.movieName.clear();
         st.panX = 0.0f;
         st.centered = false;
     }
+    opening_.reset(); // (its own animations again, until the one opening it says otherwise)
+    closing_.reset();
     chosen_.clear();
     focus_.reset();
     dragging_.reset();
@@ -1039,6 +1117,20 @@ float ScreenView::now() const {
     return tools_ ? engine_.toolsTime() : engine_.time();
 }
 
+ScreenView::Played ScreenView::animationIn(const Script* script, const std::optional<std::string>& name) {
+    if (!name) return std::nullopt;
+    if (!script) return nullptr;
+    const auto it = script->animations.find(*name);
+    return it != script->animations.end() ? std::make_shared<const Animation>(it->second) : nullptr;
+}
+
+bool ScreenView::still() const { return !tools_ && !engine_.settings().animations; }
+
+float ScreenView::played(const Animation& a, float seconds) const {
+    if (!still()) return seconds;
+    return a.loops() ? 0.0f : a.total();
+}
+
 void ScreenView::opened() {
     shownSince_ = now();
     leftSince_.reset();
@@ -1051,17 +1143,49 @@ void ScreenView::leave() {
 }
 
 bool ScreenView::leaving() const {
-    return leftSince_ && def_->hideAnimation && now() - *leftSince_ < def_->hideAnimation->length();
+    return leftSince_ && hideAnimation() && !still() && now() - *leftSince_ < hideAnimation()->total();
+}
+
+void ScreenView::playWith(Played opening, Played closing) {
+    opening_ = std::move(opening);
+    closing_ = std::move(closing);
 }
 
 bool ScreenView::startsCovered() const {
-    const Animation* a = def_->showAnimation.get();
-    return a && a->at(0.0f, {255, 255, 255, 255}, [](bool, float) { return 0.0f; }).fade >= 0.999f;
+    const Animation* a = showAnimation();
+    return a && a->at(0.0f, {255, 255, 255, 255}, [](bool, float) { return 0.0f; }, {}).fade >= 0.999f;
 }
 
 bool ScreenView::endsCovered() const {
-    const Animation* a = def_->hideAnimation.get();
-    return a && a->at(a->length(), {255, 255, 255, 255}, [](bool, float) { return 0.0f; }).fade >= 0.999f;
+    const Animation* a = hideAnimation();
+    return a && a->at(a->loops() ? a->length * 0.999f : a->total(), {255, 255, 255, 255}, [](bool, float) { return 0.0f; }, {}).fade >= 0.999f;
+}
+
+bool ScreenView::pointedAt(std::size_t index) const {
+    if (leftSince_) return false;
+    if (focus_ && focus_->element == index) return true; // (a part that takes clicks: pointed at, or the keys' or a controller's)
+    return seenMotion_ == engine_.pointerMoves() && SDL_PointInRectFloat(&mouse_, &rectOf(index));
+}
+
+void ScreenView::hoverOnward(std::size_t index) {
+    const Animation* a = def_->elements[index].hoverAnimation.get();
+    ElementState& st = state_[index];
+    if (!a) return;
+    const float t = now(), dt = st.hoverAt ? std::clamp(t - *st.hoverAt, 0.0f, 0.25f) : 0.0f;
+    st.hoverAt = t;
+    if (still()) { // (as it ends while it's pointed at; else as it starts)
+        st.hover = pointedAt(index) ? std::max(played(*a, 0.0f), 0.0001f) : 0.0f;
+        return;
+    }
+    if (pointedAt(index)) {
+        st.hover = std::max(st.hover + dt, 0.0001f); // (it starts at once)
+        if (!a->loops()) st.hover = std::min(st.hover, a->total());
+        else if (a->length > 0.0f && st.hover >= 2.0f * a->length) st.hover = a->length + std::fmod(st.hover - a->length, a->length);
+        return;
+    }
+    // Back the way it came, from where it is in the time through it's in (one played to its end: from its end).
+    if (a->length > 0.0f && st.hover > a->length) st.hover = !a->loops() && st.hover >= a->total() ? a->length : std::fmod(st.hover, a->length);
+    st.hover = std::max(0.0f, st.hover - dt);
 }
 
 // ---------------------------------------------------------------------------
@@ -1120,7 +1244,16 @@ std::string ScreenView::interpolate(std::string_view text) {
 
 RichText ScreenView::rich(std::string_view text) {
     if (text.find_first_of("{}") == std::string_view::npos) return {.text = std::string(text), .spans = {}}; // (nothing to fill in or style: as it is)
-    return richText(text, lookup_, &engine_.palette());
+    if (const auto read = richRead_.find(text); read != richRead_.end()) return read->second;
+    // (one that fills in a value is read every time: the value may have changed; one that only styles
+    // its words, once)
+    bool fills = false;
+    RichText out = richText(text, [&](std::string_view name) {
+        fills = true;
+        return lookup_(name);
+    }, &engine_.palette());
+    if (!fills && richRead_.size() < 512) richRead_.emplace(std::string(text), out);
+    return out;
 }
 
 Font& ScreenView::styleFont(const Style& s) {
@@ -1224,6 +1357,11 @@ const ScreenView::Target* ScreenView::focusedTarget() const {
 // Drawing
 // ---------------------------------------------------------------------------
 
+template <class Paint> void ScreenView::wiped(SDL_Renderer* r, const Shift& by, const Paint& paint) {
+    if (by.wipe >= 0.999f) return paint(); // (a std::function made only for a wipe)
+    partWiper_.draw(r, engine_.assets(), {engine_.canvas().w, engine_.canvas().h}, by.wipeBox, by.wipe, by.wipeShape, paint);
+}
+
 void ScreenView::draw(SDL_Renderer* r, float alpha) {
     drawnFrame_ = engine_.frameNumber();
     layout();
@@ -1233,13 +1371,15 @@ void ScreenView::draw(SDL_Renderer* r, float alpha) {
     // A part in another shows only while that one does, and moves and fades with its animation; the
     // whole screen moves and fades with its show_animation= (or, closed, its hide_animation=).
     Shift whole{};
-    if (const Animation* a = leftSince_ ? def_->hideAnimation.get() : def_->showAnimation.get(); a && (leftSince_ || shownSince_)) {
+    if (const Animation* a = leftSince_ ? hideAnimation() : showAnimation(); a && (leftSince_ || shownSince_)) {
         float t = now() - (leftSince_ ? *leftSince_ : *shownSince_);
-        if (leftSince_) t = std::min(t, a->length() * 0.999f); // (closing: once through, even with loop)
-        const Animation::Look look = a->at(t, {255, 255, 255, 255}, [size = engine_.canvas()](bool across, float place) { // (the whole screen: ±2 is just off it)
+        if (leftSince_ && a->loops()) t = std::min(t, a->length * 0.999f); // (closing: once through, even with loop)
+        const Canvas& size = engine_.canvas();
+        const Animation::Look look = a->at(played(*a, t), {255, 255, 255, 255}, [&size](bool across, float place) { // (the whole screen: ±2 is just off it)
             return across ? placeEdge(place, size.w, size.w) : placeEdge(-place, size.h, size.h);
-        });
-        whole = {look.x, look.y, std::clamp(look.opacity, 0.0f, 1.0f), std::clamp(look.fade, 0.0f, 1.0f), look.fadeColor};
+        }, {size.w, size.h});
+        whole = {look.x, look.y, std::clamp(look.opacity, 0.0f, 1.0f), std::clamp(look.fade, 0.0f, 1.0f), look.fadeColor, look.wipe, {0.0f, 0.0f, size.w, size.h},
+                 look.wipeShape};
     }
     std::vector<Shift> shifts(n);
     // What's in a container with edges=cut (or scroll=yes) is cut off at its edges; with edges=fade it
@@ -1271,57 +1411,63 @@ void ScreenView::draw(SDL_Renderer* r, float alpha) {
             rectOf(box) = was;
         }
     };
-    for (std::size_t i = 0; i < n; ++i) {
-        closeTo(i);
-        const Element& el = def_->elements[i];
-        const bool in = el.parent >= 0 && static_cast<std::size_t>(el.parent) < i;
-        if ((in && !drawn_[static_cast<std::size_t>(el.parent)]) || !visible(el)) {
-            state_[i].since.reset(); // (it starts again when it shows again)
-            continue;
-        }
-        const Shift by = in ? shifts[static_cast<std::size_t>(el.parent)] : whole;
-        const SDL_FRect rect = rectOf(i);
-        rectOf(i).x += by.x;
-        rectOf(i).y += by.y;
-        shifts[i] = by;
-        ElementState& st = state_[i];
-        if (st.clicked && el.clickAnimation && now() - *st.clicked >= el.clickAnimation->length()) st.clicked.reset();
-        if (el.animation && !st.since) st.since = now();
-        std::optional<RenderClip> clip; // (in a container that cuts off its edges: only what's inside its box shows)
-        if (const auto cut = cutBy(i, &shifts)) clip.emplace(r, *cut);
-        if ((st.clicked && el.clickAnimation) || el.animation) { // (clicked: its click animation, until it's over)
-            const bool click = st.clicked && el.clickAnimation;
-            const Animation::Look look = click ? drawAnimated(r, i, alpha * by.opacity, *el.clickAnimation, now() - *st.clicked, {by.x, by.y}, boxOf(i))
-                                               : drawAnimated(r, i, alpha * by.opacity, *el.animation, now() - *st.since, {by.x, by.y}, boxOf(i));
-            shifts[i] = {by.x + look.x, by.y + look.y, by.opacity * std::clamp(look.opacity, 0.0f, 1.0f)};
-        } else {
-            drawElement(r, i, alpha * by.opacity);
-        }
-        clip.reset();
-        rectOf(i) = rect;
-        drawn_[i] = true;
-        if (el.kind == ElementKind::Button && el.selected) { // (chosen because of its selected=: what its action sets holds, once it's so)
-            const bool chosen = el.selected->test(lookup_);
-            if (chosen && !st.chosen)
-                for (const Command& c : el.actions) {
-                    const auto* set = std::get_if<cmd::Set>(&c);
-                    const auto* ui = std::get_if<cmd::Ui>(&c);
-                    if ((set && set->op == '=') || (ui && ui->verb == "setting")) chosen_.push_back(c);
+    // The parts, on the screen as its show (or hide) animation wipes it: all of them at once.
+    const Shift onScreen{.x = whole.x, .y = whole.y, .opacity = whole.opacity}; // (what the parts on the screen itself are moved and faded by)
+    auto parts = [&] {
+        for (std::size_t i = 0; i < n; ++i) {
+            closeTo(i);
+            const Element& el = def_->elements[i];
+            const bool in = el.parent >= 0 && static_cast<std::size_t>(el.parent) < i;
+            if ((in && !drawn_[static_cast<std::size_t>(el.parent)]) || !visible(el)) {
+                state_[i].since.reset(); // (it starts again when it shows again)
+                continue;
+            }
+            const Shift by = in ? shifts[static_cast<std::size_t>(el.parent)] : onScreen;
+            const SDL_FRect rect = rectOf(i);
+            rectOf(i).x += by.x;
+            rectOf(i).y += by.y;
+            shifts[i] = by;
+            ElementState& st = state_[i];
+            if (st.clicked && el.clickAnimation && now() - *st.clicked >= el.clickAnimation->total()) st.clicked.reset();
+            if (el.animation && !st.since) st.since = now();
+            hoverOnward(i);
+            std::optional<RenderClip> clip; // (in a container that cuts off its edges: only what's inside its box shows)
+            if (const auto cut = cutBy(i, &shifts)) clip.emplace(r, *cut);
+            if (el.animation || (el.hoverAnimation && st.hover > 0.0f) || (st.clicked && el.clickAnimation)) { // (clicked: its click animation too, until it's over)
+                Shift wipe = by;
+                const Animation::Look look = drawAnimated(r, i, alpha * by.opacity, wipe, boxOf(i));
+                shifts[i] = {by.x + look.x, by.y + look.y, by.opacity * std::clamp(look.opacity, 0.0f, 1.0f), 0.0f, {}, wipe.wipe, wipe.wipeBox, wipe.wipeShape};
+            } else {
+                wiped(r, by, [&] { drawElement(r, i, alpha * by.opacity); });
+            }
+            clip.reset();
+            rectOf(i) = rect;
+            drawn_[i] = true;
+            if (el.kind == ElementKind::Button && el.selected) { // (chosen because of its selected=: what its action sets holds, once it's so)
+                const bool chosen = el.selected->test(lookup_);
+                if (chosen && !st.chosen)
+                    for (const Command& c : el.actions) {
+                        const auto* set = std::get_if<cmd::Set>(&c);
+                        const auto* ui = std::get_if<cmd::Ui>(&c);
+                        if ((set && set->op == '=') || (ui && ui->verb == "setting")) chosen_.push_back(c);
+                    }
+                st.chosen = chosen;
+            }
+            if (el.kind == ElementKind::Container && i + 1 < n && within(i + 1, i) && (el.scrolls() || el.edges() == "fade")) {
+                open.push_back(i);
+                if (!fading && el.edges() == "fade" && startAside(r, scale)) { // (its parts: aside)
+                    aside.emplace(r, aside_.get(), scale);
+                    SDL_SetRenderDrawColor(r, 0, 0, 0, 0);
+                    SDL_RenderClear(r);
+                    fading = i;
                 }
-            st.chosen = chosen;
-        }
-        if (el.kind == ElementKind::Container && i + 1 < n && within(i + 1, i) && (el.scrolls() || el.edges() == "fade")) {
-            open.push_back(i);
-            if (!fading && el.edges() == "fade" && startAside(r, scale)) { // (its parts: aside)
-                aside.emplace(r, aside_.get(), scale);
-                SDL_SetRenderDrawColor(r, 0, 0, 0, 0);
-                SDL_RenderClear(r);
-                fading = i;
             }
         }
-    }
-    closeTo(n);
-    if (whole.fade > 0.0f) draw::rect(r, {0.0f, 0.0f, engine_.canvas().w, engine_.canvas().h}, withAlpha(whole.fadeColor, whole.fade * alpha)); // (fade=: over everything, as a screen's fade transition)
+        closeTo(n);
+        if (whole.fade > 0.0f) draw::rect(r, {0.0f, 0.0f, engine_.canvas().w, engine_.canvas().h}, withAlpha(whole.fadeColor, whole.fade * alpha)); // (fade=: over everything)
+    };
+    if (whole.wipe >= 0.999f) parts();
+    else screenWiper_.draw(r, engine_.assets(), {engine_.canvas().w, engine_.canvas().h}, whole.wipeBox, whole.wipe, whole.wipeShape, parts);
     if (leftSince_) targets_.clear(); // (closed: only seen going)
     if (held_ && heldMoved_) { // what's being dragged, under the pointer
         const Element& el = def_->elements[*held_];
@@ -1345,16 +1491,23 @@ SDL_FRect ScreenView::bounds(std::size_t index) {
     return box;
 }
 
-Animation::Look ScreenView::drawAnimated(SDL_Renderer* r, std::size_t index, float alpha, const Animation& a, float seconds, SDL_FPoint shift,
-                                         const SDL_FRect& box) {
+Animation::Look ScreenView::drawAnimated(SDL_Renderer* r, std::size_t index, float alpha, Shift& by, const SDL_FRect& box) {
+    const SDL_FPoint shift{by.x, by.y};
     const Element& el = def_->elements[index];
+    const ElementState& st = state_[index];
     const bool picture = el.kind == ElementKind::Image || el.kind == ElementKind::Face;
     const bool shape = el.kind == ElementKind::Container;
     const SDL_Color own = picture ? SDL_Color{255, 255, 255, 255} : shape ? el.style.bg : el.style.color;
     const SDL_FRect rect = rectOf(index);
-    const Animation::Look look = a.at(seconds, own, [&](bool across, float place) { // (places in the box it's in, from where it's written)
+    const auto offset = [&](bool across, float place) { // (places in the box it's in, from where it's written)
         return across ? box.x + placeEdge(place, rect.w, box.w) - (rect.x - shift.x) : box.y + placeEdge(-place, rect.h, box.h) - (rect.y - shift.y);
-    });
+    };
+    const SDL_FPoint screen{engine_.canvas().w, engine_.canvas().h};
+    Animation::Look look;
+    auto add = [&](const Animation& a, float seconds) { look = look.with(a.at(seconds, look.color.value_or(own), offset, screen)); };
+    if (el.animation && st.since) add(*el.animation, played(*el.animation, now() - *st.since));
+    if (el.hoverAnimation && st.hover > 0.0f) add(*el.hoverAnimation, st.hover);
+    if (st.clicked && el.clickAnimation) add(*el.clickAnimation, now() - *st.clicked);
     Style style = el.style; // (as the look makes it, for this moment: the part itself stays as written)
     rectOf(index).x += look.x;
     rectOf(index).y += look.y;
@@ -1369,8 +1522,15 @@ Animation::Look ScreenView::drawAnimated(SDL_Renderer* r, std::size_t index, flo
     if (look.color) (picture ? tint_ : shape ? style.bg : style.color) = *look.color;
     state_[index].styled = std::move(style);
     turn_ = look.rotate;
-    drawElement(r, index, alpha * std::clamp(look.opacity, 0.0f, 1.0f));
-    if (look.fade > 0.0f) draw::rect(r, rectOf(index), withAlpha(look.fadeColor, std::clamp(look.fade, 0.0f, 1.0f) * alpha)); // (fade=: the part covered with the colour)
+    if (look.wipe < by.wipe) { // (its own wipe, over where it is now)
+        by.wipe = look.wipe;
+        by.wipeBox = rectOf(index);
+        by.wipeShape = look.wipeShape;
+    }
+    wiped(r, by, [&] {
+        drawElement(r, index, alpha * std::clamp(look.opacity, 0.0f, 1.0f));
+        if (look.fade > 0.0f) draw::rect(r, rectOf(index), withAlpha(look.fadeColor, std::clamp(look.fade, 0.0f, 1.0f) * alpha)); // (fade=: the part covered with the colour)
+    });
     turn_ = 0.0f;
     tint_ = {255, 255, 255, 255};
     rectOf(index) = rect;
@@ -2366,7 +2526,7 @@ std::optional<std::pair<Commands, std::string>> ScreenView::takePressed() {
     }
     const Element& el = def_->elements[*playing_];
     const auto& since = state_[*playing_].clicked;
-    if (since && el.clickAnimation && now() - *since < el.clickAnimation->length()) return std::nullopt;
+    if (since && el.clickAnimation && now() - *since < el.clickAnimation->total()) return std::nullopt;
     playing_.reset();
     return std::pair{el.actions, el.confirm};
 }
@@ -2403,7 +2563,7 @@ void ScreenView::activate(const Target& t, std::optional<float> mouseX) {
         if (!el.option("drag").empty()) return held_ == t.spot.element ? held_.reset() : hold(t.spot.element);
         if (held_ && !el.drop.empty()) return drop(el);
         held_.reset();
-        if (el.clickAnimation && el.clickAnimation->length() > 0.0f) { // (it plays, then it does what it does)
+        if (el.clickAnimation && el.clickAnimation->total() > 0.0f && !still()) { // (it plays, then it does what it does)
             if (playing_) return;
             clicked(el);
             state_[t.spot.element].clicked = now();
@@ -2584,6 +2744,10 @@ bool ScreenView::scrollWidgets(const SDL_Event& e) {
 }
 
 bool ScreenView::handleEvent(const SDL_Event& e) {
+    if (e.type == SDL_EVENT_MOUSE_MOTION) { // (where the pointer is, as this screen saw it last)
+        mouse_ = {e.motion.x, e.motion.y};
+        seenMotion_ = engine_.pointerMoves();
+    }
     if (leftSince_) return def_->modal && isInput(e); // (closing: it only plays its hide_animation=)
     // Hotkeys: `key` elements, and buttons with key= (as if clicked: a click animation plays first).
     for (std::size_t i = 0; i < def_->elements.size(); ++i) {

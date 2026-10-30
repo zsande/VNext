@@ -150,16 +150,6 @@ struct Translation;
 // Story commands
 // ---------------------------------------------------------------------------
 
-enum class TransitionKind : std::uint8_t { None, Fade, Dissolve, Wipe, Slide };
-
-struct Transition {
-    TransitionKind kind = TransitionKind::None;
-    float duration = 0.0f;
-    SDL_Color color{0, 0, 0, 255}; // colour a fade passes through
-    std::string shape;             // a wipe shaped by this picture: its dark parts change first
-    std::vector<Transition> then;  // open SCREEN with fade ... then fade ...: the fades after it
-};
-
 // Optional changes to a picture on stage (characters and images).
 struct StageProps {
     std::optional<float> x, y;             // 0..1 across / down the canvas (the picture lines up with that much of it)
@@ -169,8 +159,11 @@ struct StageProps {
     std::optional<SDL_Color> tint;         // multiplies its colours (black: a silhouette)
 };
 
-enum class Ease : std::uint8_t { Linear, In, Out, InOut };
-[[nodiscard]] float eased(Ease e, float t); // t (0..1) with that speeding up and slowing down
+// How a change goes from where it was to where it's going: evenly, speeding up, slowing down, or
+// both; bouncing as it lands, springing past and back, or going a little past and back.
+enum class Ease : std::uint8_t { Linear, In, Out, InOut, Bounce, Spring, Overshoot };
+// t (0..1) with that speeding up and slowing down. Spring and Overshoot go past 1 on the way.
+[[nodiscard]] float eased(Ease e, float t);
 
 // Things the player collects, each listed once in the scripts ("gallery", "ending", "song",
 // "achievement" and "tip" lines) and remembered for good once reached: persistent.<kind>.<name>.
@@ -187,27 +180,26 @@ struct Say {
     std::uint64_t id = 0;   // the line as written, who says it included (the same in every language)
     bool together = false;  // in a "together" block, before its last line: it shows with the next one, without waiting
 };
-struct Scene { std::string image; Transition transition; }; // image name or "#rrggbbaa"
+// A line's animations are the scripts' (by name): "" for none. "with NAME" plays one now: as a new
+// background, character or image comes (over what was there), on one already there, or as one goes.
+struct Scene {
+    std::string image; // image name or "#rrggbbaa"
+    std::optional<std::string> animation; // animation=NAME: what the background plays while it's shown
+    std::optional<std::string> with;      // with NAME: as it comes in, over the one before (which goes when it ends); on the one already there
+};
 struct Show {
     std::string character, image; // one of them
-    std::string tag;               // name used by move / hide
+    std::string tag;               // name used by hide
     std::string expression;
     StageProps props;
-    Transition transition;
+    std::optional<std::string> animation; // animation=NAME: what it plays while it's shown (animation=none: nothing)
+    std::optional<std::string> with;      // with NAME: as it comes, or on the one already there (none said: config show_animation, as one comes)
+    bool wait = false;                    // and wait: the story waits for it to end (and for it to reach a new place)
 };
-struct Hide { std::string tag; Transition transition; };
-struct Move {
+struct Hide {
     std::string tag;
-    StageProps props;
-    float seconds = 0.5f;
-    Ease ease = Ease::InOut;
-    bool wait = false; // the story waits until the movement ends
-};
-struct Shake { // shake or flash
-    bool flash = false;
-    float strength = 12.0f;
-    SDL_Color color{255, 255, 255, 255};
-    float seconds = 0.5f;
+    std::optional<std::string> with; // with NAME: plays, then it's gone (none said: config hide_animation)
+    bool wait = false;               // and wait: the story waits until it's gone
 };
 struct Choice {
     std::string text;
@@ -263,12 +255,11 @@ struct Weather {
     bool behind = false; // behind the characters (else in front of them)
     float fade = 1.0f;
 };
-// The view of the stage: the point in the middle, how close, how turned. reset: back to normal.
+// The view of the stage, played as a picture's animations are: one it keeps playing (animation=NAME),
+// and one it plays now (with NAME), from where the one before left it ("": none; with none: back to
+// normal); `wait`: the story waits for that one.
 struct Camera {
-    std::optional<float> x, y, zoom, rotate;
-    bool reset = false;
-    float seconds = 0.0f;
-    Ease ease = Ease::InOut;
+    std::optional<std::string> animation, with;
     bool wait = false;
 };
 // A video (movies/NAME.mpg) over everything; the story goes on when it ends, or when the player
@@ -286,8 +277,7 @@ struct Textbox { std::string screen; bool newPage = false, hide = false; };
 // save, notify...
 struct Ui {
     std::string verb, arg;
-    Transition transition{}; // open SCREEN with fade [SECONDS] [to COLOUR] [then fade ...]
-    Transition closing{};    // ...and close with fade ...: how it goes when it closes
+    std::optional<std::string> opening, closing; // open SCREEN with NAME and close with NAME: what it plays this time (none said: its own show_ and hide_animation=)
 };
 // "unlock PICTURE", "ending NAME", "achievement NAME", "tip NAME": the player has it now (a picture,
 // an ending reached, an achievement earned, a tip learned). Pictures and songs are also had by
@@ -319,7 +309,7 @@ struct Message {
 struct Phone { bool on = true; };
 } // namespace cmd
 
-using Command = std::variant<cmd::Say, cmd::Scene, cmd::Show, cmd::Hide, cmd::Move, cmd::Shake, cmd::Menu, cmd::Jump,
+using Command = std::variant<cmd::Say, cmd::Scene, cmd::Show, cmd::Hide, cmd::Menu, cmd::Jump,
                              cmd::Return, cmd::End, cmd::Set, cmd::Play, cmd::Wait, cmd::Screen, cmd::Ask, cmd::Ui,
                              cmd::Weather, cmd::Camera, cmd::Textbox, cmd::Movie, cmd::Record, cmd::Chapter, cmd::Mark,
                              cmd::Message, cmd::Effect, cmd::Phone>;
@@ -403,35 +393,56 @@ struct Style {
     std::string hoverSound, clickSound;
 };
 
-// "animation NAME [loop]", with its steps on the lines under it: how a screen's part with
-// animation=NAME moves, fades, grows, turns and changes colour, from how it's written. Each step goes
-// from where the last one left it to its own values over its seconds ("wait 1 second" stays put); a
-// loop starts again from the start, else it stays as its last step left it.
+// "animation NAME [loop [N times]]", with what it changes on the lines under it: how a screen, a
+// part of one (animation=, hover_animation=, click_animation=) or a character or image on the stage
+// (show ... animation=, show/hide ... with) moves, fades, grows, turns, changes colour and wipes. Each line changes some
+// of those to its values: "over 1 second" from where the line before it ended, or at moments of its
+// own ("from 0.5 to 1 second", "at 2 seconds"); without either, at once where the line before ended.
+// "wait 1 second" leaves a gap. A change goes from where the ones before it left that value; one that
+// starts while another of the same value goes on takes over from there. Played again and again (loop),
+// a few times (loop 3 times) or once, it stays as its end left it.
 struct Animation {
-    struct Step {
-        // x, y: places on the screen, -1 to 1 like the stage's (NaN: home, its own place); opacity 0..1; zoom
-        // 1 = its size; rotate in degrees.
-        std::optional<float> x, y, opacity, zoom, rotate;
-        std::optional<SDL_Color> color;                   // a picture's tint, words' colour, a rect's fill
-        std::optional<SDL_Color> fade;                    // the screen covered with this colour by the end (fade=none: uncovered again)
-        float seconds = 0.0f;
-        Ease ease = Ease::InOut;                          // (a fade's: linear, as a screen's fade is, unless said)
+    enum class Value : std::uint8_t { X, Y, Opacity, Zoom, Rotate, Color, Fade, Wipe };
+    struct Change {
+        Value what = Value::Opacity;
+        // x, y: a place on the screen, -1 to 1 like the stage's (NaN: home, its own place), or with `by`
+        // a share of the screen to move by from its own place (left=5%: -0.05 across; up=5%: 0.05 down
+        // the other way, as places go up); opacity 0..1; zoom 1 = its size; rotate in degrees.
+        float to = 0.0f;
+        bool by = false;
+        SDL_Color color{};       // color=: a picture's tint, words' colour, a rect's fill; fade=: what it's covered with (alpha 0: none, uncovered again)
+        std::string shape;       // wipe= ... shape=PICTURE: where the wipe shows it first (the picture's darkest parts); none: from the left
+        float start = 0.0f;      // when it begins (seconds into the animation)
+        float seconds = 0.0f;    // how long it takes (0: at once)
+        Ease ease = Ease::InOut; // (a fade's: linear, as a screen's fade is, unless said)
+        [[nodiscard]] float end() const { return start + seconds; }
     };
     struct Look {
         float x = 0.0f, y = 0.0f, opacity = 1.0f, zoom = 1.0f, rotate = 0.0f;
         std::optional<SDL_Color> color; // (none: its own)
-        float fade = 0.0f;              // how far the screen is covered (0 to 1), and with what: as a screen's fade transition covers it
+        float fade = 0.0f;              // how far it's covered (0 to 1), and with what
         SDL_Color fadeColor{0, 0, 0, 255};
+        float wipe = 1.0f;              // how much of it shows (1: all of it): from the left, or as `wipeShape` has it (Wiper)
+        std::string wipeShape;
+        // Two at once (a part's own and its hover one, a character's own and one played on it): moves
+        // and turns added up, opacity and zoom multiplied, the other's colour, cover and wipe where it has them.
+        [[nodiscard]] Look with(const Look& other) const;
     };
     std::string name;
-    std::vector<Step> steps;
-    bool loop = false;
+    std::vector<Change> changes; // in the order they begin
+    float length = 0.0f;         // one time through, in seconds
+    int times = 1;               // how many times it plays (0: again and again)
+    [[nodiscard]] bool loops() const { return times == 0; }
+    // Until it ends, played as many times as it plays: one time through when it plays again and again
+    // (a click's, or a closing screen's, then goes on).
+    [[nodiscard]] float total() const { return loops() ? length : length * static_cast<float>(times); }
     // How it looks `seconds` after it started; `own`: the part's own colour (where a colour starts from);
-    // `offset`: how far (in pixels) a place across (or down) is from its own place. Look's x and y are
-    // pixels then.
+    // `offset`: how far (in pixels) a place across (or down) is from its own place; `screen`: the game's
+    // size (what a move by a share of it is a share of). Look's x and y are pixels then. `start`: where
+    // its values start from (the camera: where the animation before left it; else as anything is).
     using Offset = std::function<float(bool across, float place)>;
-    [[nodiscard]] Look at(float seconds, SDL_Color own, const Offset& offset) const;
-    [[nodiscard]] float length() const; // one time through, in seconds
+    [[nodiscard]] Look at(float seconds, SDL_Color own, const Offset& offset, SDL_FPoint screen, const Look& start) const;
+    [[nodiscard]] Look at(float seconds, SDL_Color own, const Offset& offset, SDL_FPoint screen) const { return at(seconds, own, offset, screen, Look{}); }
 };
 
 enum class ElementKind : std::uint8_t {
@@ -489,6 +500,7 @@ struct Element {
     std::map<std::string, std::string, std::less<>> props;  // other widget options
     std::map<std::string, Expr, std::less<>> exprs;         // formula options (bar value=, max=...)
     std::shared_ptr<const Animation> animation;             // animation=
+    std::shared_ptr<const Animation> hoverAnimation;        // hover_animation=: while it's pointed at (and back to its start after)
     std::shared_ptr<const Animation> clickAnimation;        // click_animation=: a button's, played when it's clicked (then it does what it does)
 
     [[nodiscard]] float number(std::string_view name, float fallback) const;
@@ -568,14 +580,9 @@ struct GameConfig {
     float skipDelay = 0.05f;
     float autoPerChar = 0.01f;
     SDL_Keymod skipHold = SDL_KMOD_CTRL;
-    float fadeTime = 1.0f;
-    float dissolveTime = 0.5f;
-    Transition showTransition{.kind = TransitionKind::Dissolve, .duration = 0.25f};
-    Transition hideTransition{.kind = TransitionKind::Dissolve, .duration = 0.25f};
+    std::string showAnimation, hideAnimation; // config show_animation / hide_animation: what show and hide lines play when they name none ("": nothing)
     float spriteHeight = 0.95f;
     float moveTime = 0.4f;   // "show X at Y" on someone already there slides this long
-    float shakeStrength = 12.0f, shakeTime = 0.5f, flashTime = 0.4f;
-    SDL_Color flashColor{255, 255, 255, 255};
     bool pixelArt = false;   // pictures scale with sharp pixels (else smoothly)
     int preload = 30;        // story commands to look ahead for pictures to load early (0: none)
     int imageMemory = 512;   // MB of pictures kept loaded before old ones are let go (0: no limit)
@@ -606,6 +613,10 @@ struct Instruction {
     Command command;
     std::uint16_t file = 0;
     int line = 0;
+    // A jump or return at the end of what's under a line (an if's branch, an option's or an answer's
+    // lines), with that line's number: the story isn't at that line when it does it (the developer
+    // tools don't stop there).
+    bool tail = false;
 };
 
 struct ScriptError {

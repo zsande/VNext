@@ -101,38 +101,42 @@ struct Slot {
         Option, // key=value
     };
     Type type;
-    std::string_view name, key;
+    ToolsText name;       // (what the form calls it, without a label)
+    std::string_view key;
     StoryEditor::Box box = StoryEditor::Box::None; // its box's kind (its pick comes from that)
-    std::string_view choices, labels, hint;
+    ToolsChoices choices;
+    ToolsLabels labels;
+    ToolsHint hint;
     std::string_view only; // written (and shown) only after these words
     bool seconds = false;
-    std::string_view suggest; // values it often has ("|" between them, "value:what it is")
+    ToolsSuggestions suggest; // values it often has ("|" between them, "value:what it is")
     bool commas = false;      // an Option that's several of its choices, with commas between them (all: not written)
     bool rich = false;        // text that can be bold, coloured...
-    std::string_view group;   // the heading it starts in the form
-    std::string_view label;   // what the form calls it (else its name)
+    ToolsGroup group;         // the heading it starts in the form
+    ToolsText label;          // what the form calls it (else its name)
 };
 
 struct CommandForm {
     StoryEditor::Kind kind;
-    std::string_view verbs, labels; // the words a line starts with ("_": a space), and what their buttons say
+    std::string_view verbs; // the words a line starts with ("_": a space)
+    ToolsLabels labels;     // ...and what their buttons say
     std::span<const Slot> slots;
-    std::string_view what = "Kind"; // what the form calls the choice of those words
+    ToolsText what = "Kind"; // what the form calls the choice of those words
 };
 
 using Type = Slot::Type;
 using Box = StoryEditor::Box;
-constexpr Slot kColorSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
+inline const Slot kColorSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
                              {.type = Type::Word, .name = "Colour", .box = Box::Colour}};
 
-constexpr Slot kPositionSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}, {.type = Type::Word, .name = "Place", .box = Box::Across}};
+inline const Slot kPositionSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}, {.type = Type::Word, .name = "Place", .box = Box::Across}};
 
-constexpr Slot kFontSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
+inline const Slot kFontSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
                             {.type = Type::Word, .name = "File", .key = "quoted", .box = Box::FontFile},
                             {.type = Type::Word, .name = "Style", .box = Box::FontStyle, .hint = "Default"}};
 
 // A style's settings (and a screen part's look).
-constexpr Slot kStyleSlots[]{
+inline const Slot kStyleSlots[]{
     {.type = Type::Word, .name = "Name", .box = Box::Name},
     {.type = Type::Option, .name = "Builds on", .key = "parent", .box = Box::Style, .hint = "default", .label = "Based on"},
     {.type = Type::Option, .name = "Font", .key = "font", .box = Box::Font, .hint = "From its base style", .group = "Text"},
@@ -166,48 +170,70 @@ constexpr Slot kStyleSlots[]{
     {.type = Type::Option, .name = "Sound when pointed at", .key = "hover_sound", .box = Box::Sound, .hint = "From its base style", .group = "Sounds", .label = "Sound on hover"},
     {.type = Type::Option, .name = "Sound when clicked", .key = "click_sound", .box = Box::Sound, .hint = "From its base style", .label = "Sound on click"}};
 
-constexpr Slot kAtlasSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
+inline const Slot kAtlasSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
                              {.type = Type::Option, .name = "Image", .key = "image", .box = Box::Picture},
                              {.type = Type::Option, .name = "Frames in a row", .key = "columns", .box = Box::Count},
                              {.type = Type::Option, .name = "Names like", .key = "like", .box = Box::Record, .label = "Same names as"}};
 
-constexpr Slot kSubPictureSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
+inline const Slot kSubPictureSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
                                   {.type = Type::Option, .name = "Cut from", .key = "image", .box = Box::Picture},
                                   {.type = Type::Option, .name = "Left", .key = "x", .box = Box::Pixels, .hint = "0"},
                                   {.type = Type::Option, .name = "Top", .key = "y", .box = Box::Pixels, .hint = "0"},
                                   {.type = Type::Option, .name = "Width", .key = "w", .box = Box::Pixels},
                                   {.type = Type::Option, .name = "Height", .key = "h", .box = Box::Pixels}};
 
-constexpr Slot kAnimationSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
-                                 {.type = Type::Flag, .name = "Over and over", .key = "loop", .box = Box::YesNo, .choices = "no yes", .label = "Loop"}};
+inline const Slot kAnimationSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}}; // (how often it plays: StoryEditor::fields; what it does: the timeline)
 
-constexpr Slot kGallerySlots[]{{.type = Type::Word, .name = "Image", .box = Box::Picture}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text}};
+// What an animation's lines change, a row each on the Library's timeline (StoryEditor::timelineRow): the
+// keys written for it (a new change gets the first), what the row is called, its box, the values its
+// box suggests besides its kind's, and what a new change on it goes to.
+struct TimelineRow {
+    std::string_view keys;
+    ToolsText label;
+    Box box;
+    ToolsSuggestions more;
+    std::string_view start;
+};
+inline const TimelineRow kTimelineRows[]{
+    {"x left right", "Across", Box::Across, "home:its own place|-2:just off the left|2:just off the right|5% left:a little to the left|5% right:a little to the right", "home"},
+    {"y up down", "Up or down", Box::Down, "home:its own place|-2:just off the bottom|2:just off the top|5% up:a little up|5% down:a little down", "home"},
+    {"opacity", "Opacity", Box::Opacity, "", "100%"},
+    {"zoom", "Zoom", Box::Zoom, "", "100%"},
+    {"rotate", "Rotation", Box::Rotation, "", "0"},
+    {"color", "Colour", Box::Colour, "", "white"},
+    {"fade", "Fade to colour", Box::Colour, "none:back from it", "black"}, // (covered with it, the whole screen for a screen)
+    {"wipe", "Wipe", Box::Wipe, "", "100%"}, // (how much of it shows: from the left, or as its shape has it)
+};
+static_assert(std::size(kTimelineRows) == StoryEditor::kTimelineRowCount);
 
-constexpr Slot kEndingSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text},
+inline const Slot kGallerySlots[]{{.type = Type::Word, .name = "Image", .box = Box::Picture}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text}};
+
+inline const Slot kEndingSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text},
                               {.type = Type::Option, .name = "Hint", .key = "hint", .box = Box::Text, .hint = "None"}};
 
-constexpr Slot kSongSlots[]{{.type = Type::Word, .name = "Song", .box = Box::Sound}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text}};
+inline const Slot kSongSlots[]{{.type = Type::Word, .name = "Song", .box = Box::Sound}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text}};
 
-constexpr Slot kAchievementSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text},
+inline const Slot kAchievementSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text},
                                    {.type = Type::Word, .name = "Description", .key = "quoted", .box = Box::Text, .hint = "None"},
                                    {.type = Type::Flag, .name = "Hidden until earned", .key = "hidden", .box = Box::YesNo, .choices = "no yes"}};
 
-constexpr Slot kTipSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text},
+inline const Slot kTipSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text},
                            {.type = Type::Word, .name = "Description", .key = "quoted", .box = Box::Text, .hint = "None"}};
 
-constexpr Slot kControlSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
+inline const Slot kControlSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
                                {.type = Type::Option, .name = "Key", .key = "keys", .box = Box::Key, .hint = "None"},
                                {.type = Type::Option, .name = "Does", .key = "action", .box = Box::Action, .hint = "None"},
                                {.type = Type::Option, .name = "Also in menus", .key = "everywhere", .box = Box::YesNo, .choices = "no yes", .label = "Works in menus"},
                                {.type = Type::Option, .name = "Only when", .key = "if", .box = Box::Variable, .hint = "Always", .label = "Works when"}};
 
 struct DefinitionKind {
-    std::string_view kind, label, one; // what the Library's list calls them, and one of them (its form's title)
+    std::string_view kind;
+    ToolsText label, one; // what the Library's list calls them, and one of them (its form's title)
     std::span<const Slot> slots;
     bool listed = true; // the Library lists them (sub-images are under their images, fonts under their files; places aren't)
 };
 
-constexpr DefinitionKind kDefinitionKinds[]{
+inline const DefinitionKind kDefinitionKinds[]{
     {.kind = "color", .label = "Colours", .one = "Colour", .slots = kColorSlots},
     {.kind = "style", .label = "Styles", .one = "Style", .slots = kStyleSlots},
     {.kind = "font", .label = "Font", .one = "Font", .slots = kFontSlots, .listed = false},
@@ -273,14 +299,18 @@ using View = DeveloperTools::View;
 // The Settings tab: config NAME, what the form calls it, its value without a config line, the words
 // it's one of (else it's typed) and what it does. One without a name is a heading.
 struct Setting {
-    std::string_view name, label, standard, choices, help;
+    std::string_view name;
+    ToolsText label;
+    std::string_view standard;
+    ToolsChoices choices;
+    ToolsText help;
     bool quoted = false;      // written in quotes
-    bool with = false;        // shares the row with the one before it (a title and its version, a shake's strength and time...)
+    bool with = false;        // shares the row with the one before it (a title and its version, the animations on show and hide...)
     Box box = Box::None;      // its box's kind: what it lists, what its buttons say and how it's written, as the same box everywhere
-    std::string_view suggest; // values it often has besides its kind's ("value:what it is")
+    ToolsSuggestions suggest; // values it often has besides its kind's ("value:what it is")
 };
 
-constexpr std::array kSettings{
+inline const std::array kSettings{
     Setting{.label = "Game"},
     Setting{.name = "title", .label = "Title", .standard = "VNext", .help = "The game's name: the window's title, and {title} on screens", .quoted = true, .box = Box::Text},
     Setting{.name = "version", .label = "Version", .standard = "1.0", .help = "{version} on screens", .quoted = true, .with = true, .box = Box::Text},
@@ -308,15 +338,9 @@ constexpr std::array kSettings{
     Setting{.label = "Images"},
     Setting{.name = "image_filter", .label = "Image scaling", .standard = "smooth", .choices = "smooth pixel", .help = "pixel: sharp pixels when images are scaled (pixel art)", .box = Box::ImageFilter},
     Setting{.name = "sprite_height", .label = "Character height", .standard = "95%", .help = "The tallest a character may be, of the screen's height", .box = Box::Percent},
-    Setting{.name = "show_transition", .label = "Show transition", .standard = "dissolve 0.25", .help = "show without with: fade, dissolve, wipe, slide or none, and seconds", .box = Box::TimedTransition},
-    Setting{.name = "hide_transition", .label = "Hide transition", .standard = "dissolve 0.25", .help = "The same for hide", .with = true, .box = Box::TimedTransition},
-    Setting{.name = "fade_time", .label = "Fade time", .standard = "1", .help = "Seconds of with fade without a length", .box = Box::Seconds},
-    Setting{.name = "dissolve_time", .label = "Dissolve time", .standard = "0.5", .help = "Seconds of with dissolve without a length", .with = true, .box = Box::Seconds},
+    Setting{.name = "show_animation", .label = "Animation on show", .help = "What characters and images play as they come, when their line names none", .box = Box::Animation},
+    Setting{.name = "hide_animation", .label = "Animation on hide", .help = "What characters and images play as they go, when their line names none", .with = true, .box = Box::Animation},
     Setting{.name = "move_time", .label = "Move time", .standard = "0.4", .help = "Seconds someone on stage takes to slide to another place", .box = Box::Seconds},
-    Setting{.name = "shake_strength", .label = "Shake strength", .standard = "12", .help = "How far shake moves the screen, in pixels", .box = Box::Pixels},
-    Setting{.name = "shake_time", .label = "Shake time", .standard = "0.5", .help = "Seconds a shake lasts", .with = true, .box = Box::Seconds},
-    Setting{.name = "flash_color", .label = "Flash colour", .standard = "white", .help = "The colour of flash", .box = Box::Colour},
-    Setting{.name = "flash_time", .label = "Flash time", .standard = "0.4", .help = "Seconds a flash lasts", .with = true, .box = Box::Seconds},
     Setting{.name = "preload", .label = "Lines to load ahead", .standard = "30", .help = "Story lines looked ahead for images to load early (0: none)", .box = Box::Count},
     Setting{.name = "image_memory", .label = "Image memory", .standard = "512", .help = "MB of images kept loaded (0: no limit)", .with = true, .box = Box::Count, .suggest = "0:no limit|256|512|1024"},
     Setting{.label = "Screens"},
@@ -348,7 +372,7 @@ constexpr std::array kSettings{
     Setting{.name = "default.auto_delay", .label = "Auto delay", .standard = "500", .help = "Milliseconds auto-forward waits after a line", .with = true, .box = Box::Count},
     Setting{.name = "default.textbox_opacity", .label = "Textbox opacity", .standard = "85%", .help = "How solid the textbox is", .box = Box::Opacity},
     Setting{.name = "default.text_size", .label = "Text size", .standard = "100%", .help = "For text that follows the setting", .with = true, .box = Box::Percent},
-    Setting{.name = "default.transitions", .label = "Transitions", .standard = "yes", .help = "Fades and wipes between images", .box = Box::YesNo},
+    Setting{.name = "default.animations", .label = "Animations", .standard = "yes", .help = "Things moving, fading and wiping (no: still)", .box = Box::YesNo},
     Setting{.name = "default.master_volume", .label = "Volume", .standard = "100%", .help = "All audio", .box = Box::Volume},
     Setting{.name = "default.music_volume", .label = "Music volume", .standard = "80%", .help = "Music", .with = true, .box = Box::Volume},
     Setting{.name = "default.sound_volume", .label = "Sound volume", .standard = "100%", .help = "Sounds that aren't music or a voice", .box = Box::Volume},
@@ -372,15 +396,19 @@ std::string scaled(const std::string& line, float sy);
 // and what it lists or is one of (the first of `choices`: not written). `is`: 'a', what it does (its
 // actions); 'c', a condition.
 struct PartOption {
-    std::string_view key, label;
+    std::string_view key;
+    ToolsText label;
     Box box = Box::None;
-    std::string_view choices, labels, hint, suggest;
+    ToolsChoices choices;
+    ToolsLabels labels;
+    ToolsHint hint;
+    ToolsSuggestions suggest;
     char is = 0;
-    std::string_view group; // the heading it starts in the form
+    ToolsGroup group; // the heading it starts in the form
     bool asStyle = false;   // a part's look: what it gets is its style's (its words say so, not "its base style")
 };
 
-constexpr PartOption kScreenOptions[]{
+inline const PartOption kScreenOptions[]{
     {.key = "modal", .label = "Story while open", .box = Box::YesNo, .choices = "yes no", .labels = "Waits|Goes on", .group = "While open"},
     {.key = "keyboard", .label = "Arrow-key navigation", .box = Box::YesNoSettings, .choices = "usual yes no", .labels = "When the story waits|Yes|No"},
     {.key = "on_show", .label = "Action on open", .hint = "None", .is = 'a', .group = "Opening and closing"},
@@ -396,7 +424,7 @@ constexpr PartOption kScreenOptions[]{
     {.key = "text_speed", .label = "Text speed", .box = Box::Speed, .hint = "1"},
 };
 
-constexpr PartOption kPartOptions[]{
+inline const PartOption kPartOptions[]{
     {.key = "action", .label = "Action on click", .hint = "None", .is = 'a'},
     {.key = "confirm", .label = "Confirmation question", .box = Box::Text},
     {.key = "load_confirm", .label = "Question before loading mid-game", .box = Box::Text},
@@ -475,15 +503,24 @@ constexpr PartOption kPartOptions[]{
     {.key = "gap_y", .label = "Spacing down", .box = Box::Pixels, .hint = "Default"},
 };
 
-constexpr std::string_view kPictureBy = "?", kPictureBySuggest = "?:depends on a variable";
+constexpr std::string_view kPictureBy = "?";
+inline const ToolsSuggestions kPictureBySuggest = "?:depends on a variable";
 
 // In a form's fields: where an empty box means "from its style", the style's value instead (a field is
 // named by its setting, or, a style's own form, by the setting's label).
 void showStyleValues(std::vector<StoryEditor::Field>& fields, const Style& style, const Palette& palette);
 
 // ...and in a story line's or a character's form: where an empty box means the setting in Settings
-// (a move's time, a shake's strength, a transition's seconds, blinking...), that value.
-void showConfigValues(std::vector<StoryEditor::Field>& fields, const GameConfig& config, const Palette& palette);
+// (a move's time, the animation on show, blinking...), that value.
+void showConfigValues(std::vector<StoryEditor::Field>& fields, const GameConfig& config);
+
+// Screen lines written in a game's pixels (for `width` x `height`), written in places and shares instead.
+std::vector<std::string> placesFromPixels(const std::vector<std::string>& lines, float width, float height);
+
+// Seconds as the editor writes them: at most two places, no zeros after them (0.5, 1.25, 2); and two
+// times the same to a hundredth.
+std::string secondsText(float seconds);
+inline bool sameMoment(float a, float b) { return std::abs(a - b) < 0.005f; }
 
 constexpr SDL_Color kPanel{16, 18, 28, 255}, kBar{30, 36, 56, 255}, kAccent{130, 200, 255, 255}, kButton{44, 52, 80, 255},
     kButtonHover{66, 82, 126, 255}, kEdge{92, 112, 168, 255}, kChosen{70, 92, 150, 255}, kBox{8, 9, 14, 255}, kGood{140, 230, 160, 255},
@@ -503,11 +540,13 @@ SDL_Event keyEvent(const SDL_KeyboardEvent& key);
 
 // The Library's files: each kind's list, what a file's form calls one, its folder and its file types.
 struct FileKind {
-    std::string_view id, label, one, folder;
+    std::string_view id;
+    ToolsText label, one;
+    std::string_view folder;
     std::span<const std::string_view> extensions;
 };
 
-constexpr FileKind kFileKinds[]{{"pictures", "Images", "Image", "images/", kImageTypes},
+inline const FileKind kFileKinds[]{{"pictures", "Images", "Image", "images/", kImageTypes},
                                 {"sounds", "Audio", "Audio", "audio/", kAudioTypes},
                                 {"movies", "Movies", "Movie", "movies/", kVideoTypes},
                                 {"fontfiles", "Fonts", "Font file", "fonts/", kFontTypes}};
