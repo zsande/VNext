@@ -627,3 +627,10 @@ template <ToolsLiteral L> ToolsGroup operator""_group() { return listedWords<L, 
 template <ToolsLiteral L> ToolsChoices operator""_choices() { return listedWords<L, TextShape::Choices>(); }
 
 } // namespace vn
+
+// A table's text in std::format: as the string_view it is (GCC 14's library doesn't see that by itself).
+template <vn::TextShape Shape> struct std::formatter<vn::ToolsWords<Shape>, char> : std::formatter<std::string_view, char> {
+    template <class Context> auto format(const vn::ToolsWords<Shape>& words, Context& context) const {
+        return std::formatter<std::string_view, char>::format(std::string_view(words), context);
+    }
+};
