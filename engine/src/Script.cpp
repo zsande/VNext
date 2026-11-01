@@ -1037,7 +1037,7 @@ private:
         }
         if (verb == "movie") { // movie NAME [loop] [skip=no] [volume 80%]
             cmd::Movie m{.file = c.next().value_or("")};
-            if (m.file.empty()) return fail(line, "Which video to play is missing."_tr());
+            if (m.file.empty()) return fail(line, "Which movie to play is missing."_tr());
             while (!c.done()) {
                 if (const Took t = amount(line, c, "volume", m.volume); t != Took::No) {
                     if (t == Took::Bad) return std::nullopt;
@@ -2202,7 +2202,7 @@ private:
             if (el.text.empty() && !el.colors.contains("bottom") && el.style.bg.a == 0) error(line, "Which image to show is missing."_tr());
             break;
         case ElementKind::Movie:
-            if (el.text.empty()) error(line, "Which video to play is missing."_tr());
+            if (el.text.empty()) error(line, "Which movie to play is missing."_tr());
             break;
         case ElementKind::Input:
         case ElementKind::Slider:

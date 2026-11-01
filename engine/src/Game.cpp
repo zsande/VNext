@@ -1536,7 +1536,7 @@ void Game::playMovie(const cmd::Movie& c, std::size_t here, bool fast) {
     if (!movie_ || !*movie_) {
         movie_.reset();
         logWarn("{}: {}", script_.where(script_.code[here]),
-                file ? std::format("Can't play '{}'.", *file) : std::format("There's no video called '{}'.", c.file));
+                file ? std::format("Can't play '{}'.", *file) : std::format("There's no movie called '{}'.", c.file));
         if (!config().developer) return; // players: the story goes on
         movieStandIn_ = c.file;    // a labelled card for a moment instead
         timer_ = 3.0f;

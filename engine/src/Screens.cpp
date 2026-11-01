@@ -2295,7 +2295,7 @@ void ScreenView::drawMovie(SDL_Renderer* r, std::size_t index, float alpha) {
                                                std::clamp(el.number("volume", 1.0f), 0.0f, 1.0f));
             if (!*st.movie) st.movie.reset();
         } else {
-            logWarn("There's no video called '{}'.", name);
+            logWarn("There's no movie called '{}'.", name);
         }
         st.movieTime = now();
     }

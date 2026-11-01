@@ -664,7 +664,7 @@ SDL_AudioStream* Audio::openStream(int rate, float volume) {
     Stream s{.stream = AudioStreamPtr(SDL_CreateAudioStream(&spec, &spec)), .track = nullptr, .gain = volume};
     if (s.stream) s.track.reset(MIX_CreateTrack(mixer_.get()));
     if (!s.track || !MIX_SetTrackAudioStream(s.track.get(), s.stream.get())) { // (it plays once there's sound in it: see update())
-        logWarn("Can't play the video's sound: {}.", SDL_GetError());
+        logWarn("Can't play the movie's sound: {}.", SDL_GetError());
         return nullptr;
     }
     MIX_SetTrackGain(s.track.get(), musicVolume_ * volume);
