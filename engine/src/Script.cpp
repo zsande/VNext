@@ -1898,7 +1898,7 @@ private:
             } else if (key == "frames_in_a_row") {
                 const auto n = number(line, value, key);
                 if (!n) return;
-                if (*n < 1.0f) return error(line, "'columns' needs a number from 1 up, not '{}'."_tr(*n));
+                if (*n < 1.0f) return error(line, "'frames_in_a_row' needs a number from 1 up, not '{}'."_tr(*n));
                 a.columns = static_cast<int>(*n);
             } else {
                 return error(line, "Atlases have no setting '{}'."_tr(key));
