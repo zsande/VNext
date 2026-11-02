@@ -95,7 +95,7 @@ jobs:
           esac
           shot() { [ -s "try/$1" ] || { echo "::error::There's no screenshot try/$1."; exit 1; }; }
           mkdir -p try/game/scripts
-          printf '%s\n' 'config title "Try it"' 'config save_id "vnext_try_it"' '' 'label start' \
+          printf '%s\n' 'setting title "Try it"' 'setting save_folder "vnext_try_it"' '' 'scene start' \
             '    This is the first line of the story.' '    And this is the second.' > try/game/scripts/main.vnscript
           player dist --help
           player dist --game try/game --data try/data --screenshot try/1-story.png && shot 1-story.png
@@ -104,7 +104,7 @@ jobs:
           ls -la "try/Try it"
           cp -R dist/. "try/Try it/" # (the player next to game.vnext, as players have it)
           made=$(wc -c < "try/Try it/game.vnext" | tr -d ' ')
-          player "try/Try it" --label start --screenshot try/3-packed.png && shot 3-packed.png # (no --data: its autosave goes into game.vnext)
+          player "try/Try it" --scene start --screenshot try/3-packed.png && shot 3-packed.png # (no --data: its autosave goes into game.vnext)
           played=$(wc -c < "try/Try it/game.vnext" | tr -d ' ')
           echo "game.vnext: $made bytes when packed, $played after playing it."
           [ "$played" -gt "$made" ] || { echo "::error::The autosave didn't go into game.vnext."; exit 1; }
