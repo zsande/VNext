@@ -1,5 +1,5 @@
 // What Linux offers the player, where the player's system has it: spelling (Hunspell, with the
-// dictionaries in /usr/share/hunspell), reading text aloud (speech-dispatcher) and videos other than
+// dictionaries in /usr/share/hunspell), reading text aloud (speech-dispatcher) and movies other than
 // MPEG-1 (GStreamer: MP4, MOV and M4V, with the plugins for them). Each library is looked for once by
 // its name; without it the player does as on any system without one (System.hpp says what each does;
 // Apple.mm and Windows.cpp are the Mac's and Windows' own). Nothing here needs those libraries' headers.
@@ -51,7 +51,7 @@ private:
     void* handle_ = nullptr;
 };
 
-// A file of its own in the temporary folder (a video from a pack, for the player library to open), deleted
+// A file of its own in the temporary folder (a movie from a pack, for the player library to open), deleted
 // when this goes.
 class TempFile {
 public:
@@ -66,7 +66,7 @@ public:
     // `bytes` in it, its name ending in `ending` (".mp4": what it is goes by its ending).
     bool write(const std::string& bytes, std::string_view ending) {
         const char* folder = std::getenv("TMPDIR");
-        std::string name = std::string(folder && *folder ? folder : "/tmp") + "/vnvideoXXXXXX" + std::string(ending);
+        std::string name = std::string(folder && *folder ? folder : "/tmp") + "/vnmovieXXXXXX" + std::string(ending);
         const int fd = mkstemps(name.data(), static_cast<int>(ending.size()));
         if (fd < 0) return false;
         path_ = name;
@@ -268,7 +268,7 @@ void speak(std::string_view words) {
 }
 
 // ---------------------------------------------------------------------------
-// Videos: GStreamer
+// Movies: GStreamer
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -378,7 +378,7 @@ using Pipeline = std::unique_ptr<GstElement, PipelineStop>;
 using Element = std::unique_ptr<GstElement, ElementUnref>;
 using Sample = std::unique_ptr<GstSample, SampleUnref>;
 
-class LinuxVideo final : public SystemVideo {
+class LinuxMovie final : public SystemMovie {
 public:
     bool start(const std::string& path, const std::string* data) {
         GStreamer& g = GStreamer::get();
@@ -392,20 +392,20 @@ public:
         char* uri = g.filenameToUri(file.c_str(), nullptr);
         if (!uri) return false;
         const ScopeExit _([&] { g.gFree(uri); });
-        // Pictures as blue, green, red and alpha; sound as two sides at kSoundRate, each read as soon
-        // as it's asked for (not at its time: the player times them). A few pictures wait at most.
+        // Images as blue, green, red and alpha; sound as two sides at kSoundRate, each read as soon
+        // as it's asked for (not at its time: the player times them). A few images wait at most.
         const std::string description =
             std::string("playbin uri=\"") + uri +
-            "\" video-sink=\"videoconvert ! video/x-raw,format=BGRA ! appsink name=pictures sync=false max-buffers=4\" "
+            "\" video-sink=\"videoconvert ! video/x-raw,format=BGRA ! appsink name=images sync=false max-buffers=4\" "
             "audio-sink=\"audioconvert ! audioresample ! audio/x-raw,format=F32LE,channels=2,rate=48000,layout=interleaved ! appsink name=sound sync=false\"";
         pipeline_ = Pipeline(g.parseLaunch(description.c_str(), nullptr));
         if (!pipeline_) return false;
-        pictures_ = Element(g.byName(pipeline_.get(), "pictures"));
+        images_ = Element(g.byName(pipeline_.get(), "images"));
         sound_ = Element(g.byName(pipeline_.get(), "sound"));
-        if (!pictures_ || g.setState(pipeline_.get(), GStreamer::kPaused) == GStreamer::kFailure) return false;
+        if (!images_ || g.setState(pipeline_.get(), GStreamer::kPaused) == GStreamer::kFailure) return false;
         int state = 0, pending = 0;
         if (g.getState(pipeline_.get(), &state, &pending, 5 * GStreamer::kSecond) == GStreamer::kFailure) return false;
-        const Sample first{g.pullPreroll(pictures_.get(), 5 * GStreamer::kSecond)};
+        const Sample first{g.pullPreroll(images_.get(), 5 * GStreamer::kSecond)};
         if (!first) return false;
         int w = 0, h = 0, num = 0, den = 1;
         if (const GstStructure* s = g.capsStructure(g.sampleCaps(first.get()), 0)) {
@@ -425,9 +425,9 @@ public:
         return g.setState(pipeline_.get(), GStreamer::kPlaying) != GStreamer::kFailure;
     }
 
-    bool nextPicture(std::vector<std::uint8_t>& pixels, int& pitch, double& time) override {
+    bool nextImage(std::vector<std::uint8_t>& pixels, int& pitch, double& time) override {
         GStreamer& g = GStreamer::get();
-        const Sample sample{g.pullSample(pictures_.get(), 2 * GStreamer::kSecond)};
+        const Sample sample{g.pullSample(images_.get(), 2 * GStreamer::kSecond)};
         if (!sample) return false; // (the end, or nothing came)
         GstBuffer* buffer = g.sampleBuffer(sample.get());
         GstMapInfo bytes;
@@ -437,7 +437,7 @@ public:
         const std::size_t size = static_cast<std::size_t>(pitch) * static_cast<std::size_t>(height_);
         if (bytes.size < size) return false;
         pixels.assign(bytes.data, bytes.data + size);
-        time = static_cast<double>(frames_++) * frameTime_; // (each picture's time, by the frame rate)
+        time = static_cast<double>(frames_++) * frameTime_; // (each image's time, by the frame rate)
         return true;
     }
 
@@ -464,7 +464,7 @@ public:
 private:
     TempFile temp_;       // (before the pipeline: it goes after it, once the file's closed)
     Pipeline pipeline_;   // (before its parts: they go first)
-    Element pictures_, sound_;
+    Element images_, sound_;
     int width_ = 0, height_ = 0;
     double frameTime_ = 1.0 / 30;
     std::uint64_t frames_ = 0;
@@ -473,10 +473,10 @@ private:
 
 } // namespace
 
-std::unique_ptr<SystemVideo> SystemVideo::open(const std::string& path, const std::string* data) {
-    auto video = std::make_unique<LinuxVideo>();
-    if (!video->start(path, data)) return nullptr;
-    return video;
+std::unique_ptr<SystemMovie> SystemMovie::open(const std::string& path, const std::string* data) {
+    auto movie = std::make_unique<LinuxMovie>();
+    if (!movie->start(path, data)) return nullptr;
+    return movie;
 }
 
 } // namespace vn

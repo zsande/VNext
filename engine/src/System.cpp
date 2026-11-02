@@ -114,7 +114,7 @@ std::string eachLetter(std::string_view s, char32_t (*f)(char32_t), bool firstOn
 } // namespace
 
 // `s` in small letters (ASCII, and the alphabets lowerOf() knows), so names compare the same
-// however they're capitalized: Őrs is ŐRS and őrs.
+// however they're capitalised: Őrs is ŐRS and őrs.
 std::string lower(std::string_view s) { return eachLetter(s, lowerOf); }
 std::string upper(std::string_view s) { return eachLetter(s, upperOf); }
 std::string upperFirst(std::string_view s) { return eachLetter(s, upperOf, true); }
@@ -178,9 +178,9 @@ std::optional<bool> parseBool(std::string_view s) {
 
 namespace {
 // The built-in colours, by name.
-const Palette& colorNames() {
+const Palette& colourNames() {
     static const Palette names{
-        {"white", {255, 255, 255, 255}},   {"black", {0, 0, 0, 255}},         {"gray", {128, 128, 128, 255}},
+        {"white", {255, 255, 255, 255}},   {"black", {0, 0, 0, 255}},         {"grey", {128, 128, 128, 255}},
         {"grey", {128, 128, 128, 255}},    {"silver", {192, 192, 200, 255}},  {"red", {230, 60, 60, 255}},
         {"darkred", {140, 20, 30, 255}},   {"orange", {255, 150, 50, 255}},   {"gold", {255, 211, 110, 255}},
         {"yellow", {255, 230, 80, 255}},   {"lime", {180, 240, 120, 255}},    {"green", {70, 180, 90, 255}},
@@ -195,8 +195,8 @@ const Palette& colorNames() {
 }
 } // namespace
 
-std::optional<SDL_Color> parseColor(std::string_view text, const Palette* palette) {
-    const Palette& names = colorNames();
+std::optional<SDL_Color> parseColour(std::string_view text, const Palette* palette) {
+    const Palette& names = colourNames();
     const std::string key = lower(trim(text));
     if (palette)
         if (auto it = palette->find(key); it != palette->end()) return it->second;
@@ -225,16 +225,16 @@ std::optional<std::pair<SDL_Color, SDL_Color>> parseGradient(std::string_view te
     const std::string_view key = trim(text);
     const auto dash = key.find('-', 1);
     if (dash == std::string_view::npos) return std::nullopt;
-    const auto top = parseColor(key.substr(0, dash), palette), bottom = parseColor(key.substr(dash + 1), palette);
+    const auto top = parseColour(key.substr(0, dash), palette), bottom = parseColour(key.substr(dash + 1), palette);
     if (!top || !bottom) return std::nullopt;
     return std::pair{*top, *bottom};
 }
 
-std::string colorWords(std::string_view value, const Palette* palette) {
+std::string colourWords(std::string_view value, const Palette* palette) {
     auto one = [&](std::string_view v) {
         v = trim(v);
-        const auto c = parseColor(v, palette);
-        return c && v.starts_with('#') ? colorName(*c, palette) : std::string(v);
+        const auto c = parseColour(v, palette);
+        return c && v.starts_with('#') ? colourName(*c, palette) : std::string(v);
     };
     if (const auto dash = value.find('-', 1); dash != std::string_view::npos && parseGradient(value, palette))
         return one(value.substr(0, dash)) + " down to " + one(value.substr(dash + 1));
@@ -249,21 +249,21 @@ std::array<float, 3> hsvOf(SDL_Color c) {
     return {h * 60.0f, hi > 0.0f ? d / hi : 0.0f, hi};
 }
 
-std::string colorName(SDL_Color c, const Palette* palette) {
+std::string colourName(SDL_Color c, const Palette* palette) {
     if (c.a == 0) return "transparent";
     auto same = [&](SDL_Color o) { return o.r == c.r && o.g == c.g && o.b == c.b; };
     const std::string amount = c.a == 255 ? std::string{} : std::format(", {}%", (c.a * 100 + 127) / 255);
     if (palette)
-        for (const auto& [name, color] : *palette)
-            if (same(color)) return name + (color.a == c.a ? "" : amount);
+        for (const auto& [name, colour] : *palette)
+            if (same(colour)) return name + (colour.a == c.a ? "" : amount);
     // Hue, saturation and value: which built-in colour it's most like (a grey's hue means nothing).
     const auto [h, s, v] = hsvOf(c);
     std::string nearest;
     float best = std::numeric_limits<float>::max();
-    for (const auto& [name, color] : colorNames()) {
-        if (color.a == 0 || name == "grey") continue;
-        if (same(color)) return name + amount;
-        const auto [h2, s2, v2] = hsvOf(color);
+    for (const auto& [name, colour] : colourNames()) {
+        if (colour.a == 0 || name == "grey") continue;
+        if (same(colour)) return name + amount;
+        const auto [h2, s2, v2] = hsvOf(colour);
         float dh = std::fabs(h - h2);
         if (dh > 180.0f) dh = 360.0f - dh;
         const float hue = dh / 180.0f * 3.0f * std::min(s, s2), ds = s - s2, dv = (v - v2) * 1.5f; // (the hue counts most)
@@ -444,12 +444,12 @@ std::optional<std::string> decompress(std::string_view in, std::uint64_t size) {
     return out;
 }
 
-// Files that are compressed already (pictures, sound, video) are packed as they are.
+// Files that are compressed already (images, sound, movie) are packed as they are.
 bool compressible(std::string_view path) {
     const auto dot = path.find_last_of('.');
     const std::string ext = dot == std::string_view::npos ? std::string() : lower(path.substr(dot));
     static constexpr std::string_view kPacked[]{".png", ".jpg", ".jpeg", ".gif", ".qoi", ".ogg", ".mp3", ".flac"};
-    return !std::ranges::contains(kPacked, ext) && !std::ranges::contains(kVideoTypes, ext);
+    return !std::ranges::contains(kPacked, ext) && !std::ranges::contains(kMovieTypes, ext);
 }
 
 // Every file in folder + sub, by its path from folder, but saves/, packs and hidden files.
@@ -816,7 +816,7 @@ void SaveStore::configure(int pages, int slotsPerPage) {
 
 namespace {
 
-constexpr std::string_view kThumbnail = "thumbnail png "; // then its size in bytes, a newline and the picture
+constexpr std::string_view kThumbnail = "thumbnail png "; // then its size in bytes, a newline and the image
 
 std::string pngBytes(SDL_Surface* surface) {
     std::string out;
@@ -987,7 +987,7 @@ namespace {
 
 int percent(float v) { return static_cast<int>(std::lround(std::clamp(v, 0.0f, 1.0f) * 100.0f)); }
 
-// The settings kept in settings.txt and set by "config default.NAME" (by the same names), and
+// The settings kept in settings.txt and set by "setting default.NAME" (by the same names), and
 // the numbers they can be.
 struct Field {
     std::string_view name;
@@ -1005,7 +1005,7 @@ constexpr Field kFields[]{
     {"music_volume", &Settings::musicVolume, 0, 100},
     {"sound_volume", &Settings::soundVolume, 0, 100},
     {"voice_volume", &Settings::voiceVolume, 0, 100},
-    {"babble", &Settings::babble},
+    {"made_up_voices", &Settings::madeUpVoices},
     {"typing_sounds", &Settings::typingSounds},
     {"mouths", &Settings::mouths, 0, 2},
     {"text_speed", &Settings::textSpeed, 0, 1000},
@@ -1019,6 +1019,7 @@ constexpr Field kFields[]{
     {"skip_movies", &Settings::skipMovies},
     {"read_aloud", &Settings::readAloud},
     {"high_contrast", &Settings::highContrast},
+    {"vibration", &Settings::vibration},
 };
 
 } // namespace
@@ -1028,6 +1029,8 @@ std::optional<int> Settings::get(std::string_view key) const {
     if (f == std::end(kFields)) return std::nullopt;
     return std::visit([&](auto field) { return static_cast<int>(this->*field); }, f->field);
 }
+
+bool Settings::has(std::string_view key) { return std::ranges::find(kFields, key, &Field::name) != std::end(kFields); }
 
 bool Settings::set(std::string_view key, int v) {
     const auto f = std::ranges::find(kFields, key, &Field::name);
@@ -1098,7 +1101,7 @@ const SettingControl* findSettingControl(std::string_view name) {
     auto volume = [](int Settings::*field, bool test) {
         return SettingControl{.value = [=](const Settings& s) { return static_cast<float>(s.*field) / 100.0f; },
                               .setValue = [=](Settings& s, float v) { s.*field = percent(v); },
-                              .text = [=](const Settings& s, const GameConfig&) { return std::format("{}%", s.*field); },
+                              .text = [=](const Settings& s, const GameSettings&) { return std::format("{}%", s.*field); },
                               .testSound = test};
     };
     static const std::map<std::string, SettingControl, std::less<>> controls{
@@ -1106,16 +1109,16 @@ const SettingControl* findSettingControl(std::string_view name) {
          // 10..150 characters per second in steps of 5; the far right end is "instant"
          {.value = [](const Settings& s) { return s.textSpeed == 0 ? 1.0f : static_cast<float>(s.textSpeed - 10) / 140.0f * 0.95f; },
           .setValue = [](Settings& s, float v) { s.textSpeed = v >= 0.975f ? 0 : 10 + 5 * static_cast<int>(std::lround(std::min(v / 0.95f, 1.0f) * 28.0f)); },
-          .text = [](const Settings& s, const GameConfig&) { return std::to_string(s.textSpeed); }}}, // (0: instant)
+          .text = [](const Settings& s, const GameSettings&) { return std::to_string(s.textSpeed); }}}, // (0: instant)
         {"auto_delay",
          {.value = [](const Settings& s) { return static_cast<float>(s.autoDelay - 300) / 4700.0f; },
           .setValue = [](Settings& s, float v) { s.autoDelay = 300 + 100 * static_cast<int>(std::lround(std::clamp(v, 0.0f, 1.0f) * 47.0f)); },
-          .text = [](const Settings& s, const GameConfig&) { return std::format("{}.{}", s.autoDelay / 1000, s.autoDelay % 1000 / 100); }}},
+          .text = [](const Settings& s, const GameSettings&) { return std::format("{}.{}", s.autoDelay / 1000, s.autoDelay % 1000 / 100); }}},
         {"textbox_opacity", volume(&Settings::textboxOpacity, false)},
         {"text_size",
          {.value = [](const Settings& s) { return static_cast<float>(s.textSize - 75) / 75.0f; }, // 75% to 150% in steps of 5
           .setValue = [](Settings& s, float v) { s.textSize = 75 + 5 * static_cast<int>(std::lround(std::clamp(v, 0.0f, 1.0f) * 15.0f)); },
-          .text = [](const Settings& s, const GameConfig&) { return std::format("{}%", s.textSize); }}},
+          .text = [](const Settings& s, const GameSettings&) { return std::format("{}%", s.textSize); }}},
         {"master_volume", volume(&Settings::masterVolume, true)},
         {"music_volume", volume(&Settings::musicVolume, false)},
         {"sound_volume", volume(&Settings::soundVolume, true)},
@@ -1203,7 +1206,7 @@ bool spelledRight(std::string_view, std::string_view) { return true; }
 std::vector<std::string> spellings(std::string_view, std::string_view) { return {}; }
 void learnSpelling(std::string_view) {}
 void speak(std::string_view) {}
-std::unique_ptr<SystemVideo> SystemVideo::open(const std::string&, const std::string*) { return nullptr; }
+std::unique_ptr<SystemMovie> SystemMovie::open(const std::string&, const std::string*) { return nullptr; }
 #endif
 
 } // namespace vn

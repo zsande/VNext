@@ -10,6 +10,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -28,12 +29,12 @@ void rect(SDL_Renderer* r, const SDL_FRect& rect, SDL_Color c);
 void outline(SDL_Renderer* r, const SDL_FRect& rect, SDL_Color c);
 void gradient(SDL_Renderer* r, const SDL_FRect& rc, SDL_Color top, SDL_Color bottom);
 void circle(SDL_Renderer* r, float cx, float cy, float radius, SDL_Color c);
-void quad(SDL_Renderer* r, SDL_FPoint a, SDL_FPoint b, SDL_FPoint c, SDL_FPoint d, SDL_Color color);
+void quad(SDL_Renderer* r, SDL_FPoint a, SDL_FPoint b, SDL_FPoint c, SDL_FPoint d, SDL_Color colour);
 SDL_Color hsv(float h, float s, float v, Uint8 alpha = 255);
 } // namespace draw
 
 // Something drawn with only part of it showing, as an animation's wipe has it (Animation::Look::wipe):
-// `shown` of it, straight from the left of `box`, or where the picture `shape` is darkest first (its
+// `shown` of it, straight from the left of `box`, or where the image `shape` is darkest first (its
 // pixels stretched over `box`, softly at the edge). paint() draws it as it is; `canvas`: the game's
 // size, what the drawing's places are in. Where the graphics can't shape it, a straight one.
 class Wiper {
@@ -48,8 +49,8 @@ public:
               const std::function<void()>& paint);
 
 private:
-    // A shape's picture as read (at most 480 across): how bright each pixel is, the mask made of them, and
-    // how much that shows now. (No texture: the picture can't be read, or the graphics can't cut with it.)
+    // A shape's image as read (at most 480 across): how bright each pixel is, the mask made of them, and
+    // how much that shows now. (No texture: the image can't be read, or the graphics can't cut with it.)
     struct Mask {
         std::vector<Uint8> brightness;
         int w = 0, h = 0;
@@ -99,7 +100,7 @@ public:
 
     // White glyphs, physical pixel size; tint with SDL_SetTextureColorMod.
     [[nodiscard]] TexturePtr render(SDL_Renderer* renderer, std::string_view text) const;
-    void drawFallback(SDL_Renderer* renderer, float x, float y, std::string_view text, SDL_Color color) const;
+    void drawFallback(SDL_Renderer* renderer, float x, float y, std::string_view text, SDL_Color colour) const;
 
 private:
     [[nodiscard]] float fallbackScale() const;
@@ -118,10 +119,10 @@ private:
 };
 
 // A styled range of a TextBlock's text, in codepoints: colour, bold / italic / underline /
-// strike (TTF_STYLE_* bits) and furigana (a reading shown small above it).
+// crossed out (TTF_STYLE_* bits) and furigana (a reading shown small above it).
 struct TextSpan {
     std::size_t begin = 0, end = 0;
-    std::optional<SDL_Color> color;
+    std::optional<SDL_Color> colour;
     TTF_FontStyleFlags style = 0;
     std::string ruby;
 };
@@ -143,27 +144,28 @@ public:
     void setSpans(std::vector<TextSpan> spans);
     [[nodiscard]] const std::string& text() const { return text_; }
     [[nodiscard]] SDL_FPoint size();
+    [[nodiscard]] std::size_t lines(); // how many it takes
     [[nodiscard]] std::size_t length(); // codepoints in the text
     // How much to show when `reveal` codepoints are typed out: in Word and Line mode the word or
     // line being typed appears whole.
-    [[nodiscard]] std::size_t visible(std::size_t reveal, Reveal mode);
+    [[nodiscard]] std::size_t visible(std::size_t reveal, TextAppears mode);
 
     // Where codepoints [begin, end) are, a box on each row they're on, as drawn by draw() at 0, 0
     // (words that can be clicked).
     [[nodiscard]] std::vector<SDL_FRect> boxes(std::size_t begin, std::size_t end);
 
     // `reveal`: how many codepoints of the text (counting spaces and line breaks) are visible.
-    void draw(SDL_Renderer* renderer, float x, float y, SDL_Color color, std::size_t reveal = kAll,
+    void draw(SDL_Renderer* renderer, float x, float y, SDL_Color colour, std::size_t reveal = kAll,
               const TextShadow& shadow = {});
-    // Each line positioned inside `box` by `align` / `valign` (0 = start, 0.5 = centre, 1 = end).
-    void drawIn(SDL_Renderer* renderer, const SDL_FRect& box, float align, float valign, SDL_Color color,
+    // Each line positioned inside `box` by `align` / `alignVertically` (0 = start, 0.5 = centre, 1 = end).
+    void drawIn(SDL_Renderer* renderer, const SDL_FRect& box, float align, float alignVertically, SDL_Color colour,
                 std::size_t reveal = kAll, const TextShadow& shadow = {});
 
 private:
     struct Piece { // a run of one style, colour and direction on a line
         std::size_t begin = 0, end = 0; // codepoints, from the line's start
         TTF_FontStyleFlags style = 0;
-        std::optional<SDL_Color> color;
+        std::optional<SDL_Color> colour;
         int level = 0;                  // odd: right to left (Arabic, Hebrew...)
         float x = 0.0f, width = 0.0f;   // x: where it is on the line (pieces are in reading order, not left to right)
         std::vector<float> advance; // advance[i] = width of its first i+1 codepoints (made when needed)
@@ -172,7 +174,7 @@ private:
     struct Ruby {
         std::string text;
         std::size_t end = 0;  // shown once the line's first `end` codepoints are
-        float center = 0.0f;  // over this x, from the line's start
+        float centre = 0.0f;  // over this x, from the line's start
         TexturePtr texture;
     };
     struct Line {
@@ -193,7 +195,7 @@ private:
     [[nodiscard]] bool canBreakBefore(std::size_t i, std::size_t from, std::size_t to) const;
     [[nodiscard]] float measure(std::size_t from, std::size_t to) const; // codepoints of the text, in their styles
     [[nodiscard]] std::string_view slice(std::size_t from, std::size_t to) const;
-    void drawLines(SDL_Renderer* renderer, float x0, float y, float align, float width, SDL_Color color,
+    void drawLines(SDL_Renderer* renderer, float x0, float y, float align, float width, SDL_Color colour,
                    std::size_t reveal, const TextShadow& shadow);
     [[nodiscard]] float lineStep() const;
 
@@ -206,7 +208,7 @@ private:
     std::vector<std::size_t> offsets_; // byte offset of each codepoint (and the end)
     std::vector<Uint32> codes_;        // the codepoints
     std::vector<TTF_FontStyleFlags> styles_; // each codepoint's style bits
-    std::vector<std::optional<SDL_Color>> colors_;
+    std::vector<std::optional<SDL_Color>> colours_;
     std::uint32_t generation_ = std::numeric_limits<std::uint32_t>::max();
     std::size_t length_ = 0;
     SDL_FPoint size_{};
@@ -259,65 +261,124 @@ public:
     ScreenView& operator=(ScreenView&&) VN_DELETED("its lookups point at it");
     ~ScreenView() = default;
 
-    [[nodiscard]] const std::string& name() const { return def_->name; }
-    [[nodiscard]] bool modal() const { return def_->modal; }
-    [[nodiscard]] const ScreenDef& def() const { return *def_; }
+    [[nodiscard]] const std::string& name() const { return source_->name; }
+    [[nodiscard]] bool modal() const { return source_->storyWaits; }
+    [[nodiscard]] const ScreenDef& def() const { return *source_; } // (the script's: a list's parts once)
     void reset(); // forget focus, scrolling and dragging (when the screen opens again)
-    void opened(); // its show_animation= starts (reset() does this too)
-    void leave();  // it's closing: its hide_animation= plays (it's drawn, but takes no input)
+    void opened(); // its animation_on_open= starts (reset() does this too)
+    void leave();  // it's closing: its animation_on_close= plays (it's drawn, but takes no input)
     [[nodiscard]] bool leaving() const; // ...until that's over
     [[nodiscard]] bool hasLeft() const { return leftSince_.has_value(); } // (since leave(), until it opens again)
     // The animations it plays this time it's open (open ... with NAME and close with NAME), instead of its
-    // own show_animation= and hide_animation=: until it's opened again. Empty: its own; null: none.
+    // own animation_on_open= and animation_on_close=: until it's opened again. Empty: its own; null: none.
     using Played = std::optional<std::shared_ptr<const Animation>>;
     // The animation `name` in `script`, as one opening plays it (none said: its own; one it doesn't
     // have, or "none": none).
     [[nodiscard]] static Played animationIn(const Script* script, const std::optional<std::string>& name);
     void playWith(Played opening, Played closing);
-    [[nodiscard]] const Animation* showAnimation() const { return opening_ ? opening_->get() : def_->showAnimation.get(); }
-    [[nodiscard]] const Animation* hideAnimation() const { return closing_ ? closing_->get() : def_->hideAnimation.get(); }
+    [[nodiscard]] const Animation* showAnimation() const { return opening_ ? opening_->get() : def_->animationOnOpen.get(); }
+    [[nodiscard]] const Animation* hideAnimation() const { return closing_ ? closing_->get() : def_->animationOnClose.get(); }
     [[nodiscard]] bool startsCovered() const; // its show animation begins with everything covered by a colour (fade=)
     [[nodiscard]] bool endsCovered() const;   // its hide animation ends with everything covered (fade=)
     void draw(SDL_Renderer* r, float alpha = 1.0f);
-    // After a frame: its videos that weren't drawn in it stop (the screen was closed or hidden).
+    // After a frame: its movies that weren't drawn in it stop (the screen was closed or hidden).
     void endFrame(std::uint64_t frame);
-    // Returns true when the event was used (modal screens use every input event).
+    // Returns true when the event was used (screens with story=waits use every input event).
     bool handleEvent(const SDL_Event& e);
-    // The editor's view of the last draw: whether part `index` was drawn (its if= let it), and where
-    // (its box, or for one sized by its text, the text's).
-    [[nodiscard]] bool drawn(std::size_t index) const { return index < drawn_.size() && drawn_[index]; }
-    [[nodiscard]] SDL_FRect bounds(std::size_t index);
-    // Where part `index` is now (its box, as laid out), and a part's index from the part itself.
-    [[nodiscard]] SDL_FRect& rectOf(std::size_t index) { return state_[index].rect; }
-    [[nodiscard]] const SDL_FRect& rectOf(std::size_t index) const { return state_[index].rect; }
-    [[nodiscard]] std::size_t indexOf(const Element& el) const { return static_cast<std::size_t>(&el - def_->elements.data()); }
-    // The style part `index` is drawn with: its own, or the one its animation makes of it for the moment.
-    [[nodiscard]] const Style& styleOf(std::size_t index) const { return state_[index].styled ? *state_[index].styled : def_->elements[index].style; }
+    // A click or the wheel on one of its parts that shows something (the phone's panel, a text, an image; not
+    // an empty container's box): it isn't the story's (an opened screen that lets the story go on keeps it).
+    [[nodiscard]] bool catches(const SDL_Event& e);
+    // The event it just took was a tap on a scrolling part (pressed and let go without dragging) on nothing
+    // to click: where a click elsewhere would be the story's, so is this one (the phone in a chat scene).
+    bool takeTapped() { return std::exchange(tapped_, false); }
+    // The editor's view of the last draw, by the script's part (its index in def(); one in a list: as its first
+    // item has it): whether it was drawn (its when= let it), where (its box, or for one sized by its text, the
+    // text's), its box as laid out, the box it's in, and a part's index from the part itself.
+    [[nodiscard]] bool drawnPart(std::size_t part) const;
+    [[nodiscard]] SDL_FRect partBounds(std::size_t part);
+    [[nodiscard]] SDL_FRect partRect(std::size_t part) const;
+    [[nodiscard]] SDL_FRect partBox(std::size_t part) const;
+    [[nodiscard]] std::size_t partIndex(const Element& el) const { return static_cast<std::size_t>(&el - source_->elements.data()); }
     // The words of what the mouse (or the keys) is on: a button's label or an option (read aloud);
     // empty when it's on nothing.
     [[nodiscard]] std::string pointedText();
-    // A button's click_animation= is over: what it does (and its question first), to run. None when
-    // the button (or its screen) went away meanwhile.
-    [[nodiscard]] std::optional<std::pair<Commands, std::string>> takePressed();
-    // What the buttons that came to be chosen because of their selected= set (set VARIABLE to VALUE,
+    // A button's click_animation= is over: what it does (and its question first, and its list item's values
+    // when it's in one), to run. None when the button (or its screen) went away meanwhile.
+    struct Pressed {
+        Commands actions;
+        std::string confirm;
+        Variables item;
+    };
+    [[nodiscard]] std::optional<Pressed> takePressed();
+    // What the buttons that came to be chosen because of their chosen= set (set VARIABLE to VALUE,
     // setting NAME VALUE), to put in effect as if they were clicked: a choice that shows is the one that
     // holds. Their other actions (opening a screen, music, quitting...) run only when they're clicked.
     // Gathered as the screen is drawn: once a button becomes chosen, and again each time the screen opens.
     [[nodiscard]] Commands takeChosen() { return std::exchange(chosen_, {}); }
     // The drag= of the button the player holds, if any ({dragging}).
     [[nodiscard]] std::string held() const { return held_ ? def_->elements[*held_].option("drag") : std::string{}; }
-    // The box part `index` is in, where it is now: the part it's in, or the screen (its x and y are places
-    // in it, its w and h shares of it).
-    [[nodiscard]] SDL_FRect boxOf(std::size_t index) const;
+
     // The mouse went down on one of its buttons: it's clicked if it comes up there (the engine gives
     // this screen the mouse's coming up).
     [[nodiscard]] bool pressing() const { return pressing_.has_value(); }
 
 private:
+    // Part `index` as it is now (in a screen with lists: their parts once for each item): whether it was drawn,
+    // where (as bounds() above), its box as laid out, the box it's in (the part it's in, or the screen: its x
+    // and y are places in it, its w and h shares of it), and a part's index from the part itself.
+    [[nodiscard]] bool drawn(std::size_t index) const { return index < drawn_.size() && drawn_[index]; }
+    [[nodiscard]] SDL_FRect bounds(std::size_t index);
+    [[nodiscard]] SDL_FRect& rectOf(std::size_t index) { return state_[index].rect; }
+    [[nodiscard]] const SDL_FRect& rectOf(std::size_t index) const { return state_[index].rect; }
+    [[nodiscard]] SDL_FRect boxOf(std::size_t index) const;
+    [[nodiscard]] std::size_t indexOf(const Element& el) const { return static_cast<std::size_t>(&el - def_->elements.data()); }
+    // The style part `index` is drawn with: its own, or the one its animation makes of it for the moment.
+    [[nodiscard]] const Style& styleOf(std::size_t index) const { return state_[index].styled ? *state_[index].styled : def_->elements[index].style; }
+
+    // Lists (list=): a container's parts once for each item of one of the phone's lists, in a box of their own
+    // each (an item's box: a container of the list's, as wide as it shares out, as high as item_height= or
+    // its parts), one after another. own_ is the screen so (def_ points at it; without lists, at source_).
+    // For each part of it: the script's part it is (an item's box: none), its item's values ({chat.name}...:
+    // its list's item's, and those of the lists it's in), and what it's called across changes (its state,
+    // focus and the like go with that). expand(): again for what the lists hold now (before each draw).
+    const ScreenDef* source_;
+    ScreenDef own_;
+    bool hasLists_ = false;
+    std::vector<std::size_t> sourceOf_, firstOf_;
+    std::vector<std::shared_ptr<const Variables>> bound_;
+    std::vector<std::string> keyOf_;
+    std::map<std::string, std::string, std::less<>> listContext_; // each list's last chat...: new items there play item_animation=
+    void expand();
+    struct ListItem {
+        std::string key;
+        Variables values;
+    };
+    // A list's items now; `context`: what they're of (a chat's name...).
+    [[nodiscard]] std::vector<ListItem> listItems(const Element& list, std::string& context);
+    void seen(const Element& list);                       // what it shows has been seen (messages read, missed calls seen...)
+    [[nodiscard]] bool isItemBox(std::size_t index) const { return index < sourceOf_.size() && sourceOf_[index] == SIZE_MAX; }
+    [[nodiscard]] Variables itemOf(std::size_t index) const; // its item's values (none: not in a list)
+    // While one lives, lookup_ sees part `index`'s item's values first.
+    std::size_t current_ = SIZE_MAX;
+    struct Bound {
+        ScreenView& view;
+        std::size_t was;
+        Bound(ScreenView& v, std::size_t index) : view(v), was(std::exchange(v.current_, index)) {}
+        ~Bound() { view.current_ = was; }
+        Bound(const Bound&) = delete;
+        Bound& operator=(const Bound&) = delete;
+    };
+    [[nodiscard]] bool stacks(std::size_t index, bool* down = nullptr) const; // its parts go one after another (stack=; an item's box: its list's)
+    // A text's width_at_most=, in pixels (0: none): a share of the box it's in (a box whose width comes from its
+    // parts, fit=parts without a width: of the one that one's in).
+    [[nodiscard]] float widest(std::size_t index) const;
+    // What part `index`'s width= (`across`) or height= is a share of: the box it's in, or for one in a box that's as
+    // big as its parts that way (fit=parts without a size, an item's box without item_height=) the box that one's in.
+    [[nodiscard]] float shareOf(std::size_t index, bool across) const;
+
     enum class Look : std::uint8_t { Idle, Hover, Selected, Disabled };
     // What can be clicked: a part, or one of its items (a choice, a tab, a save...), or a small
-    // button on an item: a save's delete button, a history line's "hear it again" and "go back", or
-    // an option of an item: an answer to a message.
+    // button on an item: a save's delete button, a history line's "hear it again" and "go back".
     enum class Button : std::uint8_t { None, Delete, Voice, Back };
     struct Spot {
         std::size_t element = 0;
@@ -331,17 +392,17 @@ private:
         SDL_FRect rect;
         bool keyboard; // reachable with the arrow keys
     };
-    // Lists and grids (choices, saves, the gallery, endings, the chart...): columns= item_w= item_h=
-    // gap= (or gap_x= and gap_y=), with these defaults (an itemW of 0: the part's width shared out).
+    // Lists and grids (choices, saves, the gallery, endings, the flowchart...): columns= item_width= item_height=
+    // spacing= (or spacing_across= and spacing_down=), with these defaults (an itemW of 0: the part's width shared out).
     struct Grid {
         int columns = 1;
         float itemW = 0, itemH = 0, gapX = 0, gapY = 0;
         [[nodiscard]] SDL_FRect cell(const SDL_FRect& area, std::size_t i, float scroll = 0.0f) const;
         [[nodiscard]] float height(std::size_t items) const; // of all the rows
     };
-    // (item_w=, gap=... are shares of the box the part is in; without them, these pixels)
+    // (item_width=, spacing=... are shares of the box the part is in; without them, these pixels)
     [[nodiscard]] Grid grid(const Element& el, Grid defaults) const;
-    [[nodiscard]] float share(const Element& el, std::string_view key, bool across, float fallback) const; // (name_w=, wide_w=...)
+    [[nodiscard]] float share(const Element& el, std::string_view key, bool across, float fallback) const; // (name_width=, wide_tab_width=...)
     void layout(); // where each part is now (its place and size in its box)
     struct ElementState {
         SDL_FRect rect{}; // where the part is on the screen, in the game's pixels (laid out every frame; w/h 0: automatic)
@@ -355,23 +416,26 @@ private:
         float movieTime = 0.0f;       // the engine's time when it last played
         std::uint64_t movieFrame = 0; // the frame it was last drawn in
         float panX = 0.0f;            // the flowchart: how far it's been moved sideways
-        bool centered = false;        // ...and whether it has been moved to the current place yet
+        bool centred = false;        // ...and whether it has been moved to the current place yet
         std::vector<std::string> ids; // ...the place each item goes to
         std::optional<float> since;     // a part with an animation: when it showed (its animation starts then)
         std::optional<float> clicked;   // a button with click_animation=: when it was clicked (it plays from then)
-        float hover = 0.0f;             // a part with hover_animation=: how far into it (on while it's pointed at, back after)
-        std::optional<float> hoverAt;   // ...and when that was
+        float pointedPlayed = 0.0f;             // a part with pointed_animation=: how far into it (on while it's pointed at, back after)
+        std::optional<float> pointedPlayedAt;   // ...and when that was
         float reach = 0.0f, reachX = 0.0f; // a container that scrolls: how far down from its top, and across from its left, its parts reach
         float scrollX = 0.0f;              // ...and how far it's scrolled across
         float glideX = 0.0f, glideY = 0.0f, glideAt = 0.0f; // ...gliding on after a drag: how fast (the game's pixels a second), and when it last moved
-        float ownW = 0.0f, ownH = 0.0f;    // a container with fit=parts: as wide and as high as its parts, measured where they are (0: not yet)
-        std::optional<SDL_FRect> hit;   // a button without a size: where it's clicked (its usual and its current picture's size together)
-        bool ownWords = false;          // ...one without a picture: as big as its words (drawn as they are, not wrapped)
-        bool chosen = false;            // a button with selected=: chosen when it was last drawn (see takeChosen)
+        float ownW = -1.0f, ownH = -1.0f;  // a container with fit=parts: as wide and as high as its parts, measured where they are (-1: not yet; 0: none show)
+        std::optional<SDL_FRect> hit;   // a button without a size: where it's clicked (its usual and its current image's size together)
+        bool ownWords = false;          // ...one without an image: as big as its words (drawn as they are, not wrapped)
+        bool chosen = false;            // a button with chosen=: chosen when it was last drawn (see takeChosen)
+        std::optional<float> messageAt; // a part with message_animation=: when a message came (it plays from then)
+        std::optional<float> itemAt;    // an item's box, new in its list: when it came (its list's item_animation= plays from then)
+        float keptScroll = -1.0f, keptMost = 0.0f; // a list with position=bottom: its scroll and how far it went last time (at the end: it stays there)
     };
     struct Shift { // what the part a part is in moves it by (its animation's), how faded, how covered with a colour and how wiped
         float x = 0.0f, y = 0.0f, opacity = 1.0f, fade = 0.0f;
-        SDL_Color fadeColor{0, 0, 0, 255};
+        SDL_Color fadeColour{0, 0, 0, 255};
         float wipe = 1.0f; // (how much of it shows: over `wipeBox`, as `wipeShape` has it)
         SDL_FRect wipeBox{};
         std::string wipeShape;
@@ -407,33 +471,35 @@ private:
     bool scrollDragMoved_ = false, scrollBarDrag_ = false, scrollBarAcross_ = false;
     std::vector<std::pair<float, SDL_FPoint>> dragTrail_; // when and where the mouse was lately while dragging to scroll (how fast it was let go)
     std::optional<Target> tapping_; // a list's item pressed: it acts when the mouse comes up on it, unless that was a drag
+    bool tapped_ = false;           // a scrolling part pressed and let go without dragging, on nothing to click (see takeTapped)
 
     void drawElement(SDL_Renderer* r, std::size_t index, float alpha);
-    // A part playing animations (its animation=, its hover_animation= while it's pointed at and back
+    // A part playing animations (its animation=, its pointed_animation= while it's pointed at and back
     // after, a button's click_animation= once clicked): drawn as they have it now, together, then put
     // back as it's written. Gives how it looks now (the parts in it move with it). `by`: what the part
     // it's in (or its screen) moves it by now (its places are where it's written, and it moves with that)
     // and wipes it by; and then how the parts in it are wiped (its own wipe, when it shows less).
     Animation::Look drawAnimated(SDL_Renderer* r, std::size_t index, float alpha, Shift& by, const SDL_FRect& box);
     // Whether a part is pointed at: the one with the focus (the pointer's, or the keys' and a controller's),
-    // or any under the pointer (a box with buttons in it too). hoverOnward(): its hover animation goes on
+    // or any under the pointer (a box with buttons in it too). pointedOnward(): its pointed animation goes on
     // meanwhile (round and round, if it plays again and again), and back to its start after.
     [[nodiscard]] bool pointedAt(std::size_t index) const;
-    void hoverOnward(std::size_t index);
+    void pointedOnward(std::size_t index);
     std::uint64_t seenMotion_ = 0; // the engine's count of pointer moves when the last one here came (older: it's gone elsewhere)
     std::optional<std::size_t> playing_; // a button whose click animation plays: what it does is done when it's over
-    float turn_ = 0.0f;                     // ...a picture's turn and tint meanwhile
+    float turn_ = 0.0f;                     // ...an image's turn and tint meanwhile
     SDL_Color tint_{255, 255, 255, 255};
     // `flip` mirrors it (on top of the element's flip=); `box`: where (else the element's own box).
-    void picture(SDL_Renderer* r, const Picture& pic, const Element& el, std::string_view fit, float ax, float ay, float alpha,
+    void image(SDL_Renderer* r, const Image& pic, const Element& el, std::string_view fit, float ax, float ay, float alpha,
                  bool flip = false, const SDL_FRect* box = nullptr);
     void drawNamebox(SDL_Renderer* r, std::size_t index, float alpha);
     void drawChoices(SDL_Renderer* r, std::size_t index, float alpha);
     void drawHistory(SDL_Renderer* r, std::size_t index, float alpha);
     void drawRecords(SDL_Renderer* r, std::size_t index, float alpha); // the gallery, endings, songs, achievements
-    void drawChart(SDL_Renderer* r, std::size_t index, float alpha);
-    void drawPhone(SDL_Renderer* r, std::size_t index, float alpha);
-    void drawContacts(SDL_Renderer* r, std::size_t index, float alpha);
+    void drawFlowchart(SDL_Renderer* r, std::size_t index, float alpha);
+    [[nodiscard]] bool shows(std::size_t index); // its when= lets it, and on the phone its app (app=) is the one open
+    [[nodiscard]] int newOn(const Element& app); // what's new in an app (a container with app=, the script's): in the lists in it, and its count=
+    [[nodiscard]] const CharacterDef* characterNamed(std::string_view name) const; // the character the phone calls that
     void drawPage(SDL_Renderer* r, std::size_t index, float alpha);
     void drawPages(SDL_Renderer* r, std::size_t index, float alpha);
     void drawSlots(SDL_Renderer* r, std::size_t index, float alpha);
@@ -444,31 +510,36 @@ private:
     [[nodiscard]] float number(const Element& el, std::string_view key, float fallback);
     [[nodiscard]] std::string inputTarget(const Element& el);
     bool handleInput(const SDL_Event& e);
+    // The input box that takes typing: the one clicked last (typing_), else the first shown.
+    [[nodiscard]] std::optional<std::size_t> typedInto();
     void adjustSlider(std::size_t element, int delta);
     [[nodiscard]] SDL_FRect sliderBox(std::size_t element) const;
     void box(SDL_Renderer* r, const SDL_FRect& rect, const Style& s, Look look, float alpha);
     void text(SDL_Renderer* r, TextBlock& block, std::string_view str, const SDL_FRect& rect, const Style& s,
-              SDL_Color color, float alpha, std::size_t reveal = TextBlock::kAll, std::vector<TextSpan> spans = {});
+              SDL_Color colour, float alpha, std::size_t reveal = TextBlock::kAll, std::vector<TextSpan> spans = {});
     [[nodiscard]] static const Style::State* stateOf(const Style& s, Look look); // its look then (nullptr: its own)
-    [[nodiscard]] std::string lookImage(const Style& s, Look look, bool chosen); // the picture a style shows in a look (empty: none)
+    [[nodiscard]] std::string lookImage(const Style& s, Look look, bool chosen); // the image a style shows in a look (empty: none)
     // A button's look now: it can't be clicked, it's pressed (until the mouse comes up) or playing its
-    // click animation, it's pointed at, it's chosen (its selected= is true, or it's being dragged), or
+    // click animation, it's pointed at, it's chosen (its chosen= is true, or it's being dragged), or
     // its usual self. `hit` is where a press on it counts.
     struct ButtonLook {
         Look look;
         bool on, chosen;
     };
     [[nodiscard]] ButtonLook buttonLook(std::size_t index, const SDL_FRect& hit);
-    void sizeButton(std::size_t index); // one without a width (or a height): as big as its picture now, or its words
+    void sizeButton(std::size_t index); // one without a width (or a height): as big as its image now, or its words
     void sizeOwn(std::size_t index);    // any part without a width (or a height): as big as what it shows, and placed by that
-    [[nodiscard]] SDL_Color textColor(const Style& s, Look look) const;
+    [[nodiscard]] SDL_Color textColour(const Style& s, Look look) const;
     [[nodiscard]] float boxAlpha(const Style& s, float alpha);
-    Font& styleFont(const Style& s); // its font, at the player's text size when it has text_size=yes
+    Font& styleFont(const Style& s); // its font, at the player's text size when it has text_size_follows=yes
     [[nodiscard]] std::string interpolate(std::string_view text);
     [[nodiscard]] RichText rich(std::string_view text); // {expressions} filled in, {bold} and the like as spans
+    // A text part's words as it shows them: rich(), and with lines=N at most N lines `width` wide (what doesn't fit
+    // cut, with ...).
+    [[nodiscard]] RichText textOf(std::size_t index, float width);
 
     [[nodiscard]] bool visible(const Element& el);
-    [[nodiscard]] bool live(std::size_t index); // shown now: its if= lets it, and the part it's in was drawn last time
+    [[nodiscard]] bool live(std::size_t index); // shown now: its when= lets it, and the part it's in was drawn last time
     [[nodiscard]] bool enabled(const Element& el);
     [[nodiscard]] bool selected(const Element& el);
     [[nodiscard]] bool focused(std::size_t element, int item = 0, Button button = Button::None, int option = -1) const {
@@ -493,13 +564,15 @@ private:
     // ones stand at their start. played(): where `a` is after `seconds`, so.
     [[nodiscard]] bool still() const;
     [[nodiscard]] float played(const Animation& a, float seconds) const;
-    Lookup lookup_; // the engine's names, with a textbox's line's own (speaker, has_face...) for its line
+    Lookup lookup_; // the engine's names (a list's item's first), with a textbox's line's own (speaker, has_face...) for its line
+    std::uint32_t arrivals_ = 0; // messages come so far, as this screen saw it (one more: message_animation= plays)
     std::unordered_map<std::string, RichText, StringHash, std::equal_to<>> richRead_; // rich()'s texts with nothing to fill in, read once
     std::vector<ElementState> state_;
     std::vector<bool> drawn_;
     std::uint64_t drawnFrame_ = 0; // the frame it was last drawn in
     std::vector<Target> targets_; // from the last draw, topmost last
     std::optional<Spot> focus_;
+    std::optional<std::size_t> typing_;   // the input box clicked last
     std::optional<std::size_t> dragging_; // a slider being dragged
     // A button with drag= the player holds: it follows the pointer once moved (from where on it they
     // took it), or waits for a click on a part with drop= (keyboard, controller, a tap).

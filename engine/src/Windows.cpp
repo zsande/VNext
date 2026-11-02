@@ -1,7 +1,7 @@
 // What Windows offers the player through its own parts: spelling (its spell checker), reading text
-// aloud (SAPI) and videos other than MPEG-1 (Media Foundation: MP4, MOV and M4V). System.hpp says what
+// aloud (SAPI) and movies other than MPEG-1 (Media Foundation: MP4, MOV and M4V). System.hpp says what
 // each does; Apple.mm is the Mac's.
-#ifndef _WIN32_WINNT // (Windows 10 on: what the spell checker and the video reader need)
+#ifndef _WIN32_WINNT // (Windows 10 on: what the spell checker and the movie reader need)
 #define _WIN32_WINNT 0x0A00
 #endif
 #ifndef WINVER
@@ -190,7 +190,7 @@ void speak(std::string_view words) {
 }
 
 // ---------------------------------------------------------------------------
-// Videos
+// Movies
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -227,7 +227,7 @@ private:
     std::wstring path_;
 };
 
-class WindowsVideo final : public SystemVideo {
+class WindowsMovie final : public SystemMovie {
 public:
     bool start(const std::string& path, const std::string* data) {
         if (!mediaReady()) return false;
@@ -240,10 +240,10 @@ public:
             file = temp_.path();
         }
         if (FAILED(MFCreateSourceReaderFromURL(file.c_str(), options.get(), reader_.put()))) return false;
-        Com<IMFMediaType> pictures;
-        if (FAILED(MFCreateMediaType(pictures.put())) || FAILED(pictures->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video)) ||
-            FAILED(pictures->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32)) ||
-            FAILED(reader_->SetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), nullptr, pictures.get())) || !readPictureType())
+        Com<IMFMediaType> images;
+        if (FAILED(MFCreateMediaType(images.put())) || FAILED(images->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video)) ||
+            FAILED(images->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32)) ||
+            FAILED(reader_->SetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), nullptr, images.get())) || !readImageType())
             return false;
         Com<IMFMediaType> sound;
         sound_ = SUCCEEDED(MFCreateMediaType(sound.put())) && SUCCEEDED(sound->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio)) &&
@@ -260,14 +260,14 @@ public:
         return area_.w > 0 && area_.h > 0;
     }
 
-    bool nextPicture(std::vector<std::uint8_t>& pixels, int& pitch, double& time) override {
+    bool nextImage(std::vector<std::uint8_t>& pixels, int& pitch, double& time) override {
         Com<IMFSample> sample;
         for (;;) {
             DWORD flags = 0;
             LONGLONG stamp = 0;
             if (FAILED(reader_->ReadSample(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), 0, nullptr, &flags, &stamp, sample.put()))) return false;
             if (flags & MF_SOURCE_READERF_ENDOFSTREAM) return false;
-            if ((flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) && !readPictureType()) return false;
+            if ((flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) && !readImageType()) return false;
             time = static_cast<double>(stamp) / 1e7;
             if (sample) break; // (none: a gap in the stream, on to the next)
         }
@@ -340,15 +340,15 @@ private:
     };
     TempFile temp_; // (before the reader: it goes after it, once the file's closed)
     Com<IMFSourceReader> reader_;
-    Area area_;                // the part of each picture that's shown (a 1080p video is often 1088 high, with 8 hidden)
-    std::uint32_t frameH_ = 0; // each picture's whole height
+    Area area_;                // the part of each image that's shown (a 1080p movie is often 1088 high, with 8 hidden)
+    std::uint32_t frameH_ = 0; // each image's whole height
     LONG stride_ = 0;          // bytes from one row to the next (less than none: the rows run upward)
     std::uint32_t channels_ = 0, rate_ = 0;
     bool sound_ = false;
     std::vector<float> left_; // stereo frames still to be resampled
     double position_ = 0.0;   // where the next one at kSoundRate falls among them
 
-    bool readPictureType() {
+    bool readImageType() {
         Com<IMFMediaType> type;
         UINT32 w = 0, h = 0;
         if (FAILED(reader_->GetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), type.put())) ||
@@ -376,7 +376,7 @@ private:
         return channels_ > 0 && rate_ > 0;
     }
 
-    // Stereo frames at the video's rate, as frames at kSoundRate (between two of them: a mix of both).
+    // Stereo frames at the movie's rate, as frames at kSoundRate (between two of them: a mix of both).
     void resampled(std::vector<float> stereo, std::vector<float>& out) {
         if (rate_ == static_cast<std::uint32_t>(kSoundRate)) {
             out = std::move(stereo);
@@ -400,10 +400,10 @@ private:
 
 } // namespace
 
-std::unique_ptr<SystemVideo> SystemVideo::open(const std::string& path, const std::string* data) {
-    auto video = std::make_unique<WindowsVideo>();
-    if (!video->start(path, data)) return nullptr;
-    return video;
+std::unique_ptr<SystemMovie> SystemMovie::open(const std::string& path, const std::string* data) {
+    auto movie = std::make_unique<WindowsMovie>();
+    if (!movie->start(path, data)) return nullptr;
+    return movie;
 }
 
 } // namespace vn

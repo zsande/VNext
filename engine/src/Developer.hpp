@@ -45,9 +45,9 @@ inline constexpr float swatch = 20;          // a colour's square in its box
 inline constexpr float popupPad = 4;         // around and between what a list shows
 inline constexpr float popupText = 14;       // what a popup's list says
 inline constexpr float itemH = 28;           // a row of a list
-inline constexpr float cellW = 92, cellH = 74, cellText = 12; // a picture in a list: its cell, and a label in it
-inline constexpr float listW = 260, picturesW = 400;      // a list's least width: names, or pictures
-inline constexpr float listMaxH = 320, wheelMaxH = 440;   // a list's most height: names or pictures, or with the wheel over them
+inline constexpr float cellW = 92, cellH = 74, cellText = 12; // an image in a list: its cell, and a label in it
+inline constexpr float listW = 260, imagesW = 400;      // a list's least width: names, or images
+inline constexpr float listMaxH = 320, wheelMaxH = 440;   // a list's most height: names or images, or with the wheel over them
 inline constexpr float codeH = 28;           // the colour's code box over the wheel
 inline constexpr float wheelD = 150;         // the wheel's diameter
 inline constexpr float barW = 16, barGap = 8; // the value and alpha bars beside it, and the gaps between
@@ -81,7 +81,7 @@ inline constexpr float listenW = 64;         // the voice row's Play
 inline constexpr float buttonText = 14, smallButtonText = 13;
 inline constexpr float buttonPad = 24;       // a button in a row of them: its label and this much
 inline constexpr float choicePad = 16;       // a choice's button: its label and this much
-inline constexpr float previewButtonW = 80;  // the least for a preview's buttons: Preview on, Try it, Audio off, Reset
+inline constexpr float previewButtonW = 80;  // the least for a preview's buttons: Preview on, Try it, Sound off, Reset
 inline constexpr float previewHeadH = headingH + gap; // a preview's heading, with those buttons, and the gap under it (when it's off, the heading is all there is)
 // Texts.
 inline constexpr float noteText = 14;        // notes, help and problems
@@ -94,16 +94,16 @@ inline constexpr float pairBoxW = 110;       // two boxes on a row: each at leas
 inline constexpr float runBoxW = 80;         // an action's boxes on a row: each at least this wide (else each has a row)
 inline constexpr float pairLabelPart = 0.28f; // the second's label: at most this much of the room after the first's, on two lines past that
 // The Settings tab, the Translate tab's table, the Map and the log.
-inline constexpr float settingRowH = 42, settingHeadH = 44, settingNoteH = 60, settingHeadNoteH = 22, settingOtherH = 24;
+inline constexpr float settingRowH = 42, settingHeadH = 44, settingHeadNoteH = 22, settingOtherH = 24;
 inline constexpr float settingLabelW = 200, settingLabelPart = 0.22f, settingFieldW = 340, settingFieldPart = 0.32f, settingHelpGap = 16;
 inline constexpr float mapPadX = 20, mapPadY = 40, mapNoteY = 22;   // the Map: where its grid starts, and its note over the unreached column
 inline constexpr float tableRowH = 40, languageW = 360;
 inline constexpr float nodeW = 170, nodeH = 36, nodeGapX = 90, nodeGapY = 16, mapStep = 60;
 inline constexpr float logRowH = 21;
 // What's shown over a Library form (at most this high, or this much of the room), and a list's popup.
-inline constexpr float sampleStyleH = 110, sampleAtlasH = 230, sampleAnimationH = 240, sampleSubPictureH = 380;
+inline constexpr float sampleStyleH = 110, sampleAtlasH = 230, sampleAnimationH = 240, sampleSubImageH = 380;
 inline constexpr float sampleText = 12;      // words drawn over a sample (an atlas's expression, how to mark a sub-image)
-inline constexpr float sampleStylePart = 0.25f, sampleAtlasPart = 0.42f, sampleAnimationPart = 0.25f, sampleSubPicturePart = 0.55f;
+inline constexpr float sampleStylePart = 0.25f, sampleAtlasPart = 0.42f, sampleAnimationPart = 0.25f, sampleSubImagePart = 0.55f;
 // An animation's timeline: its rows' names, the seconds over them, a row; a change at once (a diamond),
 // a bar's ends (to drag), how near a moment a drag snaps to it, the least room for each second marked.
 inline constexpr float timelineLabelW = 110, timelineRulerH = 22, timelineRowH = 22, timelineDiamond = 12, timelineEdge = 6, timelineSnap = 6,
@@ -111,28 +111,32 @@ inline constexpr float timelineLabelW = 110, timelineRulerH = 22, timelineRowH =
 inline constexpr float popupShadow = 3, popupMargin = 8, popupGap = 2;
 } // namespace layout
 
-// The visual editor's view of a game: its script files as lines, the scenes in them (labels), each
+// The visual editor's view of a game: its script files as lines, the scenes in them, each
 // scene's rows (a line each; the lines inside a choice or an "if" are under it), the characters and
-// the game's settings (its config lines). It changes lines and writes the files straight away. Lines
+// the game's settings (its setting lines). It changes lines and writes the files straight away. Lines
 // it has no form for stay as they are, to be edited as text.
 class StoryEditor {
 public:
-    // A Line is someone speaking, or narration (no one); a Background is a scene line; a Character
-    // shows or hides someone (or a picture); an Option is one of a choice's, or an answer to a message;
-    // Game is quick save, fullscreen, screenshot or quit. Other is any line without a form (a mistake).
+    // A Line is someone speaking, or narration (no one; in a chat, a message); a Background is a scene
+    // line; a Character shows or hides someone (or an image); an Option is one of a choice's, or an answer
+    // to a message, a chat or a post; Game is quick save, fullscreen, screenshot or quit. On the phone (one
+    // kind, Phone, to the person: its first box says which, see phoneWord): a Message (or a chat's line that
+    // sends something, types...), a Chat scene, a Call (and its Missed lines), and Phone (the phone itself: on,
+    // off, its apps, clock...).
+    // Other is any line without a form (a mistake).
     enum class Kind : std::uint8_t { Line, Character, Background, Choice, Option, If, Else, Set, Jump, End, Music, Sound, Voice, Stop, Wait,
-                                     Effect, Weather, Camera, Movie, Screen, Notify, Textbox, NewPage, Together, Chapter,
-                                     Unlock, Message, Phone, Ask, Game, Note, Other };
+                                     Effect, Weather, Camera, Movie, Screen, Notice, Textbox, NewPage, Together, Chapter,
+                                     Unlock, Message, Chat, Call, Missed, Ask, Game, Note, Other };
     // The names a field lists (Expressions: of the character in the field's context; Records: the
-    // endings, achievements, tips or gallery pictures, by the context's word). Shown: characters and
-    // pictures; Backgrounds: pictures and colours; Bases: the names pictures start with (aiko for
+    // endings, achievements, tips or gallery images, by the context's word). Shown: characters and
+    // images; Backgrounds: images and colours; Bases: the names images start with (aiko for
     // aiko_happy); Channels: the names sounds play as; FontNames: the fonts font lines name; Keys: key,
     // mouse and controller names; SettingValues: a player setting and a value for it ("fullscreen yes"), as
     // buttons set them; Settings: the players' settings sliders change;
-    // Conditions: the variables, and the words screens' conditions know; PictureFiles: images/NAME.png.
-    enum class Pick : std::uint8_t { None, Characters, Shown, Pictures, Sounds, Places, Scenes, VariableNames, Expressions, Screens,
-                                     Movies, Records, Fonts, Styles, Colors, PicturesOrColors, Bases, Channels, FontNames, Keys, Languages,
-                                     VoiceFolders, Settings, Controls, Conditions, PictureFiles, Animations };
+    // Conditions: the variables, and the words screens' conditions know; ImageFiles: images/NAME.png.
+    enum class Pick : std::uint8_t { None, Characters, Shown, Images, Sounds, Places, Scenes, VariableNames, Expressions, Screens,
+                                     Movies, Records, Fonts, Styles, Colours, ImagesOrColours, Bases, Channels, FontNames, Keys, Languages,
+                                     VoiceFolders, Settings, Controls, Conditions, ImageFiles, Animations };
     // Every box a form has is of a kind, defined once (kindOf): what it lists to pick from, the values it
     // suggests, the buttons it has instead of a box and what they say, and how its value is written. A
     // row says its box's kind and what its own empty box means, so boxes of a kind are the same in
@@ -142,19 +146,20 @@ public:
         Words, // text that can be bold, coloured, paused...
         Text,  // plain text: a title, a question, a note, what a tab says
         Name,  // one word that names something: a style, a character, a part
-        Picture, // a picture, or a colour (every picture's box takes either)
-        Shape,   // a picture alone, for its shape: where it's darkest (a wipe's)
-        PictureFile, Colour, Sound, Movie, FontFile, Font, Style, Character, Shown, Expression, Scene, Screen, Variable,
+        Image, // an image, or a colour (every image's box takes either)
+        Shape,   // an image alone, for its shape: where it's darkest (a wipe's)
+        ImageFile, Colour, Sound, Movie, FontFile, Font, Style, Character, Shown, Expression, Scene, Screen, Variable,
         Setting, Animation, Key, Place, Channel, Record, VoiceFolder, Control, Base, Language,
         Across, Down, Layer, Speed, Zoom, Opacity, Wipe, Volume, Percent, Rotation, Seconds,
         Pixels, Count, Number, PerSecond, LineSpacing, TextSpeed, Pause, Wind, WidthHeight, Point, // (numbers: a size, how many, a rate...)
-        FontStyle, Babble, VariableValue, Action, Playing, KeySlot, SaveMode,      // (lists of words)
+        FontStyle, MadeUpVoice, VariableValue, Action, Playing, KeySlot, SaveMode,      // (lists of words)
         YesNo, YesNoStyle, YesNoSettings, YesNoSame, Easing, Plays,
-        Condition, Fit, Reveal, Talk, ImageFilter, SkipHold, WindowFill, Mouths,
-        Sync, Side, FaceCopies, FaceTalk, Align, VAlign, Operation, Joiner, ShowHide, Visibility, SetVerb, Sent, Anchor, Repeat, Scroll, Effects, WeatherKind,
-        Edges, ContainerFit,
-        ScreenAction, VariableAction, StoryAction, SoundAction, SaveAction, SettingAction, GalleryAction, // (an action's kind, by what it's about)
-        SettingChoice, GameLanguage, // (what a setting goes to: the Settings tab's own options for it, as a list; a language)
+        Condition, Fit, TextAppears, MouthMoves, ImageScaling, HoldToSkip, WindowFill, Mouths, NewMessages, ChatMessages,
+        MessageKind, PhoneLine, // (the phone's lines: which one, what a message does)
+        Side, FaceCopies, FaceMouth, Align, AlignVertically, Operation, Joiner, ShowHide, Visibility, SetVerb, Sent, Position, Repeat, Scroll, Effects, WeatherKind,
+        Edges, ContainerFit, Stack, List,
+        ScreenAction, VariableAction, StoryAction, SoundAction, SaveAction, SettingAction, GalleryAction, PhoneAction, // (an action's kind, by what it's about)
+        SettingChoice, GameLanguage, StoryWhileOpen, // (what a setting goes to: the Settings tab's own options for it, as a list; a language)
     };
     struct BoxKind {
         Box box = Box::None;
@@ -165,9 +170,9 @@ public:
         bool rich = false;     // text with bold, colours, pauses... (buttons for them under the box)
         bool percent = false;  // written as one (50%), however it's typed (0.5, 50)
         bool wheel = false;    // a colour's box: the colour as a square, and a wheel with the code to type when it opens
-        bool pictures = false; // its list shows the pictures, as cells
+        bool images = false; // its list shows the images, as cells
         bool listen = false;   // its list's entries, and the box, have a button to hear them
-        bool wide = false;     // its names can be long (a file's, a picture's): never half a row
+        bool wide = false;     // its names can be long (a file's, an image's): never half a row
     };
     [[nodiscard]] static const BoxKind& kindOf(Box box);
     struct Field {
@@ -188,14 +193,14 @@ public:
         std::string group;   // the heading it starts (the fields after it are under it too, until the next; "+Name": folded at first)
     };
     struct Scene {
-        std::size_t file = 0, line = 0; // its label line
+        std::size_t file = 0, line = 0; // its scene line
         std::size_t end = 0;            // after its last line
         std::string name;
     };
     struct Row {
         std::size_t line = 0; // in the scene's file
         std::size_t end = 0;  // after its last line, and those of the rows inside it
-        int depth = 0;        // 0: right under the label
+        int depth = 0;        // 0: right under the scene line
         Kind kind = Kind::Other;
         std::string text;     // without the indentation
     };
@@ -209,6 +214,8 @@ public:
     [[nodiscard]] bool loaded() const { return !files_.empty(); }
     [[nodiscard]] const std::vector<Scene>& scenes() const { return scenes_; }
     [[nodiscard]] const std::vector<Row>& rows(const Scene& scene) const; // (kept as of this version: a reference, not to hold across a change)
+    // A scene a character's chat= or call= names ("chat", "call"; else ""): it plays when the player opens their chat or calls them.
+    [[nodiscard]] std::string_view phoneSceneOf(const Scene& scene) const;
     [[nodiscard]] const std::vector<Character>& characters() const;
     [[nodiscard]] std::vector<std::string> names(Pick pick, std::string_view context = {}) const;
     [[nodiscard]] const std::vector<std::string>& variables() const; // the ones the scripts change or ask for
@@ -217,6 +224,12 @@ public:
     // Rows as forms: the fields of a row (they can change with its values: a hidden character has no
     // place), and the line they make (from the fields by name).
     [[nodiscard]] static std::string_view kindName(Kind kind);
+    // The phone's lines are one kind to the person (Phone), each a kind of its own here: the word a phone line's
+    // first box ("What") has for it (none: not one of them), the kind a word is (Other: none), and the lines
+    // one starts as (with a first line inside it where it holds lines: a chat's, a call's...).
+    [[nodiscard]] static std::string_view phoneWord(Kind kind);
+    [[nodiscard]] static Kind phoneKind(std::string_view word);
+    [[nodiscard]] static std::vector<std::string> phoneLines(Kind kind);
     [[nodiscard]] std::vector<Field> fields(const Row& row) const;
     [[nodiscard]] std::string lineOf(Kind kind, const std::vector<Field>& fields) const;
     [[nodiscard]] std::string summary(const Row& row) const; // as the list shows it
@@ -225,6 +238,9 @@ public:
     // Changes, each written to its file at once. Changes with the same `key` are one step for undo
     // (typing into one field).
     void setText(const Scene& scene, const Row& row, const std::string& text, const std::string& key);
+    // Its line, and the lines inside it (as written under it: indented once) in place of the ones there when
+    // those are blank, as a new row's are (else they stay). One step for undo.
+    void setRowLines(const Scene& scene, const Row& row, const std::string& text, const std::vector<std::string>& inside, const std::string& key);
     // Adds lines after `row` (and the rows inside it), or at the end of what's inside it; without
     // a row, at the end of the scene. Gives the first new line.
     std::size_t add(const Scene& scene, const Row* row, bool inside, const std::vector<std::string>& lines);
@@ -267,7 +283,7 @@ public:
     // character, a definition ("style button"), Settings, or else its file.
     [[nodiscard]] std::string placeOf(std::size_t file, std::size_t line) const;
     std::size_t replaceAll(std::string_view what, const std::string& with);
-    // A variable's lines (set, if, {name} in words, screens' if= and var=...), and a new name for it in
+    // A variable's lines (set, if, {name} in words, screens' when= and variable=...), and a new name for it in
     // all of them (one step for undo): false when it can't be one.
     [[nodiscard]] std::vector<Found> uses(std::string_view variable) const;
     // Every line that uses it changes too: how many (its own variable line not counted); none when the name can't be.
@@ -275,25 +291,25 @@ public:
     // The layout's lines (screens' parts, styles, animations' steps) with `scale` done to them (one
     // step for undo, with others of the same key).
     void scaleLayout(const std::function<std::string(const std::string&)>& scale, const std::string& key);
-    // A new name for a file in images/, audio/, movies/ or fonts/ (`from` and `to` with their
-    // extension), and the lines that use it changed to match (a character's pictures: its
+    // A new name for a file in images/, sounds/, movies/ or fonts/ (`from` and `to` with their
+    // extension), and the lines that use it changed to match (a character's images: its
     // expressions). One step for undo, the file's name too. How many lines changed; none when it
     // can't have that name.
     std::optional<std::size_t> renameAsset(std::string_view folder, const std::string& from, const std::string& to);
     // The scene ends by jumping to `to`: a jump or end it ends with already changes, else one is added.
     // True when one was there.
     bool jumpAtEnd(std::size_t scene, const std::string& to);
-    // Each character's name and the name its pictures start with (aiko_happy is "show aiko happy").
-    [[nodiscard]] std::vector<std::pair<std::string, std::string>> pictureBases() const;
+    // Each character's name and the name its images start with (aiko_happy is "show aiko happy").
+    [[nodiscard]] std::vector<std::pair<std::string, std::string>> imageBases() const;
     // Where the story goes from each scene: jump, call and option arrows (-> scene), by name.
     struct Link {
         std::size_t from = 0;
         std::string to;
-        bool call = false, option = false;
+        bool call = false;
         std::size_t line = 0; // (its line in the scene's file)
     };
     [[nodiscard]] const std::vector<Link>& links() const;
-    // A jump's (or call's) line taken out, or an option's arrow (it goes on after the choice then).
+    // A jump's (or call's) line taken out.
     void removeLink(const Link& link);
     // Where the Map shows the scenes put somewhere by hand (by name; game/.map.txt, which packs leave
     // out, as "name x y"); the others are laid out by themselves. Renaming a scene keeps its place.
@@ -360,10 +376,10 @@ public:
     bool renameScreen(std::size_t screen, const std::string& name, const std::string& key); // (its uses follow)
     void removeScreen(std::size_t screen); // (and the keys and buttons that only open it)
     std::optional<std::size_t> moveScreen(std::size_t screen, std::size_t to); // before screen `to` (or after the last), in its file
-    [[nodiscard]] bool defines(std::string_view what, std::string_view name) const; // a "style NAME" line, "color NAME"...
+    [[nodiscard]] bool defines(std::string_view what, std::string_view name) const; // a "style NAME" line, "colour NAME"...
     [[nodiscard]] std::vector<std::string> defined(std::string_view what) const;     // the names of those
 
-    // Things listed once by name, outside the scenes: "color NAME ...", "style", "font", "position",
+    // Things listed once by name, outside the scenes: "colour NAME ...", "style", "font", "place",
     // "atlas" (with the lines indented under it), "gallery", "ending", "song", "achievement", "tip"
     // and "control" lines. A new one goes after the last of its kind (or in main.vnscript, before its
     // first scene); renaming one follows where it's used (styles, colours, fonts, places, atlases,
@@ -388,7 +404,7 @@ public:
         std::string key, value; // what it changes and to what, as written: x=home, left=5%, opacity=40%
         float start = 0.0f, seconds = 0.0f;
         std::string ease; // (inout, linear...: a fade's is linear unless it says)
-        std::string shape; // a wipe's picture (shape=): where it shows first; none: from the left
+        std::string shape; // a wipe's image (shape=): where it shows first; none: from the left
     };
     struct Timeline {
         std::vector<Bar> bars;
@@ -406,12 +422,12 @@ public:
     bool renameDefinition(std::string_view kind, std::size_t index, const std::string& name, const std::string& key);
     [[nodiscard]] std::string root() const { return root_; }
 
-    // The game's settings: the config lines in main.vnscript. A setting's value as written (without
+    // The game's settings: the setting lines in main.vnscript. A setting's value as written (without
     // quotes), and its line; none: it has no line, so it has its default.
     [[nodiscard]] bool hasMain() const;
     [[nodiscard]] std::optional<std::string> setting(std::string_view name) const;
     [[nodiscard]] std::optional<std::size_t> settingLine(std::string_view name) const;
-    [[nodiscard]] bool isSetting(std::size_t line) const; // a config line in main.vnscript
+    [[nodiscard]] bool isSetting(std::size_t line) const; // a setting line in main.vnscript
     // A new value (in quotes if `quoted`); an empty one takes the line out.
     void setSetting(std::string_view name, const std::string& value, bool quoted, const std::string& key);
 
@@ -452,6 +468,16 @@ private:
     // they're a scene or a screen): gives where they start now.
     std::size_t moveLines(std::size_t file, std::size_t from, std::size_t until, std::size_t at, bool spaced);
     [[nodiscard]] bool isCharacter(std::string_view name) const;
+    // Who a line names and how they look: "Aiko happy" or "Aiko (happy)" (a character's), or anyone's name.
+    [[nodiscard]] std::pair<std::string, std::string> speakerOf(std::string_view who) const;
+    // A chat's phone line as its form has it ("me" the player): whether it's the player's, who sent it and
+    // how they look, what it does and with what.
+    struct PhoneLine {
+        bool mine = false;
+        std::string who, expression, does = "says", text, file, seconds;
+    };
+    [[nodiscard]] PhoneLine phoneLineOf(std::string_view text) const;
+    [[nodiscard]] std::vector<Field> rowFields(const Row& row) const; // (fields(), but for the phone's first box)
     [[nodiscard]] bool hasScene(std::string_view name) const; // (by name, in any case)
     [[nodiscard]] bool hasScreen(std::string_view name) const;
     void renameSpeaker(const std::string& from, const std::string& to);
@@ -555,11 +581,11 @@ struct DeveloperTools {
     std::vector<std::size_t> moreRows;          // more lines of the scene chosen (Shift+click), by their lines
     std::optional<std::size_t> collapseTo;      // a chosen one pressed: only it stays chosen, unless it's dragged
     // The Library tab: what's listed (a kind of definition, "variables", "voices", or the files:
-    // "pictures", "sounds", "movies" or "fontfiles") and the one chosen (a file: also what's made from it, a sub-image or a font, by
+    // "images", "sounds", "movies" or "fontfiles") and the one chosen (a file: also what's made from it, a sub-image or a font, by
     // its index in the editor's definitions, and the files whose list of those is open); files picked
-    // to import (from the file dialog's thread, or dropped on the window), copied into the game when
+    // to import (from the file chooser's thread, or dropped on the window), copied into the game when
     // the tools are next drawn.
-    std::string library = "pictures";
+    std::string library = "images";
     std::optional<std::size_t> libraryItem, librarySub;
     std::vector<std::string> libraryOpen;
     std::string libraryFind; // a file to choose once it's listed (by the name scripts call it)
@@ -568,10 +594,10 @@ struct DeveloperTools {
         std::mutex mutex;
         std::vector<std::pair<std::string, std::string>> files; // each one's path, and where it goes (empty: by its kind, under its own name)
         std::optional<SDL_FPoint> dropAt;                     // where the last drop landed (on the Screens tab's screen: the image goes there)
-        std::string as;                                       // where the one picked in the dialog open goes, without its extension
-        std::string pattern, label;                           // (that dialog's filter)
+        std::string as;                                       // where the one picked in the file chooser that's open goes, without its extension
+        std::string pattern, label;                           // (that file chooser's filter)
         SDL_DialogFileFilter filter{};                        // ...pointing at them, while it's open
-        bool open = false;                                    // a dialog is open (one at a time: its filter stays as it is)
+        bool open = false;                                    // a file chooser is open (one at a time: its filter stays as it is)
     } imports;
     struct Translation { // the Translate tab's file, as lines
         std::string id;
@@ -592,7 +618,7 @@ struct DeveloperTools {
     std::size_t translateChecked = SIZE_MAX;               // the scripts' version its texts were last checked against
     TexturePtr fontSample; // the chosen font file's sample, and that file
     std::string fontSampleOf;
-    // The chosen movie: a still of its first picture, or playing (heard through the player's own
+    // The chosen movie: a still of its first image, or playing (heard through the player's own
     // sound), and that file.
     std::unique_ptr<Movie> movie;
     std::string movieOf;
@@ -621,8 +647,8 @@ struct DeveloperTools {
         int dragging = 0;
         bool editBottom = false; // a gradient (navy-black): the wheel changes its bottom colour, not its top
     } popup;
-    TexturePtr wheelPicture; // the colour wheel's picture, `wheelPictureSize` pixels across
-    int wheelPictureSize = 0;
+    TexturePtr wheelImage; // the colour wheel's image, `wheelImageSize` pixels across
+    int wheelImageSize = 0;
     std::optional<std::pair<std::string, std::string>> picked;
     std::string openList; // a box whose list opens once it's drawn (a new line's first box, focused by the editor)
     bool popupClick = false, overPopup = false;
@@ -667,10 +693,10 @@ struct DeveloperTools {
     bool previewHeld = false;    // the mouse went down on it: it gets the coming up too
     SDL_FRect previewShown{};    // where it's drawn this frame
     std::vector<std::string> previewOverlays; // the screens its buttons opened over it (the top last)
-    std::vector<std::string> previewLeaving;  // the ones its buttons closed, drawn while their hide_animation= plays
+    std::vector<std::string> previewLeaving;  // the ones its buttons closed, drawn while their animation_on_close= plays
     std::string previewPending;               // one a button opened, opening once the screen under it has faded out
     std::pair<ScreenView::Played, ScreenView::Played> previewPendingWith; // ...playing these (with NAME and close with NAME)
-    std::vector<std::string> previewScreens;  // the screens on it last frame (their on_show= and on_hide= run as they come and go)
+    std::vector<std::string> previewScreens;  // the screens on it last frame (their action_on_open= and action_on_close= run as they come and go)
     std::optional<std::pair<std::string, std::size_t>> previewAt; // playing on: the file and line it's at
     std::optional<std::size_t> previewRow;                        // (the row lit for it in the list, kept in view)
     struct PlaceDrag {           // the chosen line's character, dragged on it
@@ -681,12 +707,12 @@ struct DeveloperTools {
         std::size_t key = 0;                // (one step for undo)
     };
     std::optional<PlaceDrag> placeDrag;
-    Audio* heard = nullptr;
+    Sound* heard = nullptr;
     Uint64 previewTicks = 0;
-    Audio silence;               // (never started)
+    Sound silence;               // (never started)
     ReadLog previewRead;
     Variables previewPersistent;
-    Chart previewChart;
+    Flowchart previewFlowchart;
     TexturePtr canvas; // (the Screens tab draws into it too)
     // The Screens tab: the screen open (its name: the game's own, or a built-in one), the part chosen
     // (its line; none: the screen's own settings), and a part being moved or resized.
@@ -705,7 +731,7 @@ struct DeveloperTools {
         bool resize = false;
         SDL_FRect from{};                  // its box then
         float x = 0.0f, y = 0.0f;          // where the mouse was then (on the canvas)
-        float px = 0.0f, py = 0.0f, pw = 0.0f, ph = 0.0f; // its x= y= w= h= then
+        float px = 0.0f, py = 0.0f, pw = 0.0f, ph = 0.0f; // its x= y= width= height= then
         bool own = true;                                  // it moves on its own (not with a chosen part it's in)
         std::vector<std::pair<std::size_t, SDL_FRect>> moved; // everything it moves (the parts in them too), and where each was
         struct Other {                                    // the other chosen parts, moving with it
@@ -726,15 +752,15 @@ struct DeveloperTools {
     std::vector<bool> scenesWrong;
     std::size_t colourVersion = SIZE_MAX; // the characters' name colours, by lower-case name, as of that version
     std::map<std::string, std::optional<SDL_Color>, std::less<>> characterColours;
-    std::uint64_t audioGeneration = 0; // sound files found by name, as of that list of files (see filesGeneration)
-    std::map<std::string, std::string> audioPaths;
-    std::map<std::string, std::optional<std::string>> foundAudio;
+    std::uint64_t soundGeneration = 0; // sound files found by name, as of that list of files (see filesGeneration)
+    std::map<std::string, std::string> soundPaths;
+    std::map<std::string, std::optional<std::string>> foundSound;
     std::size_t sceneWordsVersion = SIZE_MAX, sceneWordsScene = SIZE_MAX, sceneWords = 0; // the open scene's, as of that version
     // The files in each folder with an ending, as listed at a generation: listed again at the next (twice a
     // second, and when files are imported, renamed or thrown away), not every frame.
     std::map<std::string, std::pair<std::uint64_t, std::vector<std::string>>> fileLists;
     bool saidNoGame = false; // (the hint that there's no game yet went to the log: once)
-    // The developer tools' language (About): the translations in "editor languages" next to the player
+    // The developer tools' language (About): the translations in "developer tools translations" next to the player
     // (each file's name without .vnscript, its language's name and code), as of that folder's list of
     // files; and the one in use (empty: English).
     struct ToolsLanguage {
@@ -763,11 +789,11 @@ struct DeveloperTools {
     std::optional<std::pair<std::string, std::size_t>> passing;
 
     // A character's name colour, when it has one (the lists that name characters show it as a square).
-    [[nodiscard]] std::optional<SDL_Color> characterColor(const Palette& palette, std::string_view name);
+    [[nodiscard]] std::optional<SDL_Color> characterColour(const Palette& palette, std::string_view name);
     // A sound file by its name (and whether it's there), as of the list of files: not looked for on disk
     // every frame.
-    [[nodiscard]] const std::string& cachedAudio(const Assets& assets, const std::string& name);
-    [[nodiscard]] std::optional<std::string> cachedFoundAudio(const Assets& assets, const std::string& name);
+    [[nodiscard]] const std::string& cachedSound(const Assets& assets, const std::string& name);
+    [[nodiscard]] std::optional<std::string> cachedFoundSound(const Assets& assets, const std::string& name);
     // The files in a folder with an ending, as listed once a generation (see filesGeneration); and whether
     // a file is there, as of that generation too: not looked for on disk every frame.
     [[nodiscard]] const std::vector<std::string>& cachedFiles(const std::string& folder, std::string_view ext);
@@ -814,11 +840,11 @@ struct DeveloperTools {
     std::optional<float> guideX, guideY;    // what the part being moved lines up with (on the canvas)
     std::unique_ptr<Game> sample; // the story at its first line (or choice), for the textboxes in screens
     bool sampleMade = false;
-    std::string tryScreen; // (tried: the screen whose on_show= ran; its on_hide= runs when another is tried)
+    std::string tryScreen; // (tried: the screen whose action_on_open= ran; its action_on_close= runs when another is tried)
     std::string triedStatus; // (what Try it said last: taken away when it stops)
     std::vector<std::string> tryOverlays; // the screens the tried one's buttons opened over it (the top last), as in the game
-    std::vector<std::string> tryLeaving;  // (closed: drawn while their hide_animation= plays)
-    bool tryClosing = false;              // the tried screen closed itself: its hide_animation= plays, then Try it stops
+    std::vector<std::string> tryLeaving;  // (closed: drawn while their animation_on_close= plays)
+    bool tryClosing = false;              // the tried screen closed itself: its animation_on_close= plays, then Try it stops
     std::string tryPending;               // one a button opened, opening once the screen under it has faded out
     std::pair<ScreenView::Played, ScreenView::Played> tryPendingWith; // ...playing these (with NAME and close with NAME)
     std::unique_ptr<ScreenView> screenView; // the screen open, as the game draws it
@@ -832,8 +858,8 @@ struct DeveloperTools {
         std::size_t key = 0;        // (one step for undo)
     };
     std::optional<PartDrag> partDrag;
-    // The Library's sub-picture: a box being dragged on the picture it's cut from (from where, in
-    // the picture's pixels, and where the mouse was pressed).
+    // The Library's sub-image: a box being dragged on the image it's cut from (from where, in
+    // the image's pixels, and where the mouse was pressed).
     struct CutDrag {
         SDL_FPoint from{};
         float x = 0.0f, y = 0.0f;
@@ -915,7 +941,7 @@ public:
     ~Developer() = default;
 
     [[nodiscard]] bool isOpen() const { return tools.open; }
-    void dropPreviews() { tools.dropPreviews(); } // (they use the pictures and the renderer: let go of before those are)
+    void dropPreviews() { tools.dropPreviews(); } // (they use the images and the renderer: let go of before those are)
     void dropCanvas() { tools.canvas.reset(); }
     void stopMovie() { tools.stopMovie(); }
     // They close, as they are (the game a found game folder has begins without them).
@@ -951,9 +977,9 @@ public:
     void playFromLine(const std::string& scene, std::optional<std::size_t> line); // the game, as it is at that line (none: the scene's first)
 
 private:
-    void runTrying(const Commands& commands, const std::string& confirm = {}); // (as a tried screen's: what they'd do to the player's game is said, not done)
+    void runTrying(const Commands& commands, const std::string& confirm = {}, const Variables& item = {}); // (as a tried screen's: what they'd do to the player's game is said, not done)
     void tryScreenHook(const ScreenDef& def, bool opening); // (as a tried screen's: said, not done)
-    void runScreenHook(std::string_view screen, bool shown);               // its on_show= or on_hide=, as the game runs them when it opens and closes
+    void runScreenHook(std::string_view screen, bool shown);               // its action_on_open= or action_on_close=, as the game runs them when it opens and closes
     [[nodiscard]] ScreenView* previewView(std::string_view name); // the preview's and Try it's: the editor's screens, as they are now
     [[nodiscard]] std::string translationPath(const std::string& id) const; // a translation's file
     void saveTranslation();                             // the Translate tab's file, written
@@ -975,13 +1001,13 @@ private:
     // did is done to it where it can be (the story goes on, a screen opens over it...), or said.
     void previewEvent(const SDL_Event& e);
     void previewDid();
-    void previewHooks(); // the on_show= and on_hide= of the screens that came and went on it
+    void previewHooks(); // the action_on_open= and action_on_close= of the screens that came and went on it
     // The story of `s` played as fast as it goes to a line of a scene (an option's: its choice's;
-    // none: the scene's first), in a game of its own (heard through `audio`) with copies of what the
+    // none: the scene's first), in a game of its own (heard through `sound`) with copies of what the
     // player has seen and kept. `reached` false: it never got there from the scene's start, so it
     // starts at the line itself. None when the line has nothing to show.
     // `before`: it stops just before the line's command, whatever it is (to start the game with it).
-    std::unique_ptr<Game> playedTo(const Script& s, const StoryEditor::Scene& scene, std::optional<std::size_t> line, Audio& audio, bool& reached,
+    std::unique_ptr<Game> playedTo(const Script& s, const StoryEditor::Scene& scene, std::optional<std::size_t> line, Sound& sound, bool& reached,
                                    bool before = false);
     void drawSettings(DeveloperUi& ui, const SDL_FRect& box);
     void drawScreens(DeveloperUi& ui, const SDL_FRect& area);
@@ -1017,7 +1043,7 @@ private:
     void drawVoices(DeveloperUi& ui, const SDL_FRect& list, const SDL_FRect& form);    // ...and voiced lines
     void drawStyleSample(DeveloperUi& ui, const std::string& style, const SDL_FRect& box);
     void drawAtlas(DeveloperUi& ui, const StoryEditor::Definition& def, const SDL_FRect& box); // its frames, and its eyes and mouth to drag
-    void drawSubPicture(DeveloperUi& ui, const StoryEditor::Definition& def, const SDL_FRect& box); // the picture it's cut from, to cut it out on
+    void drawSubImage(DeveloperUi& ui, const StoryEditor::Definition& def, const SDL_FRect& box); // the image it's cut from, to cut it out on
     // An animation in the Library: how it looks at its timeline's playhead, then how often it plays, its
     // timeline (drawTimeline: a row for each thing it changes, a bar for each change) and the chosen
     // change's form. The sample: a square in the middle of the game's screen, as a part there would
@@ -1039,8 +1065,8 @@ private:
     void translationKeys();                                     // ...undo and redo
     void pruneTranslation();                                    // ...the texts the game doesn't show any more, taken out
     bool goTo(const std::string& path, std::size_t line); // the developer tools at that line of the scripts
-    void importFiles(); // the files picked or dropped, into images/, audio/, movies/ or fonts/
-    // The system's dialog to pick files of a kind (`extensions` with their dots) to import; `as`: the
+    void importFiles(); // the files picked or dropped, into images/, sounds/, movies/ or fonts/
+    // The system's file chooser to pick files of a kind (`extensions` with their dots) to import; `as`: the
     // one picked goes there, under that name (images/spanish/sign, without its extension).
     void chooseFiles(std::string_view label, std::span<const std::string_view> extensions, const std::string& as);
     // A sound file's Play button: it plays the file while every other sound waits, and is Stop while
@@ -1061,7 +1087,7 @@ private:
     // Where the story is (the file and line of its command), when the developer tools were opened over it.
     [[nodiscard]] std::optional<std::pair<std::string, std::size_t>> storyAt() const;
     // The developer tools' language: their own folder (where the one chosen is kept), the folder of the
-    // translations ("editor languages", next to the player), the translations there, one put in use
+    // translations ("developer tools translations", next to the player), the translations there, one put in use
     // (empty: English), and About's row for them: how tall it is. writeToolsTranslation: a file with every
     // text the tools show to translate, or the texts the one in use doesn't have yet added to its file.
     [[nodiscard]] std::string toolsFolder() const;
@@ -1087,7 +1113,7 @@ private:
     struct PopupFrame;                    // (that list this frame: where, the value, what's picked)
     void drawColourWheel(PopupFrame& pop); // ...a colour box's: its code, wheel and bars
     std::optional<std::string> drawFormatBar(DeveloperUi& ui, const std::string& id, float x, float w, float& y);
-    [[nodiscard]] std::vector<ScriptError> missingFiles(const Script& script) const; // lines using pictures, sounds or videos the game lacks
+    [[nodiscard]] std::vector<ScriptError> missingFiles(const Script& script) const; // lines using images, sounds or movies the game lacks
 
     Engine& engine;       // the player they're the tools of
     DeveloperTools tools; // their state

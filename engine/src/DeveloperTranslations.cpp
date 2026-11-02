@@ -288,7 +288,7 @@ void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const s
         if (const std::string want = translationFileName(name); !want.empty() && want != t.id && !std::ranges::contains(ids, want)) renameTranslation(t.id, want);
     // (a code that isn't the language's: a computer set to it wouldn't pick this translation)
     if (const std::string known = languageCode(name); !known.empty() && !code.empty() && lower(code) != known && !lower(code).starts_with(known + "-"))
-        y += ui.text("Computers set to {} say {}, not {}: with code={} they'd start with this translation."_tr(name, known, code, known), right.x, y,
+        y += ui.text("Computers set to {} say {}, not {}: with the code {} they'd start with this translation."_tr(name, known, code, known), right.x, y,
                      layout::noteText, kWarn, right.w).y + 8 * k;
 
     const std::vector<TextPair> pairs = textPairs(t.lines); // (after the language's line: it may have come first just now)
@@ -397,18 +397,18 @@ void Developer::fillTranslation(const std::string& id) {
     openTranslation(id);
 }
 
-// A translation's file named after its language (japanese.vnscript), and its own pictures, sounds and
+// A translation's file named after its language (japanese.vnscript), and its own images, sounds and
 // movies (images/japanese/...) with it.
 void Developer::renameTranslation(const std::string from, const std::string& to) { // (from is a copy: it can be t.id, which changes below)
     DeveloperTools& d = tools;
     auto& t = d.translation;
     if (!SDL_RenamePath(translationPath(from).c_str(), translationPath(to).c_str())) return;
     ++d.filesGeneration;
-    for (const std::string_view sub : {"images/", "audio/", "movies/"}) {
+    for (const std::string_view sub : {"images/", "sounds/", "movies/"}) {
         const std::string was = engine.gameRoot() + std::string(sub) + from;
         if (SDL_PathInfo info; SDL_GetPathInfo(was.c_str(), &info) && info.type == SDL_PATHTYPE_DIRECTORY &&
                                !SDL_RenamePath(was.c_str(), (engine.gameRoot() + std::string(sub) + to).c_str())) {
-            d.failed = true; // (its own pictures, sounds or movies stay under the old name: said)
+            d.failed = true; // (its own images, sounds or movies stay under the old name: said)
             d.status = "Can't move '{}{}' to '{}{}': {}."_tr(sub, from, sub, to, SDL_GetError());
         }
     }

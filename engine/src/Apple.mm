@@ -1,4 +1,4 @@
-// What macOS offers the player through its own frameworks: spelling, reading text aloud and videos
+// What macOS offers the player through its own frameworks: spelling, reading text aloud and movies
 // other than MPEG-1 (System.hpp says what each does; other systems have stand-ins in System.cpp).
 #include "System.hpp"
 
@@ -64,30 +64,30 @@ void speak(std::string_view words) {
 
 namespace {
 
-// A video through AVFoundation: a reader for its pictures and one for its sound (each read at its
+// A movie through AVFoundation: a reader for its images and one for its sound (each read at its
 // own pace). (Its tracks are looked up the way that waits for them: fine for a file on disk.)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-class AppleVideo final : public SystemVideo {
+class AppleMovie final : public SystemMovie {
 public:
     bool start(NSURL* url) {
         asset_ = [AVURLAsset URLAssetWithURL:url options:nil];
-        AVAssetTrack* video = [asset_ tracksWithMediaType:AVMediaTypeVideo].firstObject;
-        if (!video) return false;
-        const CGSize size = video.naturalSize;
+        AVAssetTrack* imageTrack = [asset_ tracksWithMediaType:AVMediaTypeVideo].firstObject;
+        if (!imageTrack) return false;
+        const CGSize size = imageTrack.naturalSize;
         describe({.width = static_cast<int>(size.width),
                   .height = static_cast<int>(size.height),
                   .duration = CMTimeGetSeconds(asset_.duration),
                   .sound = [asset_ tracksWithMediaType:AVMediaTypeAudio].firstObject != nil});
         return readers();
     }
-    bool nextPicture(std::vector<std::uint8_t>& pixels, int& pitch, double& time) override {
+    bool nextImage(std::vector<std::uint8_t>& pixels, int& pitch, double& time) override {
         @autoreleasepool {
             for (;;) {
-                const Owned<CMSampleBufferRef, CFRelease> sample{[pictureOut_ copyNextSampleBuffer]};
+                const Owned<CMSampleBufferRef, CFRelease> sample{[imageOut_ copyNextSampleBuffer]};
                 if (!sample) return false;
                 CVImageBufferRef image = CMSampleBufferGetImageBuffer(sample.get());
-                if (!image) continue; // (not a picture: on to the next)
+                if (!image) continue; // (not an image: on to the next)
                 const auto rows = CVPixelBufferGetHeight(image), stride = CVPixelBufferGetBytesPerRow(image);
                 pitch = static_cast<int>(stride);
                 pixels.resize(rows * stride); // (before the lock: nothing between it and the unlock can fail)
@@ -112,7 +112,7 @@ public:
         }
     }
     void restart() override {
-        [pictures_ cancelReading];
+        [images_ cancelReading];
         [sounds_ cancelReading];
         readers();
     }
@@ -120,18 +120,18 @@ public:
 private:
     bool readers() {
         NSError* error = nil;
-        pictures_ = [AVAssetReader assetReaderWithAsset:asset_ error:&error];
-        AVAssetTrack* video = [asset_ tracksWithMediaType:AVMediaTypeVideo].firstObject;
-        if (!pictures_ || !video) return false;
-        pictureOut_ = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:video
+        images_ = [AVAssetReader assetReaderWithAsset:asset_ error:&error];
+        AVAssetTrack* imageTrack = [asset_ tracksWithMediaType:AVMediaTypeVideo].firstObject;
+        if (!images_ || !imageTrack) return false;
+        imageOut_ = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:imageTrack
                                                                 outputSettings:@{(__bridge NSString*)kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_32BGRA)}];
-        pictureOut_.alwaysCopiesSampleData = NO;
-        [pictures_ addOutput:pictureOut_];
-        if (![pictures_ startReading]) return false;
+        imageOut_.alwaysCopiesSampleData = NO;
+        [images_ addOutput:imageOut_];
+        if (![images_ startReading]) return false;
         soundOut_ = nil;
-        if (AVAssetTrack* audio = [asset_ tracksWithMediaType:AVMediaTypeAudio].firstObject) {
+        if (AVAssetTrack* soundTrack = [asset_ tracksWithMediaType:AVMediaTypeAudio].firstObject) {
             sounds_ = [AVAssetReader assetReaderWithAsset:asset_ error:&error];
-            soundOut_ = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:audio outputSettings:@{
+            soundOut_ = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:soundTrack outputSettings:@{
                 AVFormatIDKey : @(kAudioFormatLinearPCM), AVLinearPCMBitDepthKey : @32, AVLinearPCMIsFloatKey : @YES,
                 AVLinearPCMIsNonInterleaved : @NO, AVLinearPCMIsBigEndianKey : @NO, AVNumberOfChannelsKey : @2, AVSampleRateKey : @(kSoundRate)}];
             if (sounds_ && soundOut_) [sounds_ addOutput:soundOut_];
@@ -141,28 +141,28 @@ private:
     }
 
     AVURLAsset* asset_ = nil;
-    AVAssetReader* pictures_ = nil;
+    AVAssetReader* images_ = nil;
     AVAssetReader* sounds_ = nil;
-    AVAssetReaderTrackOutput* pictureOut_ = nil;
+    AVAssetReaderTrackOutput* imageOut_ = nil;
     AVAssetReaderTrackOutput* soundOut_ = nil;
 };
 #pragma clang diagnostic pop
 
 } // namespace
 
-std::unique_ptr<SystemVideo> SystemVideo::open(const std::string& path, const std::string* data) {
+std::unique_ptr<SystemMovie> SystemMovie::open(const std::string& path, const std::string* data) {
     @autoreleasepool {
         NSString* file = text(path);
         if (data) { // (from a pack: a copy on disk to read, made once)
-            const std::string name = std::format("vnext-video-{:016x}{}", std::hash<std::string>{}(*data), path.substr(path.rfind('.')));
+            const std::string name = std::format("vnext-movie-{:016x}{}", std::hash<std::string>{}(*data), path.substr(path.rfind('.')));
             file = [NSTemporaryDirectory() stringByAppendingPathComponent:text(name)];
             if (![[NSFileManager defaultManager] fileExistsAtPath:file] &&
                 ![[NSData dataWithBytesNoCopy:const_cast<char*>(data->data()) length:data->size() freeWhenDone:NO] writeToFile:file atomically:YES])
                 return nullptr;
         }
-        auto video = std::make_unique<AppleVideo>();
-        if (!video->start([NSURL fileURLWithPath:file])) return nullptr;
-        return video;
+        auto movie = std::make_unique<AppleMovie>();
+        if (!movie->start([NSURL fileURLWithPath:file])) return nullptr;
+        return movie;
     }
 }
 

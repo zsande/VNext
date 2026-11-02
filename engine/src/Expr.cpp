@@ -60,7 +60,7 @@ struct Function {
 constexpr std::array kFunctions{
     Function{"random", 1, 2}, Function{"min", 1, 16}, Function{"max", 1, 16}, Function{"abs", 1, 1},
     Function{"len", 1, 1},    Function{"str", 1, 1},  Function{"int", 1, 1},  Function{"upper", 1, 1},
-    Function{"lower", 1, 1},  Function{"round", 1, 1}, Function{"if", 3, 3}, // if(condition, then, otherwise): a picture by a yes/no...
+    Function{"lower", 1, 1},  Function{"round", 1, 1}, Function{"if", 3, 3}, // if(condition, then, otherwise): an image by a yes/no...
 };
 
 // Comparisons written as words, longest first: "is at least" -> ">=".
@@ -365,6 +365,13 @@ Value Expr::eval(const Lookup& lookup) const {
     return root_ >= 0 ? evalNode(root_, lookup) : Value{0};
 }
 
+std::vector<std::string> Expr::names() const {
+    std::vector<std::string> out;
+    for (const Node& n : nodes_)
+        if (n.kind == Kind::Variable && !std::ranges::contains(out, n.name)) out.push_back(n.name);
+    return out;
+}
+
 std::optional<Value> Expr::constant() const {
     if (root_ < 0 || nodes_[static_cast<std::size_t>(root_)].kind != Kind::Literal) return std::nullopt;
     return nodes_[static_cast<std::size_t>(root_)].value;
@@ -466,9 +473,9 @@ Value Expr::evalNode(int index, const Lookup& lookup) const {
 }
 
 bool isTextTag(std::string_view inner) {
-    static constexpr std::array<std::string_view, 19> tags{"pause",  "nowait",  "speed", "/speed",    "color",      "/color",
-                                                           "reveal", "bold",    "/bold", "italic",    "/italic",    "underline",
-                                                           "/underline", "strike", "/strike", "ruby", "/ruby", "tip", "/tip"};
+    static constexpr std::array<std::string_view, 19> tags{"pause",  "no_wait",  "speed", "/speed",    "colour",      "/colour",
+                                                           "appears", "bold",    "/bold", "italic",    "/italic",    "underline",
+                                                           "/underline", "crossed_out", "/crossed_out", "furigana", "/furigana", "tip", "/tip"};
     return std::ranges::contains(tags, lower(inner.substr(0, inner.find_first_of(" ="))));
 }
 
@@ -535,6 +542,30 @@ std::string fillValues(std::string_view text, const Lookup& lookup) {
     return out;
 }
 
+std::string withValues(std::string_view text, const Variables& values) {
+    std::string out;
+    out.reserve(text.size());
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
+        const auto close = text.find('}', i);
+        if ((c == '{' || c == '}') && i + 1 < text.size() && text[i + 1] == c) {
+            out += text.substr(i, 2);
+            ++i;
+        } else if (c == '{' && close != std::string_view::npos) {
+            const std::string_view inner = text.substr(i + 1, close - i - 1);
+            if (const auto it = values.find(trim(inner)); it != values.end()) {
+                for (char v : toString(it->second)) out += v == '{' || v == '}' ? std::string(2, v) : std::string(1, v);
+            } else {
+                out += text.substr(i, close - i + 1);
+            }
+            i = close;
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
 std::string checkText(std::string_view text) {
     for (std::size_t i = 0; i < text.size(); ++i) {
         if ((text[i] == '{' || text[i] == '}') && i + 1 < text.size() && text[i + 1] == text[i]) {
@@ -546,9 +577,28 @@ std::string checkText(std::string_view text) {
         const std::string_view inner = text.substr(i + 1, close - i - 1);
         i = close;
         if (isTextTag(inner)) continue;
-        if (auto e = Expr::parse(inner); !e) return "There's a mistake in {{{}}}: {}"_tr(inner, e.error());
+        if (auto e = Expr::parse(inner); !e) return "There's a mistake in {{{}}}: {}."_tr(inner, e.error());
     }
     return {};
+}
+
+std::vector<std::string> namesIn(std::string_view text) {
+    std::vector<std::string> out;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if ((text[i] == '{' || text[i] == '}') && i + 1 < text.size() && text[i + 1] == text[i]) {
+            ++i;
+            continue;
+        }
+        const auto close = text.find('}', i);
+        if (text[i] != '{' || close == std::string_view::npos) continue;
+        const std::string_view inner = text.substr(i + 1, close - i - 1);
+        i = close;
+        if (isTextTag(inner)) continue;
+        if (const auto e = Expr::parse(inner))
+            for (std::string& name : e->names())
+                if (!std::ranges::contains(out, name)) out.push_back(std::move(name));
+    }
+    return out;
 }
 
 int randomNumber(int lo, int hi) {

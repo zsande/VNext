@@ -37,7 +37,7 @@ namespace vn {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Logical resolution ("config resolution" in the script). Everything is laid out in these
+// Logical resolution ("setting game_size" in the script). Everything is laid out in these
 // coordinates and scaled to the window. The engine has the one in effect (Engine::canvas()).
 struct Canvas {
     float w = 1280.0f;
@@ -159,7 +159,7 @@ template <class F>
 void withoutThrowing(F&& body) noexcept {
     try {
         std::forward<F>(body)();
-    } catch (...) { // (what it was doing is dropped: a log line, files picked, a video's sound)
+    } catch (...) { // (what it was doing is dropped: a log line, files picked, a movie's sound)
     }
 }
 
@@ -233,15 +233,15 @@ constexpr std::uint64_t fnv1a(std::string_view s, std::uint64_t h = 146959810393
     return h;
 }
 
-// The shadow drawn under text (styles: shadow=, shadow_color=, shadow_offset=).
+// The shadow drawn under text (styles: shadow=, shadow_colour=, shadow_offset=).
 struct TextShadow {
     bool on = true;
-    SDL_Color color{0, 0, 0, 153};
+    SDL_Color colour{0, 0, 0, 153};
     float offset = 0.0f; // canvas pixels; 0: one sixteenth of a line
 };
 
 // How a line of dialogue appears: a letter, a word or a whole line at a time.
-enum class Reveal : std::uint8_t { Letter, Word, Line };
+enum class TextAppears : std::uint8_t { Letter, Word, Line };
 
 namespace utf8 {
 std::size_t length(std::string_view s);
@@ -249,7 +249,7 @@ std::size_t offset(std::string_view s, std::size_t codepoints); // byte offset o
 } // namespace utf8
 
 // Small and capital letters, in ASCII and the alphabets with one rule each for it (Latin with its
-// accents, Greek, Cyrillic): names compare the same however they're capitalized.
+// accents, Greek, Cyrillic): names compare the same however they're capitalised.
 char32_t lowerOf(char32_t c);
 char32_t upperOf(char32_t c);
 std::string lower(std::string_view s);
@@ -269,17 +269,17 @@ std::optional<float> parseNumber(std::string_view s);
 // on/off, yes/no, true/false, 1/0
 std::optional<bool> parseBool(std::string_view s);
 
-// Colour names: the built-in ones (white, black, red, pink, skyblue...) plus "color" lines.
+// Colour names: the built-in ones (white, black, red, pink, skyblue...) plus "colour" lines.
 using Palette = std::map<std::string, SDL_Color, std::less<>>;
 // "#rgb", "#rrggbb", "#rrggbbaa" or a colour name; a gradient ("navy-black": fading down to another) gives its top.
-std::optional<SDL_Color> parseColor(std::string_view text, const Palette* palette = nullptr);
+std::optional<SDL_Color> parseColour(std::string_view text, const Palette* palette = nullptr);
 // "TOP-BOTTOM": a colour fading down to another (navy-black, #203040-#000000).
 std::optional<std::pair<SDL_Color, SDL_Color>> parseGradient(std::string_view text, const Palette* palette = nullptr);
-// What a colour's box says for a value: its name, a code's likeness (colorName), "navy down to black" for a gradient.
-std::string colorWords(std::string_view value, const Palette* palette = nullptr);
+// What a colour's box says for a value: its name, a code's likeness (colourName), "navy down to black" for a gradient.
+std::string colourWords(std::string_view value, const Palette* palette = nullptr);
 // What to call a colour: its name (the game's own, or a built-in one) when it has one, else the
 // built-in one it's most like ("like navy"); a see-through one says how much ("black, 50%").
-std::string colorName(SDL_Color c, const Palette* palette = nullptr);
+std::string colourName(SDL_Color c, const Palette* palette = nullptr);
 // A colour's hue (0 to 360), saturation and value (0 to 1); a grey's hue is 0.
 std::array<float, 3> hsvOf(SDL_Color c);
 
@@ -296,15 +296,15 @@ std::array<float, 3> hsvOf(SDL_Color c);
 
 inline constexpr std::string_view kPackName = "game.vnext";
 
-// The files the player reads, by their endings (in lower case): pictures, sounds, videos (MPEG-1;
-// the others where the system plays them, see kSystemVideoTypes) and fonts.
+// The files the player reads, by their endings (in lower case): images, sounds, movies (MPEG-1;
+// the others where the system plays them, see kSystemMovieTypes) and fonts.
 inline constexpr std::array<std::string_view, 6> kImageTypes{".png", ".jpg", ".jpeg", ".bmp", ".qoi", ".gif"};
-inline constexpr std::array<std::string_view, 4> kAudioTypes{".ogg", ".mp3", ".flac", ".wav"};
-inline constexpr std::array<std::string_view, 5> kVideoTypes{".mpg", ".mpeg", ".mp4", ".mov", ".m4v"};
+inline constexpr std::array<std::string_view, 4> kSoundTypes{".ogg", ".mp3", ".flac", ".wav"};
+inline constexpr std::array<std::string_view, 5> kMovieTypes{".mpg", ".mpeg", ".mp4", ".mov", ".m4v"};
 inline constexpr std::array<std::string_view, 3> kFontTypes{".ttf", ".otf", ".ttc"};
 
 // The game's files: its pack's, once one is open (for the paths under its root), else the disk's. The
-// engine has one (Engine::files()); what reads the game (pictures, sounds, fonts, videos, scripts) is
+// engine has one (Engine::files()); what reads the game (images, sounds, fonts, movies, scripts) is
 // given it.
 class GameFiles {
 public:
@@ -360,18 +360,18 @@ std::optional<std::string> moveToTrash(const std::string& path);
 [[nodiscard]] std::vector<std::string> spellings(std::string_view word, std::string_view language);
 void learnSpelling(std::string_view word);
 void speak(std::string_view words);
-// A video the system plays (MP4, MOV and M4V: AVFoundation on a Mac, Media Foundation on Windows, GStreamer on
+// A movie the system plays (MP4, MOV and M4V: AVFoundation on a Mac, Media Foundation on Windows, GStreamer on
 // Linux where it's installed; elsewhere none): its
-// pictures in order, each with its time, and its sound. From a file (or, `data` given, from its
+// images in order, each with its time, and its sound. From a file (or, `data` given, from its
 // bytes: one in a pack).
-class SystemVideo {
+class SystemMovie {
 public:
-    [[nodiscard]] static std::unique_ptr<SystemVideo> open(const std::string& path, const std::string* data);
-    virtual ~SystemVideo() = default;
-    SystemVideo(const SystemVideo&) VN_DELETED("used through a pointer to it: never copied, so never sliced");
-    SystemVideo& operator=(const SystemVideo&) VN_DELETED("used through a pointer to it: never copied, so never sliced");
-    SystemVideo(SystemVideo&&) VN_DELETED("used through a pointer to it: never copied, so never sliced");
-    SystemVideo& operator=(SystemVideo&&) VN_DELETED("used through a pointer to it: never copied, so never sliced");
+    [[nodiscard]] static std::unique_ptr<SystemMovie> open(const std::string& path, const std::string* data);
+    virtual ~SystemMovie() = default;
+    SystemMovie(const SystemMovie&) VN_DELETED("used through a pointer to it: never copied, so never sliced");
+    SystemMovie& operator=(const SystemMovie&) VN_DELETED("used through a pointer to it: never copied, so never sliced");
+    SystemMovie(SystemMovie&&) VN_DELETED("used through a pointer to it: never copied, so never sliced");
+    SystemMovie& operator=(SystemMovie&&) VN_DELETED("used through a pointer to it: never copied, so never sliced");
     // What it is: its size in pixels, how long it lasts, and whether it has sound (stereo, kSoundRate a second).
     struct Info {
         int width = 0, height = 0;
@@ -380,20 +380,20 @@ public:
     };
     [[nodiscard]] const Info& info() const { return info_; }
     static constexpr int kSoundRate = 48000;
-    // The next picture: blue, green, red and alpha, `pitch` bytes a row; false after the last.
-    virtual bool nextPicture(std::vector<std::uint8_t>& pixels, int& pitch, double& time) = 0;
+    // The next image: blue, green, red and alpha, `pitch` bytes a row; false after the last.
+    virtual bool nextImage(std::vector<std::uint8_t>& pixels, int& pitch, double& time) = 0;
     // More of its sound, the two sides' samples in turn; false after the end.
     virtual bool nextSound(std::vector<float>& samples) = 0;
     virtual void restart() = 0; // from the beginning again
 
 protected:
-    SystemVideo() = default;
+    SystemMovie() = default;
     void describe(const Info& info) { info_ = info; } // (once it's open: what the system says it is)
 
 private:
     Info info_;
 };
-inline constexpr std::array<std::string_view, 3> kSystemVideoTypes{".mp4", ".mov", ".m4v"};
+inline constexpr std::array<std::string_view, 3> kSystemMovieTypes{".mp4", ".mov", ".m4v"};
 
 // Packs the game folder `folder` (with a slash at the end) into the file `file`: everything in it
 // but saves/ and hidden files.
@@ -415,7 +415,7 @@ struct SaveInfo {
 };
 
 // Save slots: one file each, <folder>/<page>-<n>.vnsave, on the disk or in the game's pack. It holds the
-// game state as lines of text (metadata last), then a "thumbnail png <bytes>" line and the thumbnail picture.
+// game state as lines of text (metadata last), then a "thumbnail png <bytes>" line and the thumbnail image.
 // Pages are "auto" and "quick" (written round-robin) plus the numbered pages "1".."N".
 class SaveStore {
 public:
@@ -492,10 +492,10 @@ private:
 // Settings
 // ---------------------------------------------------------------------------
 
-struct GameConfig; // (Script.hpp)
+struct GameSettings; // (Script.hpp)
 
 // Player preferences, stored as "name value" lines in settings.txt in the save folder.
-// Defaults come from "config default.<name> value" lines in the script.
+// Defaults come from "setting default.<name> value" lines in the script.
 struct Settings {
     // Display
     bool fullscreen = false;
@@ -504,37 +504,39 @@ struct Settings {
     int scaling = 0; // fit, integer, stretch, fill
     bool vsync = true;
     int frameLimit = 0; // frames per second, 0 = unlimited
-    // Audio (percent)
+    // Sound (percent)
     int masterVolume = 100;
     int musicVolume = 80;
     int soundVolume = 100;
     int voiceVolume = 100;
-    bool babble = true;       // made-up voices (characters with babble=)
-    bool typingSounds = true; // the little sounds as text types (characters with blip=)
-    int mouths = 0;           // when mouths move: 0 as the characters say (talk=), 1 only with a voice, 2 never
+    bool madeUpVoices = true; // made-up voices (characters with made_up_voice=)
+    bool typingSounds = true; // the little sounds as text types (characters with typing_sound=)
+    int mouths = 0;           // when mouths move: 0 as the characters say (mouth_moves=), 1 only with a voice, 2 never
     // Text
     int textSpeed = 45;      // characters per second, 0 = instant
     int autoDelay = 500;     // milliseconds before auto-advance (plus a little per letter on lines without a voice)
     int textboxOpacity = 85; // percent
-    int textSize = 100;      // percent, for text in styles with text_size=yes
+    int textSize = 100;      // percent, for text in styles with text_size_follows=yes
     bool animations = true; // (off: no motion: animations show how they end, and looping ones stand still)
     // Skipping and going back
     bool skipUnread = false;       // false: skipping stops at text that hasn't been read yet
     bool skipAfterChoices = false; // false: making a choice ends skip mode
     bool rollback = true;          // the mouse wheel / Back button goes back to earlier lines
-    bool skipMovies = true;        // clicks and skipping go past videos (unless the story says skip=no)
+    bool skipMovies = true;        // clicks and skipping go past movies (unless the story says skip=no)
     // Seeing and hearing
     bool readAloud = false;    // the system reads the lines, choices and the buttons pointed at aloud (macOS)
     bool highContrast = false; // screens drawn in white on black, the button pointed at in yellow
+    bool vibration = true;     // controllers rumble: the phone buzzing with a message, ringing with a call
     // Language: a translation's id, "original" (as written), or empty: the computer's language when
     // there's a translation for it.
     std::string language;
     // Keys the player chose on the Controls screen, by control name ("none" for an emptied slot).
     std::map<std::string, std::vector<std::string>, std::less<>> keys;
 
-    // Sets one value by its name (settings.txt, config default.NAME); false for unknown names.
+    // Sets one value by its name (settings.txt, setting default.NAME); false for unknown names.
     bool set(std::string_view key, int value);
     [[nodiscard]] std::optional<int> get(std::string_view key) const; // (yes: 1, no: 0)
+    [[nodiscard]] static bool has(std::string_view key);              // there's a setting called that
     static Settings load(const std::string& path, const Settings& defaults);
     bool save(const std::string& path) const;
 };
@@ -550,8 +552,8 @@ using ReadLog = std::unordered_set<std::uint64_t>;
 struct SettingControl {
     std::function<float(const Settings&)> value;
     std::function<void(Settings&, float)> setValue;
-    std::function<std::string(const Settings&, const GameConfig&)> text;
-    bool testSound = false; // play a blip after changing it
+    std::function<std::string(const Settings&, const GameSettings&)> text;
+    bool testSound = false; // play a short sound after changing it
 };
 const SettingControl* findSettingControl(std::string_view name);
 

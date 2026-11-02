@@ -152,7 +152,7 @@ std::string headOf(std::string_view text) {
     return head;
 }
 
-bool capitalized(std::string_view text) { return startsWithCapital(text); }
+bool capitalised(std::string_view text) { return startsWithCapital(text); }
 
 std::string_view afterWords(std::string_view text, std::size_t count) {
     for (std::size_t i = 0; i < count; ++i) {
@@ -231,26 +231,29 @@ struct CommandWord {
 };
 constexpr auto kCommands = std::to_array<CommandWord>({
     // The story's own: blocks, waiting, questions, its structure.
-    {"label", true, false}, {"if", true, false}, {"else", true, false}, {"elif", true, false}, {"choice", true, false},
+    {"scene", true, false}, {"if", true, false}, {"else", true, false}, {"choice", true, false},
     {"return", true, false}, {"wait", true, false}, {"ask", true, false}, {"textbox", true, false}, {"new page", true, false}, {"together", true, false},
-    {"movie", true, false}, {"chapter", true, false}, {"chart", true, false}, {"ending", true, false}, {"message", true, false},
-    {"phone", true, false},
+    {"movie", true, false}, {"chapter", true, false}, {"flowchart", true, false}, {"ending", true, false},
+    {"phone", true, false}, {"chat", true, false},
     // Both.
-    {"scene", true, true}, {"show", true, true}, {"hide", true, true},
+    {"background", true, true}, {"show", true, true}, {"hide", true, true},
     {"effect", true, true}, {"weather", true, true}, {"camera", true, true}, {"music", true, true}, {"sound", true, true},
     {"voice", true, true}, {"stop", true, true}, {"jump", true, true}, {"call", true, true}, {"end", true, true},
-    {"set", true, true}, {"add", true, true}, {"subtract", true, true}, {"toggle", true, true}, {"unlock", true, true},
-    {"achievement", true, true}, {"tip", true, true}, {"notify", true, true}, {"open", true, true}, {"quick save", true, true},
+    {"set", true, true}, {"add", true, true}, {"subtract", true, true}, {"toggle", true, true}, {"gallery", true, true},
+    {"achievement", true, true}, {"tip", true, true}, {"notice", true, true}, {"open app", false, true}, {"open chat", false, true},
+    {"open image", false, true}, {"open", true, true},
+    {"quick save", true, true},
     {"fullscreen", true, true}, {"screenshot", true, true}, {"quit", true, true},
     // Buttons and keys only.
-    {"start", false, true}, {"continue", false, true}, {"close", false, true}, {"answer", false, true},
+    {"start", false, true}, {"continue", false, true}, {"close", false, true}, {"answer call", false, true}, {"decline call", false, true}, {"hang up", false, true},
+    {"answer", false, true}, {"phone call", false, true}, {"send", false, true}, {"like", false, true}, {"keypad", false, true}, {"unlock", false, true},
     {"quick load", false, true}, {"skip", false, true}, {"auto", false, true},
-    {"advance", false, true}, {"rollback", false, true}, {"reload", false, true}, {"yes", false, true}, {"no", false, true},
-    {"next page", false, true}, {"previous page", false, true}, {"delete save", false, true}, {"next cg", false, true},
-    {"previous cg", false, true}, {"setting", false, true}, {"reset settings", false, true}, {"reset controls", false, true},
-    {"reset progress", false, true},
+    {"next line", false, true}, {"rollback", false, true}, {"reload", false, true}, {"yes", false, true}, {"no", false, true},
+    {"next page", false, true}, {"previous page", false, true}, {"delete save", false, true}, {"next image", false, true},
+    {"previous image", false, true}, {"setting", false, true}, {"reset settings", false, true}, {"reset controls", false, true},
+    {"reset progress", false, true}, {"back", false, true},
 });
-constexpr auto kDefinitions = std::to_array<std::string_view>({"character", "color", "position", "font", "atlas", "picture", "config", "style",
+constexpr auto kDefinitions = std::to_array<std::string_view>({"character", "colour", "place", "font", "atlas", "sub-image", "setting", "style",
                                                                 "control", "gallery", "ending", "song", "achievement", "tip", "animation", "screen",
                                                                 "variable"});
 
@@ -268,7 +271,18 @@ std::string commandOf(std::string_view text, bool story) {
 }
 
 bool isBlockWord(std::string_view verb) {
-    return verb == "if" || verb == "else" || verb == "elif" || verb == "choice" || verb == "label";
+    return verb == "if" || verb == "else" || verb == "choice" || verb == "scene";
+}
+
+// Whether a screen's lines have an app called `name` (in lower case) among their parts, at any depth: a
+// container with app=NAME.
+bool hasAppPart(const Line& screen, std::string_view name) {
+    return std::ranges::any_of(screen.children, [&](const Line& part) {
+        const bool app = lower(firstWord(part.text)) == "container" && std::ranges::any_of(rawWords(afterWords(part.text, 1)), [&](const std::string& word) {
+            return lower(word).starts_with("app=") && lower(unquote(std::string_view(word).substr(4))) == name;
+        });
+        return app || hasAppPart(part, name);
+    });
 }
 
 // "ending NAME", "achievement NAME" and "tip NAME" with nothing after the name are the story reaching
@@ -281,48 +295,47 @@ struct KindSpec {
     std::string_view name;
     ElementKind kind;
     std::string_view style; // style used when the element names none
-    std::array<std::string_view, 10> options;
-    bool list = false;      // a list or grid of items: also columns= item_w= item_h= gap= gap_x= gap_y=
+    std::array<std::string_view, 24> options;
+    bool list = false;      // a list or grid of items: also columns= item_width= item_height= spacing= spacing_across= spacing_down=
 };
-constexpr auto kListOptions = std::to_array<std::string_view>({"columns", "item_w", "item_h", "gap", "gap_x", "gap_y", "glide", "glide_speed", "glide_distance"});
+constexpr auto kListOptions = std::to_array<std::string_view>({"columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down", "glide", "glide_speed", "glide_distance"});
 constexpr std::array kKinds{
-    KindSpec{"image", ElementKind::Image, "", {"fit", "flip", "repeat", "selected", "scroll", "scroll_time", "bottom"}}, // (a picture, a colour, or one fading to bottom=)
-    KindSpec{"text", ElementKind::Text, "text", {"selected"}},
-    KindSpec{"button", ElementKind::Button, "button", {"action", "confirm", "key", "enabled", "selected", "drag", "drop", "click_animation"}},
+    KindSpec{"image", ElementKind::Image, "", {"fit", "flip", "repeat", "chosen", "scroll", "scroll_round", "bottom"}}, // (an image, a colour, or one fading to bottom=)
+    KindSpec{"text", ElementKind::Text, "text", {"chosen", "width_at_most", "lines"}},
+    KindSpec{"button", ElementKind::Button, "button", {"action", "confirm", "key", "clickable", "chosen", "drag", "drop", "click_animation"}},
     KindSpec{"key", ElementKind::Key, "", {"action", "confirm"}},
-    KindSpec{"namebox", ElementKind::Namebox, "namebox", {"bar", "bar_color"}},
+    KindSpec{"namebox", ElementKind::Namebox, "namebox", {"bar", "bar_colour"}},
     KindSpec{"dialogue", ElementKind::Dialogue, "dialogue", {}},
     KindSpec{"indicator", ElementKind::Indicator, "indicator", {"bob", "bob_speed", "pause_image"}},
-    KindSpec{"choices", ElementKind::Choices, "choice", {"anchor", "locked_style", "seen_style"}, true},
+    KindSpec{"choices", ElementKind::Choices, "choice", {"position", "locked_style", "picked_before_style"}, true},
     KindSpec{"history", ElementKind::History, "history",
-             {"name_w", "close_on_bottom", "name_style", "text_style", "choice_style", "voice", "back", "button_style"}, true},
-    KindSpec{"pages", ElementKind::Pages, "tab", {"wide_w", "mode", "auto", "quick"}, true},
+             {"name_width", "close_at_end", "name_style", "text_style", "choice_style", "voice", "back", "button_style"}, true},
+    KindSpec{"pages", ElementKind::Pages, "tab", {"wide_tab_width", "mode", "auto", "quick"}, true},
     KindSpec{"slots", ElementKind::Slots, "slot", {"mode", "delete", "title_style", "text_style", "empty_style", "confirm", "load_confirm", "delete_confirm"}, true},
-    KindSpec{"message", ElementKind::Message, "notify", {}},
+    KindSpec{"notice", ElementKind::Notice, "notice", {}},
     KindSpec{"face", ElementKind::Face, "face", {"fit", "flip"}}, // flip=yes mirrors every face (and face_flip=yes ones back)
     KindSpec{"control", ElementKind::Control, "setting", {"slot", "waiting"}},
     KindSpec{"gallery", ElementKind::Gallery, "gallery", {"action", "title_style", "locked_style"}, true},
-    KindSpec{"page", ElementKind::Page, "page", {"name_w", "name_style", "text_style"}, true},
-    KindSpec{"input", ElementKind::Input, "input", {"var", "max", "hint", "action", "confirm", "enabled"}},
-    KindSpec{"bar", ElementKind::Bar, "bar", {"value", "max", "vertical", "track", "fill"}},
-    KindSpec{"slider", ElementKind::Slider, "slider", {"var", "setting", "min", "max", "step", "track", "fill", "knob", "enabled", "action"}},
+    KindSpec{"page", ElementKind::Page, "page", {"name_width", "name_style", "text_style"}, true},
+    KindSpec{"input", ElementKind::Input, "input", {"variable", "most_letters", "placeholder", "action", "confirm", "clickable"}},
+    KindSpec{"bar", ElementKind::Bar, "bar", {"value", "full_at", "vertical", "track", "fill"}},
+    KindSpec{"slider", ElementKind::Slider, "slider", {"variable", "setting", "minimum", "maximum", "step", "track", "fill", "knob", "clickable", "action"}},
     KindSpec{"movie", ElementKind::Movie, "", {"fit", "loop", "volume"}},
-    KindSpec{"endings", ElementKind::Endings, "record", {"title_style", "text_style", "locked_style", "hidden"}, true},
+    KindSpec{"endings", ElementKind::Endings, "record", {"title_style", "text_style", "locked_style", "secret"}, true},
     KindSpec{"songs", ElementKind::Songs, "record", {"title_style", "text_style", "locked_style"}, true},
-    KindSpec{"achievements", ElementKind::Achievements, "record", {"title_style", "text_style", "locked_style", "hidden"}, true},
-    KindSpec{"tips", ElementKind::Tips, "record", {"action", "title_style", "locked_style", "new_style"}, true},
-    KindSpec{"chart", ElementKind::Chart, "chart", {"line", "chapter_style", "ending_style", "stub_style", "label_style", "confirm"}, true},
-    KindSpec{"phone", ElementKind::Phone, "", {"name_style", "text_style", "mine_style", "reply_style"}, true},
-    KindSpec{"contacts", ElementKind::Contacts, "record", {"action", "name_style", "text_style", "unread_style"}, true},
-    KindSpec{"container", ElementKind::Container, "", {"selected", "fit", "scroll", "scrollbar", "scrollbar_size", "glide", "glide_speed", "glide_distance", "edges", "fade_size"}},
+    KindSpec{"achievements", ElementKind::Achievements, "record", {"title_style", "text_style", "locked_style", "secret"}, true},
+    KindSpec{"tips", ElementKind::Tips, "record", {"action", "title_style", "locked_style", "unread_style"}, true},
+    KindSpec{"flowchart", ElementKind::Flowchart, "flowchart", {"line", "chapter_style", "ending_style", "unreached_style", "choice_style", "confirm"}, true},
+    KindSpec{"container", ElementKind::Container, "", {"chosen", "fit", "scroll", "scrollbar", "scrollbar_thickness", "glide", "glide_speed", "glide_distance", "edges", "fading_edges",
+                                                        "stack", "list", "position", "item_animation", "app", "title", "icon", "count"}, true},
 };
-constexpr auto kColorOptions = std::to_array<std::string_view>({"bottom", "bar_color", "track", "fill", "knob", "line"});
-constexpr auto kFormulaOptions = std::to_array<std::string_view>({"value", "min", "max", "step"});
-// The player's settings: "setting NAME VALUE" (buttons), slider setting=NAME and "config default.NAME" lines.
+constexpr auto kColourOptions = std::to_array<std::string_view>({"bottom", "bar_colour", "track", "fill", "knob", "line"});
+constexpr auto kFormulaOptions = std::to_array<std::string_view>({"value", "minimum", "maximum", "full_at", "most_letters", "step"});
+// The player's settings: "setting NAME VALUE" (buttons), slider setting=NAME and "setting default.NAME" lines.
 constexpr auto kSettingNames = std::to_array<std::string_view>({
     "fullscreen", "window_size", "scaling", "vsync", "frame_limit", "text_speed", "auto_delay", "textbox_opacity", "text_size",
-    "animations", "master_volume", "music_volume", "sound_volume", "voice_volume", "babble", "typing_sounds", "mouths", "skip_unread",
-    "skip_after_choices", "skip_movies", "rollback", "read_aloud", "high_contrast", "language",
+    "animations", "master_volume", "music_volume", "sound_volume", "voice_volume", "made_up_voices", "typing_sounds", "mouths", "skip_unread",
+    "skip_after_choices", "skip_movies", "rollback", "read_aloud", "high_contrast", "vibration", "language",
 });
 
 // Words that pick one of a few values.
@@ -331,20 +344,22 @@ using Choices = std::span<const std::pair<std::string_view, T>>;
 constexpr std::pair<std::string_view, Ease> kEases[]{{"linear", Ease::Linear}, {"in", Ease::In},         {"out", Ease::Out},
                                                      {"inout", Ease::InOut},   {"bounce", Ease::Bounce}, {"spring", Ease::Spring},
                                                      {"overshoot", Ease::Overshoot}};
-constexpr std::pair<std::string_view, Reveal> kReveals[]{{"letter", Reveal::Letter}, {"word", Reveal::Word}, {"line", Reveal::Line}};
-constexpr std::pair<std::string_view, Talk> kTalks[]{{"yes", Talk::Yes}, {"voice", Talk::Voice}, {"no", Talk::No}};
+constexpr std::pair<std::string_view, TextAppears> kTextAppears[]{{"letter", TextAppears::Letter}, {"word", TextAppears::Word}, {"line", TextAppears::Line}};
+constexpr std::pair<std::string_view, NewMessages> kNewMessages[]{{"button", NewMessages::Button}, {"open", NewMessages::Open}, {"notice", NewMessages::Notice}};
+constexpr std::pair<std::string_view, ChatMessages> kChatMessages[]{{"typed", ChatMessages::Typed}, {"click", ChatMessages::Click}};
+constexpr std::pair<std::string_view, MouthMoves> kMouthMoves[]{{"yes", MouthMoves::Yes}, {"voice", MouthMoves::Voice}, {"no", MouthMoves::No}};
 constexpr std::pair<std::string_view, int> kScalings[]{{"fit", 0}, {"integer", 1}, {"stretch", 2}, {"fill", 3}};
 constexpr std::pair<std::string_view, int> kMouths[]{{"always", 0}, {"yes", 0}, {"voice", 1}, {"never", 2}, {"no", 2}};
 
 std::optional<Align> toAlign(std::string_view s) {
     if (s == "left" || s == "top" || s == "start") return Align::Start;
-    if (s == "center" || s == "middle") return Align::Center;
+    if (s == "centre" || s == "middle") return Align::Centre;
     if (s == "right" || s == "bottom" || s == "end") return Align::End;
     return std::nullopt;
 }
 
-// A picture name as scripts use it: "images/mina.png" -> mina
-std::string pictureName(std::string_view file) {
+// An image name as scripts use it: "images/mina.png" -> mina
+std::string imageName(std::string_view file) {
     std::string out(file);
     if (out.starts_with("images/")) out.erase(0, 7);
     if (const auto dot = out.rfind('.'); dot != std::string::npos && out.find('/', dot) == std::string::npos) out.erase(dot);
@@ -352,7 +367,7 @@ std::string pictureName(std::string_view file) {
 }
 
 // Default sprite file name for a character: "Mr. Tanaka" -> mr_tanaka
-std::string imageName(std::string_view name) {
+std::string characterImageName(std::string_view name) {
     std::string out;
     for (char c : lower(name)) {
         if (letterOrDigitByte(c) || c == '-' || c == '_') out += c;
@@ -370,7 +385,7 @@ public:
     Parser(Script& script, const FileReader& read) : s_(script), read_(read) {}
 
     // `entry` is main.vnscript: the game starts there, like a C++ program in main(). It has the game's
-    // config lines and its "label start", and includes the other files.
+    // setting lines and its "scene start", and includes the other files.
     void run(const std::string& entry, std::string_view builtin) {
         std::vector<Line> flat;
         if (!builtin.empty()) readSource("<built-in ui>", builtin, 0, flat);
@@ -385,11 +400,17 @@ public:
         definitions();
         phase_ = Phase::Story;
         block(lines);
-        if (!s_.labels.contains("start"))
-            s_.errors.push_back({entry, 0, "The story needs a beginning: a 'label start' line in main.vnscript, with its first lines under it."_tr()});
+        if (!s_.scenes.contains("start"))
+            s_.errors.push_back({entry, 0, "The story needs a beginning: a 'scene start' line in main.vnscript, with its first lines under it."_tr()});
         screens();
         bindings();
         resolve();
+        // The phone's own variables: none (the clock: the computer's), a signal and a full battery, unless Settings starts them.
+        for (const char* phone : {"phone_owner", "phone_wallpaper", "phone_lock_wallpaper", "phone_passcode", "phone_clock", "phone_date"})
+            s_.startValues.try_emplace(phone, std::string{});
+        s_.startValues.try_emplace("phone_signal", 1);
+        s_.startValues.try_emplace("phone_battery", 100);
+        checkNames();
     }
 
 private:
@@ -406,14 +427,16 @@ private:
         return std::nullopt;
     }
 
-    // Runs `parse`; when the line's first word was capitalized and it doesn't work as a command,
+    // Runs `parse`; when the line's first word was capitalised and it doesn't work as a command,
     // its errors are dropped and false is returned (the line is then shown as text instead).
     template <class F>
     bool attempt(bool lenient, F&& parse) {
-        const auto before = s_.errors.size();
+        const auto before = s_.errors.size(), reads = reads_.size(), writes = written_.size();
         std::forward<F>(parse)();
         if (!lenient || s_.errors.size() == before) return true;
         s_.errors.resize(before);
+        reads_.resize(reads); // (and what it read and wrote)
+        written_.resize(writes);
         return false;
     }
 
@@ -431,19 +454,81 @@ private:
             return std::nullopt;
         }
         auto e = Expr::parse(src);
-        if (!e) error(line, "There's a mistake in '{}': {}."_tr(src, e.error()));
-        return e ? std::optional<Expr>(std::move(*e)) : std::nullopt;
+        if (!e) return fail(line, "There's a mistake in '{}': {}."_tr(src, e.error()));
+        for (std::string& name : e->names()) read(line, std::move(name));
+        return std::move(*e);
     }
 
+    // A text's {values} and tags: {tip NAME} one that's listed, {colour NAME} a colour or a value holding one.
     void checkTextOf(const Line& line, std::string_view text) {
-        if (auto problem = checkText(text); !problem.empty()) return error(line, problem + ".");
+        if (auto problem = checkText(text); !problem.empty()) return error(line, problem);
+        readValues(line, text);
         const Lookup none = [](std::string_view) { return Value{0}; };
-        (void)expand(text, none, [&](std::string_view tag, std::string_view name, std::size_t) { // {tip NAME}: one that's listed
+        (void)expand(text, none, [&](std::string_view tag, std::string_view name, std::size_t) {
+            if (tag == "colour" && !name.empty() && !parseColour(name, &s_.palette)) read(line, lower(name));
             if (tag != "tip") return;
             if (name.empty()) error(line, "{tip} needs the name of a tip."_tr());
             else if (!s_.record(RecordKind::Tip, name))
                 error(line, "There's no tip called '{}'."_tr(name));
         });
+    }
+
+    // -- Names ----------------------------------------------------------------------------
+
+    // The names conditions, formulas and texts' {values} read (with the lists a screen's part is in: its
+    // items' values are its too), and the variables the scripts write; checkNames() goes through them once
+    // everything is read.
+    struct Read {
+        std::uint16_t file = 0;
+        int number = 0;
+        std::string name;
+        std::vector<std::string> items; // the item words of the lists around it ("chat", "message"...)
+    };
+    std::vector<Read> reads_;
+    std::vector<std::string> written_;
+    std::vector<std::string> items_; // (while a screen's parts are read: the lists they're in)
+    struct PhoneSceneName { // a character's chat= or call= (checked once the scenes are read)
+        std::uint16_t file = 0;
+        int number = 0;
+        std::string scene;
+    };
+    std::vector<PhoneSceneName> phoneSceneNames_;
+
+    void read(const Line& line, std::string name) { reads_.push_back({.file = line.file, .number = line.number, .name = std::move(name), .items = items_}); }
+    void readValues(const Line& line, std::string_view text) { // (a text's {values})
+        for (std::string& name : namesIn(text)) read(line, std::move(name));
+    }
+    void wrote(std::string name) { written_.push_back(std::move(name)); }
+
+    // Each name read is something: a variable (one the scripts set, add to, subtract from, toggle, ask for or
+    // start with, or a slider's or input's), a task's (task.NAME), a value the engine gives (its built-in ones,
+    // the player's settings, answer and dropped), a record's (persistent.ending.NAME...), or, in a part inside a
+    // list, its items' ({chat.name}).
+    void checkNames() {
+        std::set<std::string, std::less<>> known(written_.begin(), written_.end());
+        for (const auto& [name, value] : s_.startValues) known.insert(name);
+        for (const std::string_view name : kBuiltinValues) known.emplace(name);
+        known.insert({"answer", "dropped"});
+        for (std::size_t k = 0; k < kRecordKinds.size(); ++k)
+            for (const Script::Record& r : s_.records(static_cast<RecordKind>(k))) known.insert(Script::recordVariable(static_cast<RecordKind>(k), r.name));
+        auto itemOf = [](std::string_view name) -> std::string_view { // the item word, when it's one of a list item's values
+            const auto dot = name.find('.');
+            const auto it = dot == std::string_view::npos ? kItemValues.end() : std::ranges::find(kItemValues, name.substr(0, dot), &std::pair<std::string_view, std::string_view>::first);
+            if (it == kItemValues.end()) return {};
+            for (auto&& word : std::views::split(it->second, ' '))
+                if (std::string_view(word.begin(), word.end()) == name.substr(dot + 1)) return it->first;
+            return {};
+        };
+        std::set<std::tuple<std::uint16_t, int, std::string>> said;
+        for (const Read& r : reads_) {
+            if (known.contains(r.name) || Settings::has(r.name) || findSettingControl(r.name)) continue;
+            const std::string_view item = itemOf(r.name);
+            if (!item.empty() && std::ranges::contains(r.items, item)) continue;
+            if (!said.insert({r.file, r.number, r.name}).second) continue;
+            const Line where{.file = r.file, .number = r.number};
+            if (item.empty()) error(where, "There's no variable or value called '{}'."_tr(r.name));
+            else error(where, "'{}' only works inside a container with list={}."_tr(r.name, std::ranges::find(kLists, item, &std::pair<std::string_view, std::string_view>::second)->first));
+        }
     }
 
     std::optional<float> number(const Line& line, std::string_view value, std::string_view what) {
@@ -456,8 +541,8 @@ private:
         return fail(line, "'{}' can be yes or no, not '{}'."_tr(what, value));
     }
 
-    std::optional<SDL_Color> color(const Line& line, std::string_view value) {
-        if (auto c = parseColor(value, &s_.palette)) return c;
+    std::optional<SDL_Color> colour(const Line& line, std::string_view value) {
+        if (auto c = parseColour(value, &s_.palette)) return c;
         return fail(line, "'{}' isn't a colour."_tr(value));
     }
 
@@ -473,17 +558,17 @@ private:
         return std::nullopt; // (not fail(): GCC 16 takes its nullopt, copied in, for something unset)
     }
 
-    // When a mouth moves (talk= and face_talk=, config talk): yes, voice or no.
-    std::optional<Talk> talk(const Line& line, std::string_view what, std::string_view value) {
-        if (const auto b = parseBool(value)) return *b ? Talk::Yes : Talk::No;
-        return oneOf<Talk>(line, what, value, kTalks);
+    // When a mouth moves (mouth_moves= and face_mouth=, setting mouths_move): yes, voice or no.
+    std::optional<MouthMoves> mouthMoves(const Line& line, std::string_view what, std::string_view value) {
+        if (const auto b = parseBool(value)) return *b ? MouthMoves::Yes : MouthMoves::No;
+        return oneOf<MouthMoves>(line, what, value, kMouthMoves);
     }
 
     // Words after a command that read as a phrase. Took::No: the next word isn't this one;
     // Took::Bad: it is, but what follows is wrong (the error is written).
     enum class Took : std::uint8_t { No, Yes, Bad };
 
-    // "fade 2" or "fade=2", "volume 50%" or "volume=50%" (music, sounds, voices, videos, weather).
+    // "fade 2" or "fade=2", "volume 50%" or "volume=50%" (music, sounds, voices, movies, weather).
     Took amount(const Line& line, Cursor& c, std::string_view key, float& out) {
         std::optional<float> n;
         if (c.take(key)) n = c.number();
@@ -544,34 +629,41 @@ private:
 
     // Commands may start with a capital letter ("If", "Show"); such a line only counts as a command
     // if it works as one, so narration like "If only I knew." stays text.
-    void block(const std::vector<Line>& lines) {
+    void block(std::span<const Line> lines) {
         for (std::size_t i = 0; i < lines.size(); ++i) {
             const Line& line = lines[i];
             const std::string head = headOf(line.text);
-            const bool exact = !capitalized(line.text);
+            const std::string second = lower(firstWord(afterWords(line.text, 1)));
+            const bool exact = !capitalised(line.text);
             const bool hasBlock = !line.children.empty();
-            if (head == "if" && (exact || hasBlock)) {
+            if (chat_ && isAnswer(line)) { // (a chat's answers: the ones together are what the player can send)
+                i = chatAnswers(lines, i);
+            } else if (const auto phone = head == "scene" && hasBlock && phase_ == Phase::Story ? phoneSceneFor(line) : std::nullopt) {
+                phoneScene(line, *phone->first, phone->second);
+            } else if (head == "if" && (exact || hasBlock)) {
                 i = ifChain(lines, i);
-            } else if ((head == "else" || head == "elif") && (exact || hasBlock)) {
+            } else if (head == "else" && (exact || hasBlock)) {
                 if (phase_ == Phase::Story) error(line, "This 'else' has no 'if' right above it at the same indentation."_tr());
                 block(line.children);
             } else if (head == "choice" && (exact || hasBlock)) {
                 menu(line);
-            } else if (head == "message" && hasBlock) {
-                messageBlock(line);
+            } else if (head == "chat" && hasBlock) {
+                chatBlock(line);
+            } else if (head == "phone" && second == "call" && (exact || hasBlock)) {
+                callBlock(line);
             } else if (head == "together" && (exact || hasBlock) && afterWords(line.text, 1).empty()) {
                 together(line);
             } else if (std::ranges::contains(kDefinitions, head) && !asText_.contains(&line) && !isRecordMark(line.text, head)) {
                 if (phase_ == Phase::Definitions) defs_.push_back(&line);
             } else {
-                if (phase_ == Phase::Story) statement(line);
+                if (phase_ == Phase::Story && !(chat_ && chatStatement(line))) statement(line);
                 block(line.children); // indentation under an ordinary line is just layout
             }
         }
     }
 
-    // if / else if / elif / else; returns the index of the chain's last line.
-    std::size_t ifChain(const std::vector<Line>& lines, std::size_t i) {
+    // if / else if / else; returns the index of the chain's last line.
+    std::size_t ifChain(std::span<const Line> lines, std::size_t i) {
         std::vector<std::size_t> exits;
         for (;; ++i) {
             const Line& line = lines[i];
@@ -592,7 +684,7 @@ private:
             bool more = false;
             if (!isElse && i + 1 < lines.size()) {
                 const std::string next = headOf(lines[i + 1].text);
-                more = (next == "else" || next == "elif") && (!capitalized(lines[i + 1].text) || !lines[i + 1].children.empty());
+                more = next == "else" && (!capitalised(lines[i + 1].text) || !lines[i + 1].children.empty());
             }
             if (phase_ == Phase::Story) {
                 if (more) exits.push_back(emit(cmd::Jump{}, line, true));
@@ -612,29 +704,56 @@ private:
             return;
         }
         cmd::Menu m;
-        std::string prompt = unquote(choiceSettings(line, afterWords(line.text, 1), m));
-        if (prompt.ends_with(':')) prompt.pop_back();
-        checkTextOf(line, prompt);
+        std::string rest(choiceSettings(line, afterWords(line.text, 1), m));
+        if (rest.ends_with(':')) rest.pop_back();
+        if (!trim(rest).empty()) error(line, "'{}' isn't one of a choice's settings (optional=, repeat=, return=, for N seconds, for N lines)."_tr(trim(rest)));
         const bool meanwhile = m.lines > 0; // up while the story goes on: each option comes back when its lines are done
-        if (meanwhile && !prompt.empty())
-            error(line, "A choice that's up for some lines has no question."_tr());
-        m.prompt = prompt;
+        if (meanwhile && m.repeats) error(line, "A choice that's up for some lines can't repeat."_tr());
+        if (chat_ || !callWith_.empty()) { // (in a chat or a call: its options are on the phone)
+            if (meanwhile || m.optional) error(line, (chat_ ? "A chat's choice can only have a time limit and repeat."_tr : "A call's choice can only have a time limit and repeat."_tr)());
+            m.phone = chat_ ? chat_->with : callWith_;
+            m.call = !chat_;
+        }
+        options(line, line.children, std::move(m), {});
+    }
+
+    // A chat's answers: quoted lines ending with ':' (their own lines indented under them) or an arrow, the
+    // ones together; returns the index of the last. They're a choice whose options show on the phone.
+    std::size_t chatAnswers(std::span<const Line> lines, std::size_t i) {
+        std::size_t end = i;
+        while (end < lines.size() && isAnswer(lines[end])) ++end;
+        if (phase_ == Phase::Definitions) {
+            for (std::size_t k = i; k < end; ++k) block(lines[k].children);
+            return end - 1;
+        }
+        options(lines[i], lines.subspan(i, end - i), cmd::Menu{.phone = chat_->with}, chat_->with);
+        return end - 1;
+    }
+
+    static bool isAnswer(const Line& line) { return answerLine(line.text, !line.children.empty()); }
+
+    // A choice's options (`optionLines`, under `line`), each with its own lines run when it's picked.
+    // `within`: what their "picked before" ids are made with besides their words (a chat's answers: whose chat).
+    void options(const Line& line, std::span<const Line> optionLines, cmd::Menu m, std::string_view within) {
+        const bool meanwhile = m.lines > 0, repeats = m.repeats;
         const std::size_t at = emit(std::move(m), line);
         std::vector<cmd::Choice> choices;
         std::vector<std::size_t> exits;   // jumps to the end of the choice
-        std::vector<std::size_t> skipped; // options without lines or arrow: continue after the choice
-        for (const auto& option : line.children) {
-            auto [choice, label] = this->option(option, prompt);
-            choice.label = label;
+        std::vector<std::size_t> skipped; // options without lines: continue after the choice
+        for (const auto& option : optionLines) {
+            cmd::Choice choice = this->option(option, within);
             if (!option.children.empty()) {
                 choice.target = s_.code.size();
                 block(option.children);
-                if (!label.empty()) emit(cmd::Jump{.label = label}, option, true);
-                else if (meanwhile) emit(cmd::Return{}, option, true);
+                if (meanwhile) emit(cmd::Return{}, option, true);
+                else if (repeats) emit(cmd::Jump{.target = at, .again = true}, option, true); // (the choice again)
                 else exits.push_back(emit(cmd::Jump{}, option, true));
-            } else if (label.empty()) {
-                if (meanwhile) choice.target = emit(cmd::Return{}, option, true); // nothing to do: back to the story
-                else skipped.push_back(choices.size());
+            } else if (meanwhile) {
+                choice.target = emit(cmd::Return{}, option, true); // nothing to do: back to the story
+            } else if (repeats) {
+                choice.target = at;
+            } else {
+                skipped.push_back(choices.size());
             }
             choices.push_back(std::move(choice));
         }
@@ -647,18 +766,12 @@ private:
         emitted.after = s_.code.size();
     }
 
-    // An option of a choice or an answer to a message: "Text [(if CONDITION) | (needs CONDITION: what)]
-    // [-> label]", and the label it goes to. `question`: its choice's question, or its message.
-    std::pair<cmd::Choice, std::string> option(const Line& option, std::string_view question) {
+    // An option of a choice, or an answer in a chat: "Text [(if CONDITION) | (needs CONDITION: what)]".
+    // `within`: what its "picked before" id is made with besides its words.
+    cmd::Choice option(const Line& option, std::string_view within) {
         std::string text(trim(option.text));
-        std::string label;
         std::optional<Expr> condition;
         if (text.ends_with(':') && !isQuoted(text)) text.pop_back();
-        if (const auto arrow = text.rfind("->"); arrow != std::string::npos && !isQuoted(text)) {
-            label = lower(trim(std::string_view(text).substr(arrow + 2)));
-            text = std::string(trim(std::string_view(text).substr(0, arrow)));
-            if (!isName(label)) error(option, "'{}' isn't a label name."_tr(label));
-        }
         bool shownLocked = false;
         std::string note;
         if (const auto open = text.rfind("(if "); text.ends_with(')') && open != std::string::npos && !isQuoted(text)) {
@@ -683,9 +796,8 @@ private:
         }
         text = unquote(text);
         checkTextOf(option, text);
-        cmd::Choice choice{.text = text, .condition = std::move(condition), .shownLocked = shownLocked, .note = std::move(note),
-                           .id = fnv1a(text, fnv1a(question, fnv1a(currentLabel_, fnv1a("choice"))))};
-        return {std::move(choice), std::move(label)};
+        return cmd::Choice{.text = text, .condition = std::move(condition), .shownLocked = shownLocked, .note = std::move(note),
+                           .id = fnv1a(text, fnv1a(within, fnv1a(currentScene_, fnv1a("choice"))))};
     }
 
     // together, with lines indented under it: they all show at once, each in its own textbox (a
@@ -701,34 +813,287 @@ private:
         for (std::size_t k = 0; k + 1 < says.size(); ++k) says[k]->together = true;
     }
 
-    // message NAME: text, with the answers the player can send back indented under it. An answer's
-    // own lines run when it's sent, and the story then goes on where it was; -> label goes there
-    // instead (after its lines).
-    void messageBlock(const Line& line) {
-        if (phase_ == Phase::Definitions) {
-            for (const auto& option : line.children) block(option.children);
-            return;
+    // -- The phone's story lines ----------------------------------------------------------
+
+    // Who a phone line is from (or to): "Mika", "Mika happy", "Mika (happy)" (`expression`) or anyone's
+    // name. A defined character's lower-case name goes in `character`, anyone else's in `sender`.
+    struct Who {
+        std::string character, sender, expression;
+        [[nodiscard]] bool empty() const { return character.empty() && sender.empty(); }
+    };
+    [[nodiscard]] Who whoOf(std::string_view written, bool expression) const {
+        std::string w(trim(written));
+        Who who;
+        if (expression && w.ends_with(')') && w.find('(') != std::string::npos) { // Mika (happy)
+            const auto open = w.rfind('(');
+            who.expression = std::string(trim(std::string_view(w).substr(open + 1, w.size() - open - 2)));
+            w = std::string(trim(std::string_view(w).substr(0, open)));
         }
-        auto c = command(line, "message", true);
-        if (!c) return;
-        const std::string text = std::get<cmd::Message>(*c).text;
-        const std::size_t at = emit(std::move(*c), line);
-        const std::size_t past = emit(cmd::Jump{}, line, true); // the story goes past the answers' lines
-        std::vector<cmd::Choice> replies;
-        for (const Line& option : line.children) {
-            auto [reply, label] = this->option(option, text);
-            reply.target = s_.code.size();
-            reply.label = label;
-            block(option.children);
-            emit(label.empty() ? Command{cmd::Return{}} : Command{cmd::Jump{.label = label}}, option, true);
-            replies.push_back(std::move(reply));
+        const auto space = w.rfind(' ');
+        if (s_.character(lower(w))) {
+            who.character = lower(w);
+        } else if (expression && who.expression.empty() && space != std::string::npos && s_.character(lower(w.substr(0, space)))) {
+            who.character = lower(w.substr(0, space)); // Mika happy
+            who.expression = w.substr(space + 1);
+        } else {
+            who.sender = unquote(w);
         }
-        jumpAt(past).target = s_.code.size();
-        std::get<cmd::Message>(s_.code[at].command).replies = std::move(replies);
+        return who;
+    }
+    // A person's name as the phone shows it: a character's own.
+    [[nodiscard]] std::string shownName(const Who& who) const {
+        if (const CharacterDef* def = who.character.empty() ? nullptr : s_.character(who.character)) return def->name;
+        return who.sender;
+    }
+    // Where the word `word` (lower case) is in `text`: outside quotes, in any case. None: npos.
+    [[nodiscard]] static std::size_t wordAt(std::string_view text, std::string_view word) {
+        for (const auto& [start, length] : wordSpans(text))
+            if (length == word.size() && lower(text.substr(start, length)) == word) return start;
+        return std::string_view::npos;
+    }
+    // "Mika, Kaede and Haru": the names.
+    [[nodiscard]] static std::vector<std::string> nameList(std::string_view text) {
+        std::string list(text);
+        for (std::size_t at = 0; (at = lower(list).find(" and ")) != std::string::npos;) list.replace(at, 5, ",");
+        std::vector<std::string> out;
+        for (auto&& part : std::views::split(std::string_view(list), ',')) {
+            std::string name = unquote(trim(std::string_view(part.begin(), part.end())));
+            if (!name.empty()) out.push_back(std::move(name));
+        }
+        return out;
     }
 
-    // The settings at the end of a choice's line (optional=yes, screen=NAME, for N seconds); returns
-    // the rest, the question.
+    // While a chat scene's lines are read: its chat.
+    struct ChatContext {
+        std::string with;      // the person's name as shown
+        std::string character; // ...a defined character's
+    };
+    std::optional<ChatContext> chat_;
+    std::string callWith_; // in someone's call= scene: whose (its choices show on the call)
+
+    // chat WHO, with its lines under it: a chat scene. Its lines are the phone's (Mika: words, me: words,
+    // Mika sends IMAGE...), quoted lines ending with ':' are answers, and the rest are the story's, as anywhere.
+    void chatBlock(const Line& line) {
+        if (phase_ == Phase::Definitions) return block(line.children);
+        if (chat_) return error(line, "A chat can't be inside another chat."_tr());
+        std::string name(trim(afterWords(line.text, 1)));
+        if (name.ends_with(':')) name.pop_back();
+        name = unquote(name);
+        if (name.empty()) return error(line, "Whose chat it is is missing."_tr());
+        const Who who = whoOf(name, false);
+        const cmd::Chat c{.with = shownName(who)};
+        if (!screenLines_.contains("phone")) error(line, "A chat needs a screen called 'phone'."_tr());
+        emit(c, line);
+        chat_ = ChatContext{.with = c.with, .character = who.character};
+        block(line.children);
+        chat_.reset();
+        emit(cmd::Message{.kind = cmd::Message::Kind::End, .character = who.character, .sender = who.character.empty() ? c.with : std::string{}}, line,
+             true);                    // (a line saying it's over)
+        emit(cmd::Wait{}, line, true); // (the last message read: a click, and the phone goes back)
+        emit(cmd::Chat{.with = c.with, .end = true}, line, true);
+    }
+
+    // A line in a chat that isn't a command: one of the phone's (Mika: words, me sends IMAGE...), emitted.
+    // False when it isn't one (then it's the story's).
+    bool chatStatement(const Line& line) {
+        if (!commandOf(line.text, true).empty() || isQuoted(trim(line.text))) return false;
+        cmd::Message m;
+        const Parsed p = phoneLine(line, line.text, m);
+        if (p == Parsed::Yes) emit(std::move(m), line);
+        return p != Parsed::No;
+    }
+
+    enum class Parsed : std::uint8_t { No, Yes, Bad };
+    // A phone line: who (and how they look), then what: ": words", "sends [sticker | voice] NAME [: caption]",
+    // "is typing [for N seconds]", "deletes it", "edits it: words", "reacts TEXT" or "reads it", in a chat
+    // scene: "me" is the player, and the chat is the scene's. No: it isn't one (nothing written); Bad: it is,
+    // with a mistake (written).
+    Parsed phoneLine(const Line& line, std::string_view text, cmd::Message& m) {
+        using Kind = cmd::Message::Kind;
+        static constexpr std::pair<std::string_view, Kind> kVerbs[]{{"sends", Kind::Image}, {"is typing", Kind::Typing}, {"deletes it", Kind::Delete},
+                                                                    {"edits it", Kind::Edit},  {"reacts", Kind::React},     {"reads it", Kind::Read}};
+        text = trim(text);
+        std::size_t colon = std::string_view::npos; // (the first outside quotes)
+        for (std::size_t k = 0, quotes = 0; k < text.size() && colon == std::string_view::npos; ++k) {
+            if (text[k] == '"') ++quotes;
+            else if (text[k] == ':' && quotes % 2 == 0) colon = k;
+        }
+        const auto spans = wordSpans(text);
+        auto wordIs = [&](std::size_t w, std::string_view word, std::size_t& end) { // (a word, without a colon after it)
+            std::string_view written = text.substr(spans[w].first, spans[w].second);
+            end = spans[w].first + spans[w].second;
+            if (written.ends_with(':')) written.remove_suffix(1), --end;
+            return lower(written) == word;
+        };
+        std::size_t verbAt = std::string_view::npos, verbEnd = 0;
+        m.kind = Kind::Text;
+        for (std::size_t w = 1; w < spans.size() && verbAt == std::string_view::npos; ++w) {
+            if (colon != std::string_view::npos && spans[w].first > colon) break;
+            for (const auto& [words, kind] : kVerbs) {
+                const auto space = words.find(' ');
+                std::size_t end = 0;
+                if (!wordIs(w, words.substr(0, space), end)) continue;
+                if (space != std::string_view::npos && (w + 1 >= spans.size() || !wordIs(w + 1, words.substr(space + 1), end))) continue;
+                verbAt = spans[w].first;
+                verbEnd = end;
+                m.kind = kind;
+                break;
+            }
+        }
+        std::string who;
+        std::string_view after;
+        if (verbAt != std::string_view::npos) {
+            who = std::string(trim(text.substr(0, verbAt)));
+            after = trim(text.substr(verbEnd));
+        } else if (colon != std::string_view::npos && colon > 0) {
+            who = std::string(trim(text.substr(0, colon)));
+            after = text.substr(colon + 1);
+            // (narration with a colon in it, "At last: rain.", isn't one: as a line's speaker, at most three words)
+            if ((std::ranges::count(who, ' ') > 2 || who.find_first_of(",!?\"{};") != std::string::npos)) return Parsed::No;
+        } else {
+            return Parsed::No;
+        }
+
+        // Who: the player ("me"), or someone.
+        if (lower(who) == "me") {
+            m.mine = true;
+            who.clear();
+        }
+        if (!who.empty()) {
+            const Who w = whoOf(who, !m.mine);
+            m.character = w.character;
+            m.sender = w.sender;
+            m.expression = w.expression;
+        }
+
+        // What: its words, its image, how long they type...
+        switch (m.kind) {
+        case Kind::Text:
+            m.text = unquote(after);
+            if (m.text.empty()) return error(line, "{} doesn't say anything."_tr(who.empty() ? std::string("me") : who)), Parsed::Bad;
+            break;
+        case Kind::Image: { // sends [sticker | voice] NAME [: caption]
+            std::string_view what = after, caption;
+            if (const auto c = what.find(':'); c != std::string_view::npos) {
+                caption = trim(what.substr(c + 1));
+                what = trim(what.substr(0, c));
+            }
+            if (const std::string first = lower(firstWord(what)); first == "sticker" || first == "voice") {
+                m.kind = first == "sticker" ? Kind::Sticker : Kind::Voice;
+                what = trim(afterWords(what, 1));
+            }
+            m.file = unquote(what);
+            m.text = unquote(caption);
+            if (m.file.empty() || m.file.find(' ') != std::string::npos)
+                return error(line, "'sends' needs an image's name after it, or sticker or voice and a name."_tr()), Parsed::Bad;
+            if (m.kind != Kind::Voice) m.file = imageName(m.file);
+            break;
+        }
+        case Kind::Typing: // is typing [for N seconds]
+            if (!after.empty()) {
+                const auto seconds = parseNumber(firstWord(afterWords(after, 1)));
+                const std::string unit = lower(afterWords(after, 2));
+                if (lower(firstWord(after)) != "for" || !seconds || (!unit.empty() && unit != "seconds" && unit != "second"))
+                    return error(line, "After 'is typing' can only come for how many seconds."_tr()), Parsed::Bad;
+                m.seconds = std::max(0.0f, *seconds);
+            }
+            break;
+        case Kind::Edit: // edits it: words
+            if (!after.starts_with(':') || trim(after.substr(1)).empty())
+                return error(line, "'edits it' needs the new words after a colon."_tr()), Parsed::Bad;
+            m.text = unquote(after.substr(1));
+            break;
+        case Kind::React:
+            m.text = unquote(after);
+            if (m.text.empty()) return error(line, "'reacts' needs the reaction after it."_tr()), Parsed::Bad;
+            break;
+        default: // deletes it, reads it
+            if (!after.empty()) return error(line, "'{}' doesn't belong in this line."_tr(after)), Parsed::Bad;
+            break;
+        }
+        if (!m.text.empty()) checkTextOf(line, m.text);
+
+        // Its chat, the chat scene's: only its person and the player write in it.
+        if (m.mine) {
+            m.character = chat_->character;
+            m.sender = chat_->character.empty() ? chat_->with : std::string{};
+        } else if (shownName({.character = m.character, .sender = m.sender}) != chat_->with) {
+            return error(line, "Only {} and the player (me) write in {}'s chat."_tr(chat_->with, chat_->with)), Parsed::Bad;
+        }
+        return Parsed::Yes;
+    }
+
+    // A character's chat= or call= scene, by its scene line: whose, and whether it's their chat's (else their call's).
+    [[nodiscard]] std::optional<std::pair<const CharacterDef*, bool>> phoneSceneFor(const Line& line) const {
+        std::string name = lower(afterWords(line.text, 1));
+        if (name.ends_with(':')) name.pop_back();
+        for (const auto& [key, def] : s_.characters)
+            if (def.chatScene == name || def.callScene == name) return std::pair{&def, def.chatScene == name};
+        return std::nullopt;
+    }
+
+    // scene NAME that a character's chat= or call= names: what happens when the player opens their chat or calls them
+    // (and their call's answered), played from its top then, its choices on the phone: in a chat, its lines are the
+    // chat's (Mika: words); a call's over at its end. Run into or jumped to, the scene is nothing: the story goes on
+    // after it.
+    void phoneScene(const Line& line, const CharacterDef& def, bool chat) {
+        scene(line);
+        const std::size_t past = emit(cmd::Jump{}, line, true);
+        s_.phoneScenes.insert_or_assign(currentScene_, s_.code.size());
+        if (chat) chat_ = ChatContext{.with = def.name, .character = def.key};
+        else callWith_ = def.name;
+        block(line.children);
+        chat_.reset();
+        callWith_.clear();
+        emit(cmd::Return{}, line, true);
+        jumpAt(past).target = s_.code.size();
+    }
+
+    // phone call WHO [for N seconds]: they call the player, with the call's lines under it and, last, its
+    // missed: lines (when the player doesn't answer). (The player calls from the phone.)
+    void callBlock(const Line& line) {
+        if (phase_ == Phase::Definitions) return block(line.children);
+        std::string rest(trim(afterWords(line.text, 2)));
+        if (rest.ends_with(':')) rest.pop_back();
+        cmd::Call c;
+        if (const auto at = wordAt(rest, "for"); at != std::string::npos && at > 0) { // for N seconds, at its end
+            const std::string_view tail = std::string_view(rest).substr(at);
+            const auto n = parseNumber(firstWord(afterWords(tail, 1)));
+            const std::string unit = lower(afterWords(tail, 2));
+            if (!n || (!unit.empty() && unit != "seconds" && unit != "second"))
+                return error(line, "'for' needs how many seconds the call rings."_tr());
+            c.seconds = std::max(0.0f, *n);
+            rest = std::string(trim(std::string_view(rest).substr(0, at)));
+        }
+        const Who who = whoOf(rest, false);
+        if (who.empty()) return error(line, "Who the call is with is missing."_tr());
+        c.character = who.character;
+        c.sender = who.sender;
+        if (chat_) error(line, "A call can't be inside a chat."_tr());
+        if (!screenLines_.contains("phone")) error(line, "A call needs a screen called 'phone'."_tr());
+        calling(line, std::move(c), line.children);
+    }
+    // A call (`c`), its lines (`lines`: the last may be missed:), its end, and its missed: lines.
+    void calling(const Line& line, cmd::Call c, std::span<const Line> lines) {
+        const auto missed = std::ranges::find_if(lines, [](const Line& l) {
+            const std::string t = lower(trim(l.text));
+            return t == "missed:" || t == "missed";
+        });
+        if (missed != lines.end() && missed + 1 != lines.end()) error(*missed, "'missed:' comes last, after the call's lines."_tr());
+        const std::span<const Line> talk(lines.begin(), missed);
+        const std::size_t at = emit(std::move(c), line);
+        block(talk);
+        emit(cmd::Call{.end = true}, line, true);
+        const std::size_t exit = emit(cmd::Jump{}, line, true);
+        const std::size_t missedAt = s_.code.size();
+        if (missed != lines.end()) block(missed->children);
+        jumpAt(exit).target = s_.code.size();
+        auto& emitted = std::get<cmd::Call>(s_.code[at].command);
+        emitted.missed = missedAt;
+        emitted.after = s_.code.size();
+    }
+
+    // The settings at the end of a choice's line (optional=yes, repeat=yes, for N seconds); returns the rest.
     std::string_view choiceSettings(const Line& line, std::string_view text, cmd::Menu& m) {
         std::vector<std::string_view> w; // the words, as parts of `text`
         for (std::size_t i = 0; i < text.size();) {
@@ -738,7 +1103,7 @@ private:
             w.push_back(text.substr(start, end - start));
             i = end;
         }
-        auto cut = [&](std::size_t n) { // the last n words aren't the question
+        auto cut = [&](std::size_t n) { // the last n words are settings
             text = trim(text.substr(0, static_cast<std::size_t>(w[w.size() - n].data() - text.data())));
             w.resize(w.size() - n);
         };
@@ -754,12 +1119,8 @@ private:
                 if (!set(m.returns, boolean(line, last.substr(7), "return"))) return text;
                 returns = true;
                 cut(1);
-            } else if (last.starts_with("screen=")) {
-                m.screen = last.substr(7);
-                if (!screenLines_.contains(m.screen)) {
-                    error(line, "There's no screen called '{}'."_tr(m.screen));
-                    return text;
-                }
+            } else if (last.starts_with("repeat=")) {
+                if (!set(m.repeats, boolean(line, last.substr(7), "repeat"))) return text;
                 cut(1);
             } else if (w.size() >= 2 + unit && lower(w[w.size() - 2 - unit]) == "for" && parseNumber(w[w.size() - 1 - unit])) {
                 const float n = std::max(0.0f, *parseNumber(w[w.size() - 1 - unit]));
@@ -771,17 +1132,17 @@ private:
             }
         }
         if (m.lines > 0 && m.seconds > 0.0f) error(line, "A choice is up for some seconds or for some lines, not both."_tr());
-        if (returns && m.lines == 0) error(line, "return= only goes with a choice that's up for some lines.");
+        if (returns && m.lines == 0) error(line, "'return=' only goes with a choice that's up for some lines."_tr());
         return text;
     }
 
     // -- Story lines ---------------------------------------------------------------
 
     void statement(const Line& line) {
-        const bool lenient = capitalized(line.text);
+        const bool lenient = capitalised(line.text);
         const std::string verb = commandOf(line.text, true);
-        if (verb == "label") {
-            if (!attempt(lenient, [&] { label(line); })) say(line);
+        if (verb == "scene") {
+            if (!attempt(lenient, [&] { scene(line); })) say(line);
             return;
         }
         if (verb.empty() || isBlockWord(verb)) return say(line); // real blocks were handled by block()
@@ -790,15 +1151,15 @@ private:
         if (c) emit(std::move(*c), line);
     }
 
-    void label(const Line& line) {
+    void scene(const Line& line) {
         std::string name = lower(afterWords(line.text, 1));
         if (name.ends_with(':')) name.pop_back();
-        if (!isName(name)) return error(line, "'{}' can't be a label name (one word of letters, numbers, _ and -)."_tr(name));
-        if (auto [it, fresh] = s_.labels.emplace(name, s_.code.size()); !fresh)
-            error(line, "There are two labels called '{}'."_tr(name));
+        if (!isName(name)) return error(line, "'{}' can't be a scene name (one word of letters, numbers, _ and -)."_tr(name));
+        if (auto [it, fresh] = s_.scenes.emplace(name, s_.code.size()); !fresh)
+            error(line, "There are two scenes called '{}'."_tr(name));
         else if (name == "start" && line.file != builtinFiles_)
-            error(line, "'label start' belongs in main.vnscript, where the story begins."_tr());
-        currentLabel_ = name;
+            error(line, "'scene start' belongs in main.vnscript, where the story begins."_tr());
+        currentScene_ = name;
         lineCounts_.clear();
     }
 
@@ -808,19 +1169,24 @@ private:
         // A screen's part written where the story is (not indented under a screen line): a mistake, not narration.
         if (!isQuoted(t)) {
             const std::string head = lower(t.substr(0, t.find(' ')));
-            static constexpr std::string_view kPartSettings[]{" x=", " y=", " w=", " h=", " action=", " style=", " bg=", " image=", " keys="};
+            static constexpr std::string_view kPartSettings[]{" x=", " y=", " width=", " height=", " action=", " style=", " background=", " image=", " keys="};
             if (std::ranges::find(kKinds, std::string_view(head), &KindSpec::name) != kKinds.end() &&
                 std::ranges::any_of(kPartSettings, [&](std::string_view key) { return t.contains(key); }))
                 return error(line, "'{}' is a screen part: it goes indented under a screen line."_tr(head));
         }
+        // A line that starts as commands do, in lower case, without being one: a mistake too (a capital: text).
+        if (const std::string word = unknownCommand(t); !word.empty()) {
+            if (const std::string verb = commandOf(t, false); !verb.empty())
+                return error(line, "'{}' is something a button can do, not a line of the story."_tr(verb));
+            return error(line, "'{}' isn't a command: text that starts with a lower-case letter goes in quotes."_tr(word));
+        }
         cmd::Say say;
         const auto colon = t.find(':');
-        const bool speakerColon = colon != std::string_view::npos && colon > 0 && (colon + 1 == t.size() || t[colon + 1] == ' ');
-        std::string prefix(speakerColon ? trim(t.substr(0, colon)) : std::string_view{});
-        const auto nameWords = std::ranges::count(prefix, ' ') + 1;
-        if (isQuoted(t) || !speakerColon || nameWords > 3 || prefix.find_first_of(",!?\"{};") != std::string::npos) {
+        std::string prefix;
+        if (!spoken(t)) {
             say.text = unquote(t);
         } else {
+            prefix = trim(t.substr(0, colon));
             say.text = unquote(t.substr(colon + 1));
             if (prefix.ends_with(')') && prefix.find('(') != std::string::npos) { // Aiko (happy):
                 const auto open = prefix.rfind('(');
@@ -837,7 +1203,7 @@ private:
                 say.speaker = prefix; // someone who isn't a defined character
             }
             if (say.text.empty()) error(line, "{} doesn't say anything."_tr(prefix));
-            if (!say.character.empty()) say.voiceId = std::format("{}_{}", currentLabel_, ++lineCounts_[say.character]);
+            if (!say.character.empty()) say.voiceId = std::format("{}_{}", currentScene_, ++lineCounts_[say.character]);
         }
         checkTextOf(line, say.text);
         say.id = fnv1a(say.text, fnv1a(say.character.empty() ? say.speaker : say.character));
@@ -860,36 +1226,37 @@ private:
         auto screenName = [&](std::string_view what) -> std::optional<std::string> {
             const auto name = c.done() || c.at("with") || c.at("and") ? std::nullopt : c.next(); // (open with fade...: no screen yet)
             if (!name) return fail(line, "Which screen to {} is missing."_tr(what));
-            if (!screenLines_.contains(lower(*name))) return fail(line, "There's no screen called '{}'."_tr(*name));
+            // (the built-in textbox's Phone button names the game's phone: it only shows when there's one)
+            if (!screenLines_.contains(lower(*name)) && line.file >= builtinFiles_) return fail(line, "There's no screen called '{}'."_tr(*name));
             return lower(*name);
         };
 
-        if (verb == "scene") { // scene PICTURE | scene COLOUR [bottom=COLOUR] [animation=NAME] [with ANIMATION]
+        if (verb == "background") { // background IMAGE | background COLOUR [bottom=COLOUR] [animation=NAME] [with ANIMATION]
             const auto name = c.next();
             if (!name) return fail(line, "Which image to show is missing."_tr());
-            cmd::Scene scene{.image = *name};
+            cmd::Background background{.image = *name};
             auto hex = [](SDL_Color col) { return std::format("#{:02x}{:02x}{:02x}{:02x}", col.r, col.g, col.b, col.a); };
-            const auto col = parseColor(*name, &s_.palette);
-            if (col) scene.image = hex(*col);
-            if (const auto grad = parseGradient(*name, &s_.palette)) scene.image = hex(grad->first) + "-" + hex(grad->second); // (navy-black: fading down to another)
+            const auto col = parseColour(*name, &s_.palette);
+            if (col) background.image = hex(*col);
+            if (const auto grad = parseGradient(*name, &s_.palette)) background.image = hex(grad->first) + "-" + hex(grad->second); // (navy-black: fading down to another)
             while (!c.done()) {
                 if (c.atOption("bottom")) { // (bottom=: the same, as two words)
                     const auto opt = c.option();
-                    if (!col) return fail(line, "A background that fades to a colour starts with one: scene black bottom=navy.");
-                    const auto bottom = color(line, opt->second);
+                    if (!col) return fail(line, "A background that fades to a colour needs a colour to start from."_tr());
+                    const auto bottom = colour(line, opt->second);
                     if (!bottom) return std::nullopt;
-                    scene.image = hex(*col) + "-" + hex(*bottom);
+                    background.image = hex(*col) + "-" + hex(*bottom);
                 } else if (c.atOption("animation")) { // (what it plays while it's shown; none: nothing)
                     const auto named = animationNamed(line, c.option()->second);
                     if (!named) return std::nullopt;
-                    scene.animation = *named;
-                } else if (const Took t = withAnimation(line, c, scene.with); t != Took::No) {
+                    background.animation = *named;
+                } else if (const Took t = withAnimation(line, c, background.with); t != Took::No) {
                     if (t == Took::Bad) return std::nullopt;
                 } else {
                     return fail(line, "'{}' doesn't belong in this {} line."_tr(c.peek().text, verb));
                 }
             }
-            return scene;
+            return background;
         }
         if ((verb == "show" || verb == "hide") && c.take("screen")) { // show screen NAME / hide screen NAME
             const auto name = screenName(verb + " screen");
@@ -954,49 +1321,27 @@ private:
             return e;
         }
         if (verb == "jump" || verb == "call") {
-            if (c.at("screen")) return fail(line, "'{}' goes to a label, not a screen."_tr(verb));
-            const auto label = c.next();
-            if (!label || !isName(*label)) return fail(line, "'{}' needs a label name."_tr(verb));
-            return finished(cmd::Jump{.label = lower(*label), .call = verb == "call"});
+            if (c.at("screen")) return fail(line, "'{}' goes to a scene, not a screen."_tr(verb));
+            const auto scene = c.next();
+            if (!scene || !isName(*scene)) return fail(line, "'{}' needs a scene name."_tr(verb));
+            return finished(cmd::Jump{.scene = lower(*scene), .call = verb == "call"});
         }
         if (verb == "return") return finished(cmd::Return{});
         if (verb == "end") return finished(cmd::End{});
         if (verb == "set" || verb == "add" || verb == "subtract" || verb == "toggle") return change(line, verb, rest);
-        if (verb == "unlock" || verb == "ending" || verb == "achievement" || verb == "tip") { // unlock PICTURE / ending NAME / ...
-            const RecordKind kind = verb == "unlock" ? RecordKind::Gallery : verb == "ending" ? RecordKind::Ending
+        if (verb == "gallery" || verb == "ending" || verb == "achievement" || verb == "tip") { // gallery IMAGE / ending NAME / ...
+            const RecordKind kind = verb == "gallery" ? RecordKind::Gallery : verb == "ending" ? RecordKind::Ending
                                   : verb == "achievement" ? RecordKind::Achievement : RecordKind::Tip;
             const auto name = c.next();
             if (!name) return fail(line, "'{}' needs a name."_tr(verb));
             if (!s_.record(kind, *name))
                 return fail(line, "There's no {} called '{}'."_tr(
-                                              kind == RecordKind::Gallery ? "gallery picture" : kRecordKinds[static_cast<std::size_t>(kind)], *name));
+                                              kind == RecordKind::Gallery ? "gallery image" : kRecordKinds[static_cast<std::size_t>(kind)], *name));
             return finished(cmd::Record{.kind = kind, .name = *name});
         }
         if (verb == "music" || verb == "sound" || verb == "voice") return play(line, verb, c);
-        if (verb == "message") { // message NAME: text, or the player's own: message to NAME: text
-            const auto colon = rest.find(':');
-            std::string who(colon == std::string_view::npos ? std::string_view{} : trim(rest.substr(0, colon)));
-            cmd::Message m{.text = unquote(colon == std::string_view::npos ? std::string_view{} : rest.substr(colon + 1))};
-            if (const std::string first = lower(headOf(who)); first == "to" && who.size() > 3) {
-                m.mine = true;
-                who = std::string(trim(std::string_view(who).substr(3)));
-            } else if (lower(who) == "me") {
-                return fail(line, "The player's own messages need who they go to."_tr());
-            }
-            if (who.empty() || m.text.empty())
-                return fail(line, "A message needs who it's from and what it says."_tr());
-            if (s_.characters.contains(lower(who))) m.character = lower(who);
-            else m.sender = who;
-            checkTextOf(line, m.text);
-            return m;
-        }
-        if (verb == "phone") { // phone off / phone on
-            const auto word = c.next();
-            const std::string w = lower(word.value_or(""));
-            if ((w != "on" && w != "off") || !c.done())
-                return fail(line, "'phone' can be on or off."_tr());
-            return cmd::Phone{.on = w == "on"};
-        }
+        if (verb == "chat") return fail(line, "'{}' needs its lines indented under it."_tr(verb)); // (with its lines: block() reads them)
+        if (verb == "phone") return phone(line, rest);
         if (verb == "stop") { // stop music | stop sound [NAME] | stop voice | stop weather, then [fade 2]
             cmd::Play stop;
             if (c.take("weather")) {
@@ -1021,18 +1366,18 @@ private:
         if (verb == "weather") return weather(line, c);
         if (verb == "camera") return camera(line, c, story);
         if (verb == "textbox") { // textbox NAME (or just "textbox": back to the usual one)
-            cmd::Textbox t{.screen = lower(c.next().value_or("say"))};
+            cmd::Textbox t{.screen = lower(c.next().value_or("textbox"))};
             if (!screenLines_.contains(t.screen)) return fail(line, "There's no screen called '{}' to use as the textbox."_tr(t.screen));
             return finished(t);
         }
         if (verb == "new page") return finished(cmd::Textbox{.newPage = true});
-        if (verb == "chapter" || verb == "chart") { // chapter TITLE / chart TITLE (the rest of the line; quotes are optional)
+        if (verb == "chapter" || verb == "flowchart") { // chapter TITLE / flowchart TITLE (the rest of the line; quotes are optional)
             std::string title = unquote(trim(rest));
             if (title.empty())
                 return fail(line, verb == "chapter" ? "The chapter's title is missing."_tr()
-                                                    : "The flowchart's name for this place is missing."_tr());
+                                                    : "The flowchart's name for this point is missing."_tr());
             checkTextOf(line, title);
-            if (verb == "chart") return cmd::Mark{.title = std::move(title)};
+            if (verb == "flowchart") return cmd::Mark{.title = std::move(title)};
             return cmd::Chapter{.title = std::move(title)};
         }
         if (verb == "movie") { // movie NAME [loop] [skip=no] [volume 80%]
@@ -1051,15 +1396,15 @@ private:
                     return fail(line, "'{}' doesn't belong in a movie line."_tr(c.peek().text));
                 }
             }
-            if (m.loop && !m.skippable) return fail(line, "A movie with loop and skip=no would never end.");
+            if (m.loop && !m.skippable) return fail(line, "A movie with 'loop' and 'skip=no' would never end."_tr());
             return m;
         }
 
         // Menu and engine commands.
         cmd::Ui ui{.verb = verb};
-        if (verb == "notify" || verb == "answer") { // the rest of the line (quotes are optional)
+        if (verb == "notice" || verb == "answer") { // the rest of the line (quotes are optional)
             ui.arg = unquote(rest, true);
-            if (verb == "notify" && ui.arg.empty()) return fail(line, "The message to show is missing."_tr());
+            if (verb == "notice" && ui.arg.empty()) return fail(line, "The notice's words are missing."_tr());
             checkTextOf(line, ui.arg);
             return ui;
         }
@@ -1072,7 +1417,7 @@ private:
             if (c.at("and") && c.left() > 1 && lower(c.peek(1).text) == "close") { // and close with ANIMATION: how it goes when it closes
                 c.skip(2);
                 const Took t = withAnimation(line, c, ui.closing);
-                if (t == Took::No) return fail(line, "'and close' needs with and an animation after it."_tr());
+                if (t == Took::No) return fail(line, "'and close' needs 'with' and an animation after it."_tr());
                 if (t == Took::Bad) return std::nullopt;
             }
             ui.arg = *name;
@@ -1108,7 +1453,34 @@ private:
             return finished(ui);
         }
         if (verb == "start" && !c.done()) ui.arg = lower(*c.next());
+        if (verb == "open chat" || verb == "phone call" || verb == "open image") { // open chat WHO, phone call WHO, open image NAME (in a list: {chat.name}...)
+            ui.arg = unquote(rest, true);
+            if (ui.arg.empty())
+                return fail(line, verb == "open image" ? "Which image to open is missing."_tr() : verb == "open chat" ? "Whose chat to open is missing."_tr()
+                                                                                                                  : "Who to call is missing."_tr());
+            return ui;
+        }
+        if (verb == "keypad") { // keypad 0 to 9, or keypad back: the phone's lock screen's keypad
+            const auto key = c.next();
+            if (!key || !(lower(*key) == "back" || (key->size() == 1 && (*key)[0] >= '0' && (*key)[0] <= '9')))
+                return fail(line, "'keypad' needs a digit (0 to 9) or back after it."_tr());
+            ui.arg = lower(*key);
+            return finished(ui);
+        }
+        if (verb == "open app") { // open app NAME: the phone's app called that
+            const auto name = c.next();
+            if (!name) return fail(line, "Which app to open is missing."_tr());
+            ui.arg = lower(*name);
+            if (const auto phone = screenLines_.find("phone"); ui.arg != "home" && ui.arg != "call" && ui.arg != "lock" && !ui.arg.contains('{') && // (the phone's own; a value's: as it goes)
+                (phone == screenLines_.end() || !hasAppPart(*phone->second, ui.arg)))
+                error(line, "There's no app called '{}'."_tr(*name)); // (said once: the button keeps its action)
+        }
         return finished(ui);
+    }
+
+    // A phone line is a call (phone call WHO, with its lines under it: callBlock), never a line of its own.
+    std::optional<Command> phone(const Line& line, std::string_view) {
+        return fail(line, "'phone' only starts a call: phone call WHO, with what's said indented under it."_tr());
     }
 
     // A player setting's value as a number: a number, yes / no, or (scaling, mouths) its word.
@@ -1170,14 +1542,14 @@ private:
         return nullptr;
     }
 
-    // at / to POSITION: a name from a "position" line, or a number from -1 (left) to 1 (right).
+    // at / to PLACE: a name from a "place" line, or a number from -1 (left) to 1 (right).
     bool place(const Line& line, Cursor& c, StageProps& props) {
         const auto word = c.next();
         if (!word) return error(line, "'at' needs a place on the stage."_tr()), false;
         if (auto n = stageCoordinate(*word, false)) props.x = *n;
-        else if (auto it = positions_.find(lower(*word)); it != positions_.end()) props.x = it->second;
+        else if (auto it = places_.find(lower(*word)); it != places_.end()) props.x = it->second;
         else {
-            return error(line, "There's no position called '{}'."_tr(*word)), false;
+            return error(line, "There's no place called '{}'."_tr(*word)), false;
         }
         return true;
     }
@@ -1209,15 +1581,15 @@ private:
         return Took::Yes;
     }
 
-    // x= y= zoom= opacity= rotate= flip= layer= tint=
+    // x= y= zoom= opacity= rotation= flip= layer= tint=
     bool stageProp(const Line& line, StageProps& p, const std::string& key, const std::string& value) {
         if (key == "flip") {
             const auto b = boolean(line, value, key);
             p.flip = b;
             return b.has_value();
         }
-        if (key == "tint") return (p.tint = color(line, value)).has_value();
-        static constexpr auto keys = std::to_array<std::string_view>({"x", "y", "zoom", "opacity", "rotate", "layer"});
+        if (key == "tint") return (p.tint = colour(line, value)).has_value();
+        static constexpr auto keys = std::to_array<std::string_view>({"x", "y", "zoom", "opacity", "rotation", "layer"});
         if (!std::ranges::contains(keys, key))
             return error(line, "A show line has no setting '{}'."_tr(key)), false;
         if (key == "x" || key == "y") {
@@ -1232,7 +1604,7 @@ private:
         if (!n) return error(line, "'{}' needs a number, not '{}'."_tr(key, value)), false;
         if (key == "zoom") p.zoom = *n;
         else if (key == "opacity") p.opacity = *n;
-        else if (key == "rotate") p.rotate = *n;
+        else if (key == "rotation") p.rotation = *n;
         else p.layer = static_cast<int>(*n);
         return true;
     }
@@ -1270,6 +1642,7 @@ private:
         if (!isVariable(set.variable))
             return fail(line, "'{}' can't be a variable name (one word of letters, numbers and _)."_tr(
                                           set.variable));
+        wrote(set.variable);
         if (set.op != '!') {
             set.value = formula(line, value);
             if (!set.value) return std::nullopt;
@@ -1277,7 +1650,7 @@ private:
         return set;
     }
 
-    // music FILE [once] | sound FILE [loop] [as CHANNEL] | voice FILE [sync | no sync], then [fade 2] [volume 50%]
+    // music FILE [once] | sound FILE [loop] [as CHANNEL] | voice FILE [text_follows=yes|no], then [fade 2] [volume 50%]
     std::optional<Command> play(const Line& line, std::string_view verb, Cursor& c) {
         cmd::Play p{.track = verb == "music" ? cmd::Play::Track::Music : verb == "voice" ? cmd::Play::Track::Voice : cmd::Play::Track::Sound,
                     .loop = verb == "music"};
@@ -1286,6 +1659,7 @@ private:
             return fail(line, "Which file to play is missing."_tr());
         if (lower(*file) == "stop") return fail(line, "'stop' isn't a file to play."_tr());
         p.file = *file;
+        readValues(line, p.file);
         while (!c.done()) {
             if (const Took t = amount(line, c, "fade", p.fade); t != Took::No) {
                 if (t == Took::Bad) return std::nullopt;
@@ -1299,11 +1673,10 @@ private:
                 const auto channel = c.next();
                 if (!channel) return fail(line, "'as' needs a name after it."_tr());
                 p.channel = lower(*channel);
-            } else if (verb == "voice" && c.take("sync")) { // the next line types out with the voice
-                p.sync = true;
-            } else if (verb == "voice" && c.at("no") && c.left() >= 2 && lower(c.peek(1).text) == "sync") {
-                c.skip(2);
-                p.sync = false;
+            } else if (verb == "voice" && c.atOption("text_follows")) { // the next line types out with the voice (or doesn't)
+                const auto b = boolean(line, c.option()->second, "text_follows");
+                if (!b) return std::nullopt;
+                p.textFollows = *b;
             } else {
                 return fail(line, "'{}' doesn't belong in this {} line."_tr(c.peek().text, verb));
             }
@@ -1312,7 +1685,7 @@ private:
         return p;
     }
 
-    // weather rain|snow|petals|leaves|embers [amount=150%] [speed=2] [wind=-0.5] [color=C] [image=NAME] [behind=yes] [fade 2]
+    // weather rain|snow|petals|leaves|embers [amount=150%] [speed=2] [wind=-0.5] [tint=C] [image=NAME] [behind=yes] [fade 2]
     std::optional<Command> weather(const Line& line, Cursor& c) {
         static constexpr auto kinds = std::to_array<std::string_view>({"rain", "snow", "petals", "leaves", "embers"});
         cmd::Weather w{.kind = lower(c.next().value_or(""))};
@@ -1327,9 +1700,9 @@ private:
             if (!opt) return fail(line, "'{}' doesn't belong in a weather line."_tr(c.peek().text));
             const auto& [key, value] = *opt;
             if (key == "image") {
-                w.image = pictureName(value);
-            } else if (key == "color") {
-                if (!(w.color = color(line, value))) return std::nullopt;
+                w.image = imageName(value);
+            } else if (key == "tint") {
+                if (!(w.tint = colour(line, value))) return std::nullopt;
             } else if (key == "behind") {
                 const auto b = boolean(line, value, key);
                 if (!b) return std::nullopt;
@@ -1367,16 +1740,17 @@ private:
         return cam;
     }
 
-    // ask NAME "Prompt" [default=TEXT] [max=N]
+    // ask NAME "Prompt" [default=TEXT] [most_letters=N]
     std::optional<Command> ask(const Line& line, Cursor& c) {
         cmd::Ask a;
         const auto name = c.next();
         if (!name || !isVariable(lower(*name))) return fail(line, "'ask' needs a variable name and a question."_tr());
         a.variable = lower(*name);
+        wrote(a.variable);
         while (!c.done()) {
             if (auto opt = c.option()) {
                 if (opt->first == "default") a.fallback = opt->second;
-                else if (opt->first == "max" && parseNumber(opt->second)) a.max = std::max(1, static_cast<int>(*parseNumber(opt->second)));
+                else if (opt->first == "most_letters" && parseNumber(opt->second)) a.mostLetters = std::max(1, static_cast<int>(*parseNumber(opt->second)));
                 else return fail(line, "'ask' has no setting '{}'."_tr(opt->first));
             } else {
                 a.prompt += (a.prompt.empty() ? "" : " ") + *c.next();
@@ -1402,6 +1776,7 @@ private:
                 const std::string_view part = trim(text.substr(start, i - start));
                 start = i + 1;
                 if (part.empty()) continue;
+                readValues(line, part); // (open chat {chat.name}...)
                 const std::string verb = commandOf(part, false);
                 if (verb.empty()) {
                     error(line, "'{}' isn't something a button can do."_tr(firstWord(part)));
@@ -1411,8 +1786,8 @@ private:
                 if (!c) continue;
                 const auto* jump = std::get_if<cmd::Jump>(&*c);
                 const auto* ui = std::get_if<cmd::Ui>(&*c);
-                const std::string label = jump ? jump->label : ui && ui->verb == "start" ? ui->arg : std::string{};
-                if (!label.empty() && !s_.labels.contains(label)) error(line, "There's no label called '{}'."_tr(label));
+                const std::string scene = jump ? jump->scene : ui && ui->verb == "start" ? ui->arg : std::string{};
+                if (!scene.empty() && !s_.scenes.contains(scene)) error(line, "There's no scene called '{}'."_tr(scene));
                 out.push_back(std::move(*c));
             }
         }
@@ -1425,17 +1800,17 @@ private:
         // Colours first so everything else can use them, then the rest in a fixed order; within a
         // group, lines take effect in the order they were written (so the last one wins).
         static constexpr std::array<std::array<std::string_view, 2>, 13> order{{
-            {"color", ""}, {"config", ""}, {"position", ""}, {"font", ""}, {"atlas", "picture"}, {"character", ""}, {"style", ""},
+            {"colour", ""}, {"setting", ""}, {"place", ""}, {"font", ""}, {"atlas", "sub-image"}, {"character", ""}, {"style", ""},
             {"control", ""}, {"gallery", "ending"}, {"song", "achievement"}, {"tip", "animation"}, {"screen", ""}, {"variable", ""},
         }};
         for (const auto& group : order)
             for (const Line* line : defs_)
                 if (const std::string kind = headOf(line->text); kind == group[0] || kind == group[1]) {
-                    const bool lenient = capitalized(line->text) && line->children.empty();
+                    const bool lenient = capitalised(line->text) && line->children.empty();
                     if (!attempt(lenient, [&] { define(*line, kind); })) asText_.insert(line);
                 }
-        for (const auto& [key, line] : animationConfigs_) // (config show_animation and hide_animation: animations the scripts have)
-            if (const std::string& name = key == "show_animation" ? s_.config.showAnimation : s_.config.hideAnimation; !name.empty() && !s_.animations.contains(name))
+        for (const auto& [key, line] : animationSettings_) // (setting animation_on_show and animation_on_hide: animations the scripts have)
+            if (const std::string& name = key == "animation_on_show" ? s_.gameSettings.animationOnShow : s_.gameSettings.animationOnHide; !name.empty() && !s_.animations.contains(name))
                 error(*line, "There's no animation called '{}'."_tr(name));
     }
 
@@ -1446,11 +1821,11 @@ private:
         if (kind != "screen" && kind != "atlas" && kind != "animation" && !line.children.empty())
             error(line, "Lines indented under this one don't belong to it."_tr());
 
-        if (kind == "color") {
+        if (kind == "colour") {
             const auto name = c.next();
             const auto value = c.next();
-            const auto col = value ? parseColor(*value, &s_.palette) : std::nullopt;
-            if (!name || !col || !c.done()) return error(line, "A color line needs a name and a colour."_tr());
+            const auto col = value ? parseColour(*value, &s_.palette) : std::nullopt;
+            if (!name || !col || !c.done()) return error(line, "A colour line needs a name and a colour."_tr());
             s_.palette.insert_or_assign(lower(*name), *col);
         } else if (kind == "variable") { // variable NAME [VALUE] ["what it's for"]
             const auto name = c.next();
@@ -1468,30 +1843,30 @@ private:
             if (!c.done() && c.peek().quoted) c.skip(1); // (what it's for)
             if (!c.done()) return error(line, "A variable line is its name, the value it starts with, and what it's for, in quotes."_tr());
             s_.startValues.insert_or_assign(lower(*name), std::move(start));
-        } else if (kind == "position") { // position NAME VALUE (or NAME=VALUE)
+        } else if (kind == "place") { // place NAME VALUE (or NAME=VALUE)
             const auto [name, value] = nameValue(c);
             const auto n = value ? stageCoordinate(*value, false) : std::nullopt;
-            if (!name || !n || !c.done()) return error(line, "A position line needs a name and a number from -1 to 1."_tr());
-            positions_.insert_or_assign(lower(*name), *n);
+            if (!name || !n || !c.done()) return error(line, "A place line needs a name and a number from -1 to 1."_tr());
+            places_.insert_or_assign(lower(*name), *n);
         } else if (kind == "font") { // font [NAME] FILE [STYLE]
             const auto a = c.next(), b = c.next(), style = c.next();
             if (!a || !c.done())
                 return error(line, "A font line needs a font file."_tr());
             if (b) s_.fonts.insert_or_assign(lower(*a), Script::FontFile{*b, style.value_or("")});
             else s_.fonts.insert_or_assign("default", Script::FontFile{*a, ""});
-        } else if (kind == "config") { // config SETTING VALUE... (or SETTING=VALUE)
+        } else if (kind == "setting") { // setting NAME VALUE... (or NAME=VALUE)
             if (line.file > builtinFiles_) // (the built-in menus' come before main.vnscript)
-                return error(line, "'config' lines belong in main.vnscript, with the game's other settings."_tr());
+                return error(line, "'setting' lines belong in main.vnscript, with the game's other settings."_tr());
             const auto [key, value] = nameValue(c);
-            if (!key) return error(line, "A config line needs a setting and a value."_tr());
+            if (!key) return error(line, "A setting line needs a name and a value."_tr());
             std::vector<std::string> values;
             if (value) values.push_back(*value);
             while (auto v = c.next()) values.push_back(*v);
-            config(line, lower(*key), values);
+            gameSettings(line, lower(*key), values);
         } else if (kind == "atlas") {
             atlas(line, c);
-        } else if (kind == "picture") {
-            subPicture(line, c);
+        } else if (kind == "sub-image") {
+            subImage(line, c);
         } else if (kind == "animation") {
             animation(line, c);
         } else if (kind == "character") {
@@ -1511,7 +1886,7 @@ private:
         }
     }
 
-    // atlas NAME [image=FILE] [columns=N] [like=ATLAS], with the frames' names indented below it:
+    // atlas NAME [image=FILE] [frames_in_a_row=N] [same_names_as=ATLAS], with the frames' names indented below it:
     //     expressions neutral happy sad
     //     eyes open half closed
     //     mouth closed half open
@@ -1524,7 +1899,7 @@ private:
         while (!c.done()) {
             auto opt = c.option();
             if (!opt) return error(line, "'{}' doesn't belong in an atlas line."_tr(c.peek().text));
-            if (opt->first == "like") { // the same frames as an atlas above (its settings come first)
+            if (opt->first == "same_names_as") { // the same frames as an atlas above (its settings come first)
                 const auto other = std::ranges::find(s_.atlases, lower(opt->second), &Atlas::name);
                 if (other == s_.atlases.end())
                     return error(line, "There's no atlas called '{}' above this line."_tr(opt->second));
@@ -1538,8 +1913,8 @@ private:
         }
         for (const auto& [key, value] : options) {
             if (key == "image") {
-                a.image = pictureName(value);
-            } else if (key == "columns") {
+                a.image = imageName(value);
+            } else if (key == "frames_in_a_row") {
                 const auto n = number(line, value, key);
                 if (!n) return;
                 if (*n < 1.0f) return error(line, "'columns' needs a number from 1 up, not '{}'."_tr(*n));
@@ -1570,13 +1945,13 @@ private:
                         break;
                     }
                     if (!layer) layer.emplace();
-                    if (opt->first == "image") layer->image = pictureName(opt->second);
+                    if (opt->first == "image") layer->image = imageName(opt->second);
                     else if (const auto n = number(part, opt->second, opt->first)) (opt->first == "x" ? layer->x : layer->y) = *n;
                 } else {
                     names.push_back(lower(*w->next()));
                 }
             }
-            if (!names.empty()) *list = std::move(names); // (like= may have given the names already)
+            if (!names.empty()) *list = std::move(names); // (same_names_as= may have given the names already)
             if (list->empty()) error(part, "'{}' needs a name for each frame."_tr(what));
             if (layer && layer->image.empty()) error(part, "Which image holds the {} is missing."_tr(what));
             if (list == &a.eyes) a.eyesPart = layer;
@@ -1646,22 +2021,22 @@ private:
                     const auto e = oneOf<Ease>(part, "ease", w->option()->second, kEases);
                     if (!e) ok = false;
                     else ease = *e, easeSaid = true;
-                } else if (w->atOption("shape")) { // shape=PICTURE: where the wipe on this line shows it first
-                    shape = pictureName(w->option()->second);
+                } else if (w->atOption("shape")) { // shape=IMAGE: where the wipe on this line shows it first
+                    shape = imageName(w->option()->second);
                 } else if (const auto opt = w->option()) {
                     const auto& [key, value] = *opt;
                     using V = Animation::Value;
                     Animation::Change change;
-                    if (key == "color") {
-                        change.what = V::Color;
-                        const auto col = color(part, value);
+                    if (key == "colour") {
+                        change.what = V::Colour;
+                        const auto col = colour(part, value);
                         if (!col) ok = false;
-                        else change.color = *col;
+                        else change.colour = *col;
                     } else if (key == "fade") { // fade=COLOUR: covered with it by the end; fade=none: uncovered again
                         change.what = V::Fade;
-                        const auto col = lower(value) == "none" ? std::optional<SDL_Color>(SDL_Color{0, 0, 0, 0}) : color(part, value);
+                        const auto col = lower(value) == "none" ? std::optional<SDL_Color>(SDL_Color{0, 0, 0, 0}) : colour(part, value);
                         if (!col) ok = false;
-                        else change.color = *col;
+                        else change.colour = *col;
                     } else if (key == "x" || key == "y") { // places, as the stage's (home: its own)
                         change.what = key == "x" ? V::X : V::Y;
                         if (lower(value) == "home") change.to = std::numeric_limits<float>::quiet_NaN();
@@ -1672,8 +2047,8 @@ private:
                         change.by = true;
                         if (const auto n = number(part, value, key)) change.to = key == "left" || key == "down" ? -*n : *n;
                         else ok = false;
-                    } else if (key == "opacity" || key == "zoom" || key == "rotate") {
-                        change.what = key == "opacity" ? V::Opacity : key == "zoom" ? V::Zoom : V::Rotate;
+                    } else if (key == "opacity" || key == "zoom" || key == "rotation") {
+                        change.what = key == "opacity" ? V::Opacity : key == "zoom" ? V::Zoom : V::Rotation;
                         if (const auto n = number(part, value, key)) change.to = *n;
                         else ok = false;
                     } else if (key == "wipe") { // how much of it shows (100%: all of it), from the left or as shape= has it
@@ -1681,7 +2056,7 @@ private:
                         if (const auto n = number(part, value, key)) change.to = std::clamp(*n, 0.0f, 1.0f);
                         else ok = false;
                     } else {
-                        error(part, "An animation can change x, y, left, right, up, down, opacity, zoom, rotate, color, fade and wipe, not '{}'."_tr(key)), ok = false;
+                        error(part, "An animation can change x, y, left, right, up, down, opacity, zoom, rotation, colour, fade and wipe, not '{}'."_tr(key)), ok = false;
                     }
                     if (ok) changes.push_back(change);
                 } else {
@@ -1712,29 +2087,29 @@ private:
         s_.animations.insert_or_assign(a.name, std::move(a)); // the last one wins
     }
 
-    // picture NAME image=FILE x=N y=N w=N h=N: a part of a picture, shown by its own name.
-    void subPicture(const Line& line, Cursor& c) {
+    // sub-image NAME cut_from=FILE x=N y=N width=N height=N: a part of an image, shown by its own name.
+    void subImage(const Line& line, Cursor& c) {
         const auto name = c.next();
-        if (!name || !isName(*name)) return error(line, "A picture line needs a name."_tr());
-        SubPicture p{.name = lower(*name)};
+        if (!name || !isName(*name)) return error(line, "A sub-image line needs a name."_tr());
+        SubImage p{.name = lower(*name)};
         while (!c.done()) {
             const auto opt = c.option();
-            if (!opt) return error(line, "'{}' doesn't belong in a picture line."_tr(c.peek().text));
+            if (!opt) return error(line, "'{}' doesn't belong in a sub-image line."_tr(c.peek().text));
             const auto& [key, value] = *opt;
-            float* at = key == "x" ? &p.rect.x : key == "y" ? &p.rect.y : key == "w" ? &p.rect.w : key == "h" ? &p.rect.h : nullptr;
-            if (key == "image") p.image = pictureName(value);
-            else if (!at) return error(line, "A picture line has no setting '{}'."_tr(key));
+            float* at = key == "x" ? &p.rect.x : key == "y" ? &p.rect.y : key == "width" ? &p.rect.w : key == "height" ? &p.rect.h : nullptr;
+            if (key == "cut_from") p.image = imageName(value);
+            else if (!at) return error(line, "A sub-image line has no setting '{}'."_tr(key));
             else if (const auto n = number(line, value, key)) *at = *n;
             else return;
         }
         if (p.image.empty() || p.rect.w <= 0.0f || p.rect.h <= 0.0f)
-            return error(line, "A picture line needs the picture it's cut from and the part: image=FILE x= y= w= h=.");
-        if (lower(p.image) == p.name) return error(line, "A picture can't be cut from itself: give it a name of its own."_tr());
-        std::erase_if(s_.subPictures, [&](const SubPicture& other) { return other.name == p.name; }); // the last one wins
-        s_.subPictures.push_back(std::move(p));
+            return error(line, "A sub-image line needs the image it's cut from and the part of it."_tr());
+        if (lower(p.image) == p.name) return error(line, "A sub-image can't be cut from itself: give it a name of its own."_tr());
+        std::erase_if(s_.subImages, [&](const SubImage& other) { return other.name == p.name; }); // the last one wins
+        s_.subImages.push_back(std::move(p));
     }
 
-    // "NAME VALUE" or "NAME=VALUE" (config and position lines).
+    // "NAME VALUE" or "NAME=VALUE" (setting and place lines).
     static std::pair<std::optional<std::string>, std::optional<std::string>> nameValue(Cursor& c) {
         auto name = c.next();
         if (!name) return {};
@@ -1751,7 +2126,7 @@ private:
         return vertical ? (1.0f - *n) * 0.5f : (*n + 1.0f) * 0.5f;
     }
 
-    // control NAME keys="space mouse_left" action="..." [everywhere=yes] [if=CONDITION]
+    // control NAME keys="space mouse_left" action="..." [in_menus=yes] [when=CONDITION]
     void control(const Line& line, Cursor& c) {
         const auto name = c.next();
         if (!name || !isName(*name)) return error(line, "A control line needs a name."_tr());
@@ -1760,7 +2135,7 @@ private:
             const auto opt = c.option();
             if (!opt) return error(line, "'{}' doesn't belong in a control line."_tr(c.peek().text));
             const auto& [key, value] = *opt;
-            if (key == "keys" || key == "key") {
+            if (key == "keys") {
                 std::string list(value);
                 std::ranges::replace(list, ',', ' ');
                 auto keyWords = splitWords(list);
@@ -1772,15 +2147,15 @@ private:
                 }
             } else if (key == "action") {
                 control.action = value;
-            } else if (key == "everywhere") {
-                control.everywhere = boolean(line, value, key).value_or(false);
-            } else if (key == "if") {
+            } else if (key == "in_menus") {
+                control.inMenus = boolean(line, value, key).value_or(false);
+            } else if (key == "when") {
                 control.condition = value;
             } else {
                 return error(line, "Controls have no setting '{}'."_tr(key));
             }
         }
-        if (control.action.empty()) return error(line, "A control needs action=.");
+        if (control.action.empty()) return error(line, "A control needs 'action='."_tr());
         std::erase_if(controlLines_, [&](const ControlLine& other) { return other.name == control.name; }); // the last one wins
         controlLines_.push_back(std::move(control));
     }
@@ -1789,11 +2164,11 @@ private:
     void character(const Line& line, Cursor& c) {
         const auto name = c.next();
         if (!name) return error(line, "A character line needs a name."_tr());
-        const GameConfig& cfg = s_.config;
-        CharacterDef def{.key = lower(*name), .name = *name, .image = imageName(*name), .babbleSpeed = cfg.babbleSpeed,
-                         .blink = cfg.blink, .blinkEvery = cfg.blinkEvery, .talk = cfg.talk, .talkSpeed = cfg.talkSpeed};
+        const GameSettings& game = s_.gameSettings;
+        CharacterDef def{.key = lower(*name), .name = *name, .image = characterImageName(*name), .madeUpVoiceSpeed = game.madeUpVoiceSpeed,
+                         .blink = game.blink, .secondsBetweenBlinks = game.secondsBetweenBlinks, .mouthMoves = game.mouthsMove, .mouthSpeed = game.mouthSpeed};
         std::optional<bool> faceBlink;
-        std::optional<Talk> faceTalk;
+        std::optional<MouthMoves> faceMouth;
         while (!c.done()) {
             const auto opt = c.option();
             if (!opt) return error(line, "'{}' doesn't belong in a character line."_tr(c.peek().text));
@@ -1804,7 +2179,7 @@ private:
                 const auto n = number(line, value, key);
                 return set(out, n ? std::optional(std::clamp(*n, lo, hi)) : std::nullopt);
             };
-            auto sync = [&](FaceSync& out) -> bool { // yes, no, or what it copies: face_sync=expression,blink
+            auto sync = [&](FaceCopies& out) -> bool { // yes, no, or what it copies: face_copies=expression,blink
                 if (const auto b = parseBool(value)) return out = {*b, *b, *b}, true;
                 out = {false, false, false};
                 for (auto&& part : std::views::split(std::string_view(value), ',')) {
@@ -1812,54 +2187,67 @@ private:
                     const std::string word = lower(written);
                     if (word == "expression") out.expression = true;
                     else if (word == "blink") out.blink = true;
-                    else if (word == "talk") out.talk = true;
-                    else return error(line, "'face_sync' can be yes, no, or what the face copies (expression, blink, talk), not '{}'."_tr(written)), false;
+                    else if (word == "mouth") out.mouth = true;
+                    else return error(line, "'face_copies' can be yes, no, or what the face copies (expression, blink, mouth), not '{}'."_tr(written)), false;
                 }
                 return true;
             };
             bool ok = true;
-            if (key == "color" || key == "text_color") {
-                const auto col = color(line, value);
+            if (key == "name_colour" || key == "text_colour") {
+                const auto col = colour(line, value);
                 ok = col.has_value();
-                if (col) (key == "color" ? def.color : def.textColor) = *col;
+                if (col && key == "name_colour") def.nameColour = *col;
+                else if (col) def.textColour = *col;
             }
-            else if (key == "image") def.image = pictureName(value);
-            else if (key == "reveal") ok = (def.reveal = oneOf<Reveal>(line, key, value, kReveals)).has_value();
+            else if (key == "image") def.image = imageName(value);
+            else if (key == "text_appears") ok = (def.textAppears = oneOf<TextAppears>(line, key, value, kTextAppears)).has_value();
             else if (key == "textbox") def.textbox = lower(value);
-            else if (key == "blip") def.blip = value;
-            else if (key == "voices") { // yes: audio/voices/<name>/, or audio/voices/<value>/
+            else if (key == "typing_sound") def.typingSound = value;
+            else if (key == "voice_files") { // yes: sounds/voices/<name>/, or sounds/voices/<value>/
                 const auto b = parseBool(value);
-                def.voices = b == false ? "" : std::format("voices/{}", b ? imageName(*name) : pictureName(value));
+                def.voiceFiles = b == false ? "" : std::format("voices/{}", b ? characterImageName(*name) : imageName(value));
             }
-            else if (key == "babble") { // high, medium, low, deep, no, or a pitch in Hz
+            else if (key == "made_up_voice") { // high, medium, low, deep, no, or a pitch in Hz
                 static constexpr std::pair<std::string_view, float> heights[]{{"high", 250.0f}, {"medium", 190.0f}, {"low", 135.0f}, {"deep", 105.0f}};
                 const auto height = std::ranges::find(heights, lower(value), &std::pair<std::string_view, float>::first);
-                if (height != std::end(heights)) def.babble = height->second;
-                else if (parseBool(value) == false) def.babble = 0.0f;
-                else if (const auto hz = parseNumber(value); hz && *hz >= 50.0f && *hz <= 600.0f) def.babble = *hz;
-                else return error(line, "'babble' can be high, medium, low, deep, no or a pitch, not '{}'."_tr(value));
+                if (height != std::end(heights)) def.madeUpVoice = height->second;
+                else if (parseBool(value) == false) def.madeUpVoice = 0.0f;
+                else if (const auto hz = parseNumber(value); hz && *hz >= 50.0f && *hz <= 600.0f) def.madeUpVoice = *hz;
+                else return error(line, "'made_up_voice' can be high, medium, low, deep, no or a pitch, not '{}'."_tr(value));
             }
-            else if (key == "babble_speed") ok = within(def.babbleSpeed, 0.25f, 4.0f);
+            else if (key == "made_up_voice_speed") ok = within(def.madeUpVoiceSpeed, 0.25f, 4.0f);
             else if (key == "blink") ok = flag(def.blink);
-            else if (key == "blink_every") ok = within(def.blinkEvery, 0.5f, 60.0f);
-            else if (key == "talk") ok = set(def.talk, talk(line, key, value));
-            else if (key == "talk_speed") ok = within(def.talkSpeed, 0.5f, 20.0f);
-            else if (key == "face") def.face = value; // a picture name, or yes / no
+            else if (key == "seconds_between_blinks") ok = within(def.secondsBetweenBlinks, 0.5f, 60.0f);
+            else if (key == "mouth_moves") ok = set(def.mouthMoves, mouthMoves(line, key, value));
+            else if (key == "mouth_speed") ok = within(def.mouthSpeed, 0.5f, 20.0f);
+            else if (key == "face") def.face = value; // an image name, or yes / no
             else if (key == "face_side") {
                 if (!isName(value)) return error(line, "'face_side' is one word, not '{}'."_tr(value));
                 def.faceSide = lower(value);
             }
-            else if (key == "face_sync") ok = sync(def.faceSync);
+            else if (key == "face_copies") ok = sync(def.faceCopies);
+            else if (key == "avatar") def.avatar = imageName(value);
+            else if (key == "about") {
+                def.about = value;
+                checkTextOf(line, value);
+            }
+            else if (key == "contact") def.contact = formula(line, value); // (in the phone's people while it's true)
+            else if (key == "ringtone") def.ringtone = value;
+            else if (key == "chat" || key == "call") { // the scene played when the player opens their chat, or calls them
+                if (!isName(lower(value))) return error(line, "'{}' needs a scene's name, not '{}'."_tr(key, value));
+                (key == "chat" ? def.chatScene : def.callScene) = lower(value);
+                phoneSceneNames_.push_back({.file = line.file, .number = line.number, .scene = lower(value)});
+            }
             else if (key == "face_flip") ok = flag(def.faceFlip);
             else if (key == "face_blink") ok = (faceBlink = boolean(line, value, key)).has_value();
-            else if (key == "face_talk") ok = (faceTalk = talk(line, key, value)).has_value();
+            else if (key == "face_mouth") ok = (faceMouth = mouthMoves(line, key, value)).has_value();
             else return error(line, "Characters have no setting '{}'."_tr(key));
             if (!ok) return;
         }
         if (const auto yes = parseBool(def.face)) def.face = *yes ? def.image + "_face" : ""; // face=yes: images/<image>_face.png
-        else def.face = pictureName(def.face);
-        def.faceBlink = faceBlink.value_or(def.blink); // the face does what the picture on stage does, unless told
-        def.faceTalk = faceTalk.value_or(def.talk);
+        else def.face = imageName(def.face);
+        def.faceBlink = faceBlink.value_or(def.blink); // the face does what the image on stage does, unless told
+        def.faceMouth = faceMouth.value_or(def.mouthMoves);
         if (!def.textbox.empty()) textboxes_.emplace_back(&line, def.textbox);
         s_.characters.insert_or_assign(def.key, std::move(def));
     }
@@ -1871,7 +2259,7 @@ private:
         return value.has_value();
     }
 
-    // gallery PICTURE "Title" | ending NAME "Title" [hint="..."] | song NAME "Title" | achievement NAME "Title" "Description" [hidden]
+    // gallery IMAGE "Title" | ending NAME "Title" [hint="..."] | song NAME "Title" | achievement NAME "Title" "Description" [secret]
     // | tip NAME "Title" "Description"
     void record(const Line& line, RecordKind kind, Cursor& c) {
         const auto name = c.next();
@@ -1879,7 +2267,7 @@ private:
         Script::Record r{.name = *name, .title = c.next().value_or(*name)};
         if (r.title.empty()) r.title = *name; // (a title left empty, "": the name)
         while (!c.done()) {
-            if (kind == RecordKind::Achievement && c.take("hidden")) r.hidden = true;
+            if (kind == RecordKind::Achievement && c.take("secret")) r.secret = true;
             else if (kind == RecordKind::Ending && c.atOption("hint")) r.text = c.option()->second;
             else if ((kind == RecordKind::Achievement || kind == RecordKind::Tip) && r.text.empty() && (c.peek().quoted || !c.peek().text.contains('=')))
                 r.text = *c.next();
@@ -1890,54 +2278,56 @@ private:
         list.push_back(std::move(r));
     }
 
-    // config SETTING VALUE (one value, or two for resolution and cursor_hotspot)
-    void config(const Line& line, const std::string& key, const std::vector<std::string>& v) {
-        GameConfig& c = s_.config;
+    // setting NAME VALUE (one value, or two for game_size and pointer_tip)
+    void gameSettings(const Line& line, const std::string& key, const std::vector<std::string>& v) {
+        GameSettings& c = s_.gameSettings;
         struct Number {
             std::string_view key;
-            float GameConfig::*field;
+            float GameSettings::*field;
             float lo, hi;
         };
         static constexpr std::array numbers{
-            Number{"skip_delay", &GameConfig::skipDelay, 0.0f, 10.0f},     Number{"auto_per_char", &GameConfig::autoPerChar, 0.0f, 10.0f},
-            Number{"sprite_height", &GameConfig::spriteHeight, 0.05f, 10.0f}, Number{"move_time", &GameConfig::moveTime, 0.0f, 60.0f},
+            Number{"skip_time", &GameSettings::skipTime, 0.0f, 10.0f},     Number{"auto_letter_delay", &GameSettings::autoLetterDelay, 0.0f, 10.0f},
+            Number{"character_height", &GameSettings::characterHeight, 0.05f, 10.0f}, Number{"move_time", &GameSettings::moveTime, 0.0f, 60.0f},
 
-            Number{"notify_time", &GameConfig::notifyTime, 0.1f, 600.0f},
-            Number{"music_crossfade", &GameConfig::musicCrossfade, 0.0f, 60.0f},
-            Number{"glide_speed", &GameConfig::glideSpeed, 0.0f, 10.0f},      Number{"glide_distance", &GameConfig::glideDistance, 0.05f, 10.0f},
-            Number{"scrollbar_size", &GameConfig::scrollbarSize, 1.0f, 64.0f}, Number{"fade_size", &GameConfig::fadeSize, 0.0f, 1000.0f},
-            Number{"blip_every", &GameConfig::blipEvery, 0.01f, 10.0f},    Number{"blip_volume", &GameConfig::blipVolume, 0.0f, 1.0f},
-            Number{"babble_speed", &GameConfig::babbleSpeed, 0.25f, 4.0f}, Number{"blink_every", &GameConfig::blinkEvery, 0.5f, 60.0f},
-            Number{"talk_speed", &GameConfig::talkSpeed, 0.5f, 20.0f},     Number{"phone_typing", &GameConfig::phoneTyping, 0.0f, 100.0f},
-            Number{"music_while_speaking", &GameConfig::musicWhileSpeaking, 0.0f, 1.0f},
+            Number{"notice_time", &GameSettings::noticeTime, 0.1f, 600.0f},
+            Number{"music_crossfade", &GameSettings::musicCrossfade, 0.0f, 60.0f},
+            Number{"glide_speed", &GameSettings::glideSpeed, 0.0f, 10.0f},      Number{"glide_distance", &GameSettings::glideDistance, 0.05f, 10.0f},
+            Number{"scrollbar_thickness", &GameSettings::scrollbarThickness, 1.0f, 64.0f}, Number{"fading_edges", &GameSettings::fadingEdges, 0.0f, 1000.0f},
+            Number{"typing_sound_gap", &GameSettings::typingSoundGap, 0.01f, 10.0f},    Number{"typing_sound_volume", &GameSettings::typingSoundVolume, 0.0f, 1.0f},
+            Number{"made_up_voice_speed", &GameSettings::madeUpVoiceSpeed, 0.25f, 4.0f}, Number{"seconds_between_blinks", &GameSettings::secondsBetweenBlinks, 0.5f, 60.0f},
+            Number{"mouth_speed", &GameSettings::mouthSpeed, 0.5f, 20.0f},     Number{"phone_typing", &GameSettings::phoneTyping, 0.0f, 100.0f},
+            Number{"music_under_voices", &GameSettings::musicUnderVoices, 0.0f, 1.0f},
         };
         struct Whole {
             std::string_view key;
-            int GameConfig::*field;
+            int GameSettings::*field;
             int lo, hi;
         };
         static constexpr std::array wholes{
-            Whole{"save_pages", &GameConfig::savePages, 1, 99}, Whole{"save_slots", &GameConfig::saveSlots, 1, 60},
-            Whole{"history_limit", &GameConfig::historyLimit, 1, 100000}, Whole{"rollback", &GameConfig::rollback, 0, 10000},
-            Whole{"preload", &GameConfig::preload, 0, 1000}, Whole{"image_memory", &GameConfig::imageMemory, 0, 65536},
+            Whole{"save_pages", &GameSettings::savePages, 1, 99}, Whole{"page_slots", &GameSettings::pageSlots, 1, 60},
+            Whole{"history_length", &GameSettings::historyLength, 1, 100000}, Whole{"rollback_lines", &GameSettings::rollbackLines, 0, 10000},
+            Whole{"load_ahead", &GameSettings::loadAhead, 0, 1000}, Whole{"image_memory", &GameSettings::imageMemory, 0, 65536},
         };
-        static const std::map<std::string_view, bool GameConfig::*> flags{
-            {"autosave", &GameConfig::autosave}, {"voice_sync", &GameConfig::voiceSync}, {"developer", &GameConfig::developer}, {"glide", &GameConfig::glide},
-            {"blink", &GameConfig::blink}, {"resizable", &GameConfig::resizable}};
-        static const std::map<std::string_view, SDL_Color GameConfig::*> colors{
-            {"narrator_color", &GameConfig::narratorColor},
-            {"letterbox_color", &GameConfig::letterboxColor}};
-        static const std::map<std::string_view, std::string GameConfig::*> texts{
-            {"title", &GameConfig::title}, {"version", &GameConfig::version}, {"save_id", &GameConfig::saveId}, {"icon", &GameConfig::icon},
-            {"cursor", &GameConfig::cursor}, {"language", &GameConfig::language}};
+        static const std::map<std::string_view, bool GameSettings::*> flags{
+            {"autosave", &GameSettings::autosave}, {"text_follows_voices", &GameSettings::textFollowsVoices}, {"developer", &GameSettings::developer}, {"glide", &GameSettings::glide},
+            {"blink", &GameSettings::blink}, {"resizable", &GameSettings::resizable}, {"phone_history", &GameSettings::phoneHistory}};
+        static const std::map<std::string_view, SDL_Color GameSettings::*> colours{
+            {"narration_colour", &GameSettings::narrationColour},
+            {"letterbox_colour", &GameSettings::letterboxColour}};
+        static const std::map<std::string_view, std::string GameSettings::*> texts{
+            {"title", &GameSettings::title}, {"version", &GameSettings::version}, {"save_folder", &GameSettings::saveFolder}, {"icon", &GameSettings::icon},
+            {"mouse_pointer", &GameSettings::mousePointer}, {"language", &GameSettings::language}, {"phone_message_sound", &GameSettings::phoneMessageSound},
+            {"phone_send_sound", &GameSettings::phoneSendSound}, {"phone_typing_sound", &GameSettings::phoneTypingSound},
+            {"phone_ringtone", &GameSettings::phoneRingtone}, {"phone_calling_sound", &GameSettings::phoneCallingSound}};
         static constexpr std::pair<std::string_view, bool> filters[]{{"smooth", false}, {"pixel", true}};
         static constexpr std::pair<std::string_view, SDL_Keymod> holds[]{
             {"ctrl", SDL_KMOD_CTRL}, {"shift", SDL_KMOD_SHIFT}, {"alt", SDL_KMOD_ALT}, {"none", 0}};
 
-        const std::size_t needs = key == "resolution" && v.size() == 1 && v[0].contains('x') ? 1
-                                : key == "resolution" || key == "cursor_hotspot"               ? 2
+        const std::size_t needs = key == "game_size" && v.size() == 1 && v[0].contains('x') ? 1
+                                : key == "game_size" || key == "pointer_tip"               ? 2
                                                                                                : 1;
-        if (v.size() < needs) return error(line, needs == 1 ? "'config {}' needs 1 value."_tr(key) : "'config {}' needs {} values."_tr(key, needs));
+        if (v.size() < needs) return error(line, needs == 1 ? "'setting {}' needs 1 value."_tr(key) : "'setting {}' needs {} values."_tr(key, needs));
         const std::string& value = v[0];
         if (const auto n = std::ranges::find(numbers, std::string_view(key), &Number::key); n != numbers.end()) {
             if (auto x = number(line, value, key)) c.*(n->field) = std::clamp(*x, n->lo, n->hi);
@@ -1945,11 +2335,11 @@ private:
             if (auto x = number(line, value, key)) c.*(w->field) = std::clamp(static_cast<int>(*x), w->lo, w->hi);
         } else if (const auto f = flags.find(key); f != flags.end()) {
             set(c.*(f->second), boolean(line, value, key));
-        } else if (const auto col = colors.find(key); col != colors.end()) {
-            set(c.*(col->second), color(line, value));
+        } else if (const auto col = colours.find(key); col != colours.end()) {
+            set(c.*(col->second), colour(line, value));
         } else if (const auto t = texts.find(key); t != texts.end()) {
             c.*(t->second) = value;
-        } else if (key == "resolution") { // resolution 1280 720 (or 1280x720)
+        } else if (key == "game_size") { // game_size 1280 720 (or 1280x720)
             const bool joined = v.size() == 1;
             const auto width = number(line, joined ? value.substr(0, value.find('x')) : value, key);
             const auto height = number(line, joined ? value.substr(value.find('x') + 1) : v[1], key);
@@ -1957,28 +2347,41 @@ private:
                 c.width = std::clamp(static_cast<int>(*width), 160, 7680);
                 c.height = std::clamp(static_cast<int>(*height), 120, 4320);
             }
-        } else if (key == "cursor_hotspot") { // cursor_hotspot X Y
+        } else if (key == "pointer_tip") { // pointer_tip X Y
             const auto x = number(line, value, key), y = number(line, v[1], key);
-            if (x && y) c.cursorHotspot = {static_cast<int>(*x), static_cast<int>(*y)};
-        } else if (key == "image_filter") {
+            if (x && y) c.pointerTip = {static_cast<int>(*x), static_cast<int>(*y)};
+        } else if (key == "image_scaling") {
             set(c.pixelArt, oneOf<bool>(line, key, value, filters));
-        } else if (key == "skip_hold") {
-            set(c.skipHold, oneOf<SDL_Keymod>(line, key, value, holds));
-        } else if (key == "talk") { // yes, voice or no: for every character without talk=
-            set(c.talk, talk(line, key, value));
-        } else if (key == "reveal") {
-            set(c.reveal, oneOf<Reveal>(line, key, value, kReveals));
-        } else if (key == "show_animation" || key == "hide_animation") { // what show and hide lines play when they name none (checked once the animations are read)
-            (key == "show_animation" ? c.showAnimation : c.hideAnimation) = lower(value) == "none" ? std::string{} : lower(value);
-            std::erase_if(animationConfigs_, [&](const auto& kept) { return kept.first == key; });
-            animationConfigs_.emplace_back(key, &line);
+        } else if (key == "hold_to_skip") {
+            set(c.holdToSkip, oneOf<SDL_Keymod>(line, key, value, holds));
+        } else if (key == "mouths_move") { // yes, voice or no: for every character without mouth_moves=
+            set(c.mouthsMove, mouthMoves(line, key, value));
+        } else if (key == "text_appears") {
+            set(c.textAppears, oneOf<TextAppears>(line, key, value, kTextAppears));
+        } else if (key == "has_phone") { // has_phone CONDITION: the player has their phone while it's true
+            c.hasPhone = formula(line, value);
+        } else if (key == "phone_owner" || key == "phone_wallpaper" || key == "phone_lock_wallpaper" || key == "phone_passcode" || key == "phone_clock" ||
+                   key == "phone_date") { // (the phone's variables, as they start)
+            s_.startValues.insert_or_assign(key, unquote(value));
+        } else if (key == "phone_signal") {
+            if (const auto on = boolean(line, value, key)) s_.startValues.insert_or_assign(key, *on ? 1 : 0);
+        } else if (key == "phone_battery") { // (how full: 0 to 100)
+            if (const auto full = number(line, value, key)) s_.startValues.insert_or_assign(key, std::clamp(static_cast<int>(std::lround(*full)), 0, 100));
+        } else if (key == "new_messages") { // button (the Phone button counts it), open (the phone opens) or notice: what tells players a message has come
+            set(c.newMessages, oneOf<NewMessages>(line, key, value, kNewMessages));
+        } else if (key == "chat_messages") { // typed or click: how a chat scene's messages come
+            set(c.chatMessages, oneOf<ChatMessages>(line, key, value, kChatMessages));
+        } else if (key == "animation_on_show" || key == "animation_on_hide") { // what show and hide lines play when they name none (checked once the animations are read)
+            (key == "animation_on_show" ? c.animationOnShow : c.animationOnHide) = lower(value) == "none" ? std::string{} : lower(value);
+            std::erase_if(animationSettings_, [&](const auto& kept) { return kept.first == key; });
+            animationSettings_.emplace_back(key, &line);
         } else if (key.starts_with("default.")) { // a player setting's starting value: a number, yes / no, or (scaling, mouths) its word
             const std::string setting = key.substr(8);
             if (!std::ranges::contains(kSettingNames, setting) || setting == "window_size" || setting == "language")
                 return error(line, "There's no player setting called '{}'."_tr(setting));
             if (const auto start = settingNumber(line, setting, key, value)) c.settingDefaults[setting] = *start;
         } else {
-            error(line, "There's no config setting called '{}'."_tr(key));
+            error(line, "There's no setting called '{}'."_tr(key));
         }
     }
 
@@ -1991,49 +2394,49 @@ private:
             return n ? std::optional(std::max(lo, *n)) : std::nullopt;
         };
         auto state = [&](std::string_view prefix) -> Style::State* {
-            return prefix == "hover" ? &s.hover : prefix == "selected" ? &s.selected : prefix == "disabled" ? &s.disabled : nullptr;
+            return prefix == "pointed" ? &s.pointed : prefix == "chosen" ? &s.chosen : prefix == "unclickable" ? &s.unclickable : nullptr;
         };
         const auto us = key.find('_');
         Style::State* st = us == std::string_view::npos ? nullptr : state(key.substr(0, us));
         const std::string_view field = st ? key.substr(us + 1) : key;
 
-        if (st && (field == "color" || field == "bg" || field == "border")) { // hover_color= selected_bg= disabled_border=...
-            const auto c = color(line, value);
-            if (c) (field == "color" ? st->color : field == "bg" ? st->bg : st->border) = c;
-            if (c && field == "bg") { // (navy-black: fading down to another)
+        if (st && (field == "colour" || field == "background" || field == "border")) { // pointed_colour= chosen_background= unclickable_border=...
+            const auto c = colour(line, value);
+            if (c) (field == "colour" ? st->colour : field == "background" ? st->background : st->border) = c;
+            if (c && field == "background") { // (navy-black: fading down to another)
                 const auto grad = parseGradient(value, &s_.palette);
-                st->bgBottom = grad ? std::optional(grad->second) : std::nullopt;
+                st->backgroundBottom = grad ? std::optional(grad->second) : std::nullopt;
             }
         }
         else if (st && field == "image") st->image = std::string(value);
         else if (key == "font") s.font = lower(value);
         else if (key == "size") set(s.size, at(1.0f));
-        else if (key == "color") {
-            s.speakerColor = value == "speaker";
-            if (!s.speakerColor) set(s.color, color(line, value));
+        else if (key == "colour") {
+            s.speakerColour = value == "speaker";
+            if (!s.speakerColour) set(s.colour, colour(line, value));
         }
-        else if (key == "bg") { // (navy-black: fading down to another)
-            set(s.bg, color(line, value));
+        else if (key == "background") { // (navy-black: fading down to another)
+            set(s.background, colour(line, value));
             const auto grad = parseGradient(value, &s_.palette);
-            s.bgBottom = grad ? std::optional(grad->second) : std::nullopt;
+            s.backgroundBottom = grad ? std::optional(grad->second) : std::nullopt;
         }
-        else if (key == "border") set(s.border, color(line, value));
+        else if (key == "border") set(s.border, colour(line, value));
         else if (key == "image") s.image = std::string(value);
-        else if (key == "align" || key == "valign") {
-            if (auto a = toAlign(value)) (key == "align" ? s.align : s.valign) = *a;
-            else error(line, "'{}' can be left, center or right (top, center or bottom for valign), not '{}'."_tr(key, value));
+        else if (key == "align" || key == "align_vertically") {
+            if (auto a = toAlign(value)) (key == "align" ? s.align : s.alignVertically) = *a;
+            else error(line, "'{}' can be left, centre or right (top, centre or bottom for align_vertically), not '{}'."_tr(key, value));
         }
         else if (key == "padding") set(s.padding, at(0.0f));
         else if (key == "opacity") {
             if (const auto n = number(line, value, key)) s.opacity = std::clamp(*n, 0.0f, 1.0f);
         }
         else if (key == "shadow") set(s.shadow.on, boolean(line, value, key));
-        else if (key == "shadow_color") set(s.shadow.color, color(line, value));
+        else if (key == "shadow_colour") set(s.shadow.colour, colour(line, value));
         else if (key == "shadow_offset") set(s.shadow.offset, at(0.0f));
         else if (key == "line_spacing") set(s.lineSpacing, at(0.1f));
-        else if (key == "textbox_opacity") set(s.textboxOpacity, boolean(line, value, key));
-        else if (key == "text_size") set(s.textSize, boolean(line, value, key));
-        else if (key == "hover_sound") s.hoverSound = std::string(value);
+        else if (key == "opacity_follows") set(s.opacityFollows, boolean(line, value, key));
+        else if (key == "text_size_follows") set(s.textSizeFollows, boolean(line, value, key));
+        else if (key == "pointed_sound") s.pointedSound = std::string(value);
         else if (key == "click_sound") s.clickSound = std::string(value);
         else return false;
         return true;
@@ -2044,7 +2447,7 @@ private:
         const auto raw = styleLines_.find(name);
         if (raw == styleLines_.end()) return std::nullopt;
         if (depth > 16) {
-            error(user, "Style '{}' is its own parent."_tr(name));
+            error(user, "Style '{}' builds on itself."_tr(name));
             return Style{};
         }
         std::vector<std::pair<const Line*, std::pair<std::string, std::string>>> props;
@@ -2062,14 +2465,14 @@ private:
         }
         std::string parent = name == "default" ? "" : "default";
         for (const auto& [line, kv] : props)
-            if (kv.first == "parent") parent = lower(kv.second);
+            if (kv.first == "based_on") parent = lower(kv.second);
         Style s;
         if (!parent.empty()) {
             if (auto base = style(parent, *raw->second.front(), depth + 1)) s = *base;
             else if (parent != "default") error(*raw->second.front(), "There's no style called '{}'."_tr(parent));
         }
         for (const auto& [line, kv] : props)
-            if (kv.first != "parent" && !styleProp(s, kv.first, kv.second, *line))
+            if (kv.first != "based_on" && !styleProp(s, kv.first, kv.second, *line))
                 error(*line, "Styles have no setting '{}'."_tr(kv.first));
         return styles_.emplace(name, s).first->second;
     }
@@ -2086,14 +2489,17 @@ private:
                     continue;
                 }
                 const auto& [key, value] = *opt;
-                if (key == "modal") def.modal = boolean(*line, value, key).value_or(true);
-                else if (key == "keyboard") keyboard = boolean(*line, value, key);
-                else if (key == "on_show") def.onShow = actions(*line, value);
+                if (key == "story") {
+                    if (const std::string v = lower(value); v == "waits" || v == "goes_on") def.storyWaits = v == "waits";
+                    else error(*line, "'{}' can be {}, not '{}'."_tr(key, "waits or goes_on", value));
+                }
+                else if (key == "arrow_keys") keyboard = boolean(*line, value, key);
+                else if (key == "action_on_open") def.actionOnOpen = actions(*line, value);
                 else if (key == "close_after") def.closeAfter = std::max(0.0f, number(*line, value, key).value_or(0.0f));
-                else if (key == "on_hide") def.onHide = actions(*line, value);
-                else if (key == "show_animation" || key == "hide_animation") {
+                else if (key == "action_on_close") def.actionOnClose = actions(*line, value);
+                else if (key == "animation_on_open" || key == "animation_on_close") {
                     if (const auto a = s_.animations.find(lower(value)); a != s_.animations.end())
-                        (key == "show_animation" ? def.showAnimation : def.hideAnimation) = std::make_shared<const Animation>(a->second);
+                        (key == "animation_on_open" ? def.animationOnOpen : def.animationOnClose) = std::make_shared<const Animation>(a->second);
                     else error(*line, "There's no animation called '{}'."_tr(value));
                 }
                 else if (key == "keep") def.keep = boolean(*line, value, key).value_or(false);
@@ -2104,7 +2510,7 @@ private:
                 else if (key == "stop_voice_on_close") def.stopOnClose.voice = boolean(*line, value, key).value_or(false);
                 else error(*line, "Screens have no setting '{}'."_tr(key));
             }
-            def.keyboard = keyboard.value_or(def.modal);
+            def.arrowKeys = keyboard.value_or(def.storyWaits);
             elements(def, line->children, -1);
             s_.screens.insert_or_assign(name, std::move(def));
         }
@@ -2118,8 +2524,11 @@ private:
             auto el = element(line);
             if (!el) continue;
             el->parent = parent;
+            const auto list = std::ranges::find(kLists, std::string_view(el->option("list")), &std::pair<std::string_view, std::string_view>::first);
             def.elements.push_back(std::move(*el));
+            if (list != kLists.end()) items_.emplace_back(list->second); // (the parts in it read its items' values: {chat.name}...)
             elements(def, line.children, static_cast<int>(def.elements.size()) - 1);
+            if (list != kLists.end()) items_.pop_back();
         }
     }
 
@@ -2158,13 +2567,14 @@ private:
         };
         for (const auto& [k, v] : props) {
             if (k == "style" || k == "name") continue; // (name=: what the editor calls it)
-            if (k == "animation" || k == "hover_animation" || (allowed(k) && k == "click_animation")) { // (any part's; a button's when it's clicked)
+            if (k == "animation" || k == "pointed_animation" || k == "message_animation" || (allowed(k) && (k == "click_animation" || k == "item_animation"))) { // (any part's; a button's when it's clicked; a list's items')
                 if (const auto a = s_.animations.find(lower(v)); a != s_.animations.end())
-                    (k == "animation" ? el.animation : k == "hover_animation" ? el.hoverAnimation : el.clickAnimation) = std::make_shared<const Animation>(a->second);
+                    (k == "animation" ? el.animation : k == "pointed_animation" ? el.pointedAnimation : k == "message_animation" ? el.messageAnimation
+                     : k == "item_animation" ? el.itemAnimation : el.clickAnimation) = std::make_shared<const Animation>(a->second);
                 else error(line, "There's no animation called '{}'."_tr(v));
-            } else if (k == "x" || k == "y" || k == "w" || k == "h") { // (places from -1 to 1, shares of its box)
-                if (auto n = number(line, v, k)) (k == "x" ? el.placeX : k == "y" ? el.placeY : k == "w" ? el.shareW : el.shareH) = *n;
-            } else if (k == "if") {
+            } else if (k == "x" || k == "y" || k == "width" || k == "height") { // (places from -1 to 1, shares of its box)
+                if (auto n = number(line, v, k)) (k == "x" ? el.placeX : k == "y" ? el.placeY : k == "width" ? el.shareWidth : el.shareHeight) = *n;
+            } else if (k == "when") {
                 el.visible = formula(line, v);
             } else if (allowed(k) && k == "action") {
                 el.actions = actions(line, v);
@@ -2172,34 +2582,37 @@ private:
                 el.drop = actions(line, v);
             } else if (allowed(k) && k == "confirm") {
                 el.confirm = v;
-            } else if (allowed(k) && std::ranges::contains(kFormulaOptions, k)) {
+            } else if (allowed(k) && (std::ranges::contains(kFormulaOptions, k) || (k == "count" && el.kind == ElementKind::Container))) {
                 if (auto e = formula(line, v)) el.exprs.insert_or_assign(k, std::move(*e));
             } else if (allowed(k) && k == "key") {
                 el.key = parseKeyChord(v);
                 if (!el.key) error(line, "'{}' isn't a key name."_tr(v));
-            } else if (allowed(k) && (k == "enabled" || k == "selected")) {
-                (k == "enabled" ? el.enabled : el.selected) = formula(line, v);
+            } else if (allowed(k) && (k == "clickable" || k == "chosen")) {
+                (k == "clickable" ? el.clickable : el.chosen) = formula(line, v);
             } else if (allowed(k) && k.ends_with("_style")) {
                 if (auto s = style(lower(v), line)) el.substyles.insert_or_assign(k, *s);
                 else error(line, "There's no style called '{}'."_tr(v));
-            } else if (allowed(k) && std::ranges::contains(kColorOptions, k)) {
-                if (auto col = color(line, v)) el.colors.insert_or_assign(k, *col);
+            } else if (allowed(k) && std::ranges::contains(kColourOptions, k)) {
+                if (auto col = colour(line, v)) el.colours.insert_or_assign(k, *col);
             } else if (allowed(k)) {
-                el.props.insert_or_assign(k, k == "var" ? lower(v) : v);
+                el.props.insert_or_assign(k, k == "variable" ? lower(v) : v);
             } else if (!styleProp(el.style, k, v, line)) {
                 error(line, "'{}' has no setting '{}'."_tr(kind, k));
             }
         }
         if (el.kind == ElementKind::Text || el.kind == ElementKind::Button) checkTextOf(line, el.text);
+        else readValues(line, el.text); // (an image's or a movie's name: {chat.avatar}...)
+        if (!el.confirm.empty()) checkTextOf(line, el.confirm);
+        for (const auto& [key, value] : el.props) readValues(line, value); // (an app's title, an input's placeholder...)
 
         switch (el.kind) {
         case ElementKind::Key:
             el.key = parseKeyChord(el.text);
             if (!el.key) error(line, "'{}' isn't a key name."_tr(el.text));
-            if (el.actions.empty()) error(line, "A key needs action=.");
+            if (el.actions.empty()) error(line, "A key needs 'action='."_tr());
             break;
-        case ElementKind::Image: // (a picture by name, a colour, or a box of its style's background; one fading down with bottom=)
-            if (el.text.empty() && !el.colors.contains("bottom") && el.style.bg.a == 0) error(line, "Which image to show is missing."_tr());
+        case ElementKind::Image: // (an image by name, a colour, or a box of its style's background; one fading down with bottom=)
+            if (el.text.empty() && !el.colours.contains("bottom") && el.style.background.a == 0) error(line, "Which image to show is missing."_tr());
             break;
         case ElementKind::Movie:
             if (el.text.empty()) error(line, "Which movie to play is missing."_tr());
@@ -2209,16 +2622,36 @@ private:
             if (el.kind == ElementKind::Slider && !el.option("setting").empty()) { // (a player setting: a volume, the text's speed...)
                 const SettingControl* setting = findSettingControl(lower(el.option("setting")));
                 if (!setting) error(line, "'{}' isn't a player setting a slider can change."_tr(el.option("setting")));
-                if (!el.option("var").empty()) error(line, "A slider changes a variable (var=) or a player setting (setting=), not both.");
+                if (!el.option("variable").empty()) error(line, "A slider changes a variable ('variable=') or a player setting ('setting='), not both."_tr());
                 break;
             }
-            if (el.kind == ElementKind::Slider && el.option("var").empty()) error(line, "A slider needs var=, the variable it changes, or setting=, the player setting.");
-            if (!el.option("var").empty() && !isVariable(el.option("var")))
-                error(line, "'{}' can't be a variable name."_tr(el.option("var")));
+            if (el.kind == ElementKind::Slider && el.option("variable").empty()) error(line, "A slider needs 'variable=' (the variable it changes) or 'setting=' (the player setting)."_tr());
+            if (!el.option("variable").empty() && !isVariable(el.option("variable")))
+                error(line, "'{}' can't be a variable name."_tr(el.option("variable")));
+            else if (!el.option("variable").empty()) wrote(el.option("variable"));
             break;
         case ElementKind::Bar:
-            if (!el.exprs.contains("value")) error(line, "A bar needs value=.");
+            if (!el.exprs.contains("value")) error(line, "A bar needs 'value='."_tr());
             break;
+        case ElementKind::Container: { // (list=, stack=, position=, app=: each one of its words)
+            if (const std::string list = lower(el.option("list")); !list.empty()) {
+                if (std::ranges::find(kLists, std::string_view(list), &std::pair<std::string_view, std::string_view>::first) == kLists.end())
+                    error(line, "There's no list called '{}'."_tr(el.option("list")));
+                el.props.insert_or_assign("list", list);
+            }
+            static constexpr std::pair<std::string_view, std::string_view> kWordsOf[]{{"stack", "no down across"}, {"position", "top centre bottom"}};
+            for (const auto& [key, words] : kWordsOf)
+                if (const std::string v = lower(el.option(key)); !v.empty()) {
+                    if (!std::ranges::contains(std::views::split(words, ' ') | std::views::transform([](auto&& w) { return std::string_view(w.begin(), w.end()); }), std::string_view(v)))
+                        error(line, "'{}' can be {}, not '{}'."_tr(key, key == "stack" ? "no, down or across" : "top, centre or bottom", el.option(key)));
+                    el.props.insert_or_assign(std::string(key), v);
+                }
+            if (const std::string app = lower(el.option("app")); !app.empty()) {
+                if (!isName(app)) error(line, "'{}' can't be an app name (one word of letters, numbers, _ and -)."_tr(el.option("app")));
+                el.props.insert_or_assign("app", app);
+            }
+            break;
+        }
         case ElementKind::Control:
             el.text = lower(el.text);
             if (std::ranges::none_of(controlLines_, [&](const ControlLine& known) { return known.name == el.text; }))
@@ -2234,7 +2667,7 @@ private:
     // A built-in screen's (or style's) text size, padding or bar, for a game of another size than the
     // 1280 x 720 they're written for (places and shares fit any size).
     void scaleBuiltIn(std::pair<std::string, std::string>& kv) const {
-        const float sy = static_cast<float>(s_.config.height) / 720.0f;
+        const float sy = static_cast<float>(s_.gameSettings.height) / 720.0f;
         static constexpr std::string_view kSizes[]{"size", "padding", "bar"};
         if (sy == 1.0f || !std::ranges::contains(kSizes, kv.first)) return;
         if (const auto n = parseNumber(kv.second)) kv.second = std::format("{}", std::lround(*n * sy));
@@ -2242,23 +2675,22 @@ private:
 
     void bindings() {
         for (const auto& c : controlLines_)
-            s_.controls.push_back({.name = c.name, .keys = c.keys, .actions = actions(*c.line, c.action), .everywhere = c.everywhere,
+            s_.controls.push_back({.name = c.name, .keys = c.keys, .actions = actions(*c.line, c.action), .inMenus = c.inMenus,
                                    .condition = c.condition.empty() ? std::nullopt : formula(*c.line, c.condition)});
     }
 
-    // -- Labels -----------------------------------------------------------------------
+    // -- Scenes -----------------------------------------------------------------------
 
     void resolve() {
+        for (const auto& [file, number, scene] : phoneSceneNames_)
+            if (!s_.scenes.contains(scene)) error(Line{.file = file, .number = number}, "There's no scene called '{}'."_tr(scene));
         for (auto& ins : s_.code) {
             const Line where{.file = ins.file, .number = ins.line};
-            auto fix = [&](const std::string& label, std::size_t& target) {
-                if (auto pc = s_.findLabel(label)) target = *pc;
-                else error(where, "There's no label called '{}'."_tr(label));
+            auto fix = [&](const std::string& scene, std::size_t& target) {
+                if (auto pc = s_.findScene(scene)) target = *pc;
+                else error(where, "There's no scene called '{}'."_tr(scene));
             };
-            if (auto* jump = std::get_if<cmd::Jump>(&ins.command); jump && !jump->label.empty()) fix(jump->label, jump->target);
-            if (auto* menu = std::get_if<cmd::Menu>(&ins.command))
-                for (auto& choice : menu->choices)
-                    if (!choice.label.empty() && choice.target == 0) fix(choice.label, choice.target); // (one with lines starts there)
+            if (auto* jump = std::get_if<cmd::Jump>(&ins.command); jump && !jump->scene.empty()) fix(jump->scene, jump->target);
         }
     }
 
@@ -2268,12 +2700,12 @@ private:
     std::size_t builtinFiles_ = 0; // the built-in menus' files: main.vnscript is the next one
     std::set<std::string> included_;
     std::vector<const Line*> defs_;
-    std::set<const Line*> asText_; // capitalized lines that didn't work as definitions
-    std::vector<std::pair<std::string, const Line*>> animationConfigs_; // config show_animation / hide_animation, and where
-    // Places for "show NAME at PLACE": these, and the game's "position" lines, as the stage has them (as
-    // stageCoordinate gives them: 0 at the left edge, 1 at the right; left is -0.6 in a position line).
-    std::map<std::string, float, std::less<>> positions_{
-        {"farleft", 0.0f}, {"left", 0.2f}, {"center", 0.5f}, {"middle", 0.5f}, {"right", 0.8f}, {"farright", 1.0f}};
+    std::set<const Line*> asText_; // capitalised lines that didn't work as definitions
+    std::vector<std::pair<std::string, const Line*>> animationSettings_; // setting animation_on_show / animation_on_hide, and where
+    // Places for "show NAME at PLACE": these, and the game's "place" lines, as the stage has them (as
+    // stageCoordinate gives them: 0 at the left edge, 1 at the right; left is -0.6 in a place line).
+    std::map<std::string, float, std::less<>> places_{
+        {"farleft", 0.0f}, {"left", 0.2f}, {"centre", 0.5f}, {"right", 0.8f}, {"farright", 1.0f}};
     std::map<std::string, std::vector<const Line*>, std::less<>> styleLines_; // repeated definitions merge
     std::map<std::string, Style, std::less<>> styles_;
     std::map<std::string, const Line*, std::less<>> screenLines_;             // the last definition wins
@@ -2282,11 +2714,11 @@ private:
         std::string name;
         std::vector<KeyChord> keys;
         std::string action, condition;
-        bool everywhere = false;
+        bool inMenus = false;
     };
     std::vector<ControlLine> controlLines_; // the last definition of a name wins
     std::vector<std::pair<const Line*, std::string>> textboxes_;              // character textbox screens to check
-    std::string currentLabel_ = "line";                // the label the story lines being read are in
+    std::string currentScene_ = "line";                // the scene the story lines being read are in
     std::map<std::string, int, std::less<>> lineCounts_; // each character's lines in it so far (voice ids)
 };
 
@@ -2303,8 +2735,8 @@ Script Script::load(const std::string& entry, const FileReader& read, std::strin
     return script;
 }
 
-std::optional<std::size_t> Script::findLabel(std::string_view name) const {
-    if (auto it = labels.find(name); it != labels.end()) return it->second;
+std::optional<std::size_t> Script::findScene(std::string_view name) const {
+    if (auto it = scenes.find(name); it != scenes.end()) return it->second;
     return std::nullopt;
 }
 
@@ -2336,7 +2768,7 @@ const ScreenDef* Script::screen(std::string_view name) const {
 std::pair<std::string, std::size_t> Script::locate(std::size_t pc) const {
     std::pair<std::string, std::size_t> best{"", pc};
     std::size_t bestPc = 0;
-    for (const auto& [name, at] : labels) {
+    for (const auto& [name, at] : scenes) {
         if (at <= pc && (best.first.empty() || at > bestPc || (at == bestPc && name < best.first))) {
             best = {name, pc - at};
             bestPc = at;
@@ -2345,8 +2777,40 @@ std::pair<std::string, std::size_t> Script::locate(std::size_t pc) const {
     return best;
 }
 
+bool answerLine(std::string_view text, bool hasLines) {
+    const std::string_view t = trim(text);
+    if (t.starts_with('"')) {
+        const auto close = t.find('"', 1);
+        if (close == std::string_view::npos) return false;
+        const std::string_view after = trim(t.substr(close + 1));
+        return hasLines || after.ends_with(':') || after.starts_with("(if ") || after.starts_with("(needs ");
+    }
+    const auto colon = t.find(':');
+    return colon != std::string_view::npos && colon + 1 == t.size() && colon > 0;
+}
+
 std::string storyCommandOf(std::string_view line) {
     return commandOf(line, true);
+}
+
+bool spoken(std::string_view line, std::string_view* speaker, std::string_view* words) {
+    const std::string_view t = trim(line);
+    if (isQuoted(t)) return false;
+    const auto colon = t.find(':');
+    if (colon == std::string_view::npos || colon == 0 || !(colon + 1 == t.size() || t[colon + 1] == ' ')) return false;
+    const std::string_view who = trim(t.substr(0, colon));
+    if (std::ranges::count(who, ' ') + 1 > 3 || who.find_first_of(",!?\"{};") != std::string_view::npos) return false;
+    if (speaker) *speaker = who;
+    if (words) *words = trim(t.substr(colon + 1));
+    return true;
+}
+
+std::string unknownCommand(std::string_view line) {
+    const std::string_view t = trim(line), word = t.substr(0, t.find_first_of(" \t"));
+    const bool scriptWord = !word.empty() && word.front() >= 'a' && word.front() <= 'z' &&
+                            std::ranges::all_of(word, [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'; });
+    if (!scriptWord || !storyCommandOf(t).empty() || std::ranges::contains(kDefinitions, word) || spoken(t)) return {};
+    return std::string(word);
 }
 
 std::string Script::where(const Instruction& ins) const {
@@ -2356,23 +2820,30 @@ std::string Script::where(const Instruction& ins) const {
 // ---------------------------------------------------------------------------
 // The built-in screens
 // ---------------------------------------------------------------------------
-// The player's built-in screens: just what a story needs to play (its lines and its choices). A
-// game's own screens and controls replace these, and add the rest (a title screen, menus...).
+// The player's built-in screens: just what a story needs to play (its lines, its choices and its
+// notices). A game's own screens and controls replace these, and add the rest (a title screen, menus...).
 
 std::string_view defaultUi() {
     return R"vnext(
-control advance keys="space mouse_left return kp_enter pad_a" action=advance
+control next_line keys="space mouse_left return kp_enter pad_a" action="next line"
 
-style choice size=24 align=center valign=center bg=#16192ae1 border=#ffffff2d hover_bg=#545caaf0 hover_border=#96aaff selected_bg=#545caaf0 selected_border=#96aaff disabled_color=#9696a5
+style choice size=24 align=centre align_vertically=centre background=#16192ae1 border=#ffffff2d pointed_background=#545caaf0 pointed_border=#96aaff chosen_background=#545caaf0 chosen_border=#96aaff unclickable_colour=#9696a5
+style notice size=20 background=#141626fa border=#96aaff padding=14
 
-screen say modal=no
-    image #141626fa x=0 y=-0.8642 w=0.9375 h=0.2639 border=#ffffff2d textbox_opacity=yes
-    namebox x=-0.9 y=-0.3947 h=0.0639 bar=3 size=28 bg=#222644f5 padding=20 color=speaker textbox_opacity=yes
-    dialogue x=0 y=-0.4667 w=0.8875 size=28 text_size=yes
-    indicator x=0.8938 y=-0.8305 w=0.0141 h=0.0167 color=#96aaff
+screen textbox story=goes_on
+    image #141626fa x=0 y=-0.8642 width=0.9375 height=0.2639 border=#ffffff2d opacity_follows=yes
+    namebox x=-0.9 y=-0.3947 height=0.0639 bar=3 size=28 background=#222644f5 padding=20 colour=speaker opacity_follows=yes
+    dialogue x=0 y=-0.4667 width=0.8875 size=28 text_size_follows=yes
+    indicator x=0.8938 y=-0.8305 width=0.0141 height=0.0167 colour=#96aaff
+    button "Phone" x=0.8889 y=-0.3947 width=0.1 height=0.0639 size=20 align=centre align_vertically=centre background=#16192ae1 border=#ffffff2d pointed_background=#545caaf0 pointed_border=#96aaff action="open phone" when=phone_button
+    image #7fc8ff x=0.9138 y=-0.3236 width=0.0219 height=0.0389 when="phone_button and phone_unread is more than 0"
+    text "{phone_unread}" x=0.9138 y=-0.3236 width=0.0219 height=0.0389 size=15 colour=#0d0f1a align=centre align_vertically=centre shadow=no when="phone_button and phone_unread is more than 0"
 
-screen choice modal=no keyboard=yes
-    choices x=0 y=0.7333 w=0.5625 h=0.5833 item_h=0.075 gap_x=0.0109 gap_y=0.0194
+screen choice story=goes_on arrow_keys=yes
+    choices x=0 y=0.7333 width=0.5625 height=0.5833 item_height=0.075 spacing_across=0.0109 spacing_down=0.0194
+
+screen notice story=goes_on
+    notice x=0.8889 y=0.8889 width=0.4375
 )vnext";
 }
 

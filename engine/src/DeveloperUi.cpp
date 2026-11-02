@@ -52,9 +52,9 @@ TextBlock& DeveloperUi::block(const Font& font, std::string_view s, float wrap) 
     return kept->second.block;
 }
 
-SDL_FPoint DeveloperUi::text(std::string_view s, float x, float y, float size, SDL_Color color, float wrap) {
+SDL_FPoint DeveloperUi::text(std::string_view s, float x, float y, float size, SDL_Color colour, float wrap) {
     TextBlock& b = block(font(size), s, wrap);
-    b.draw(r, x, y, color);
+    b.draw(r, x, y, colour);
     return b.size();
 }
 
@@ -165,14 +165,14 @@ DeveloperUi::Columns DeveloperUi::columns(const SDL_FRect& area, bool form) cons
     return {left, middle, {middle.x + middle.w + gap, area.y, formW, area.h}};
 }
 
-void DeveloperUi::formTitle(std::string_view title, float x, float y, SDL_Color color) {
-    textAround(title, x, y + layout::buttonH * k / 2, layout::titleText, color);
+void DeveloperUi::formTitle(std::string_view title, float x, float y, SDL_Color colour) {
+    textAround(title, x, y + layout::buttonH * k / 2, layout::titleText, colour);
 }
 
-void DeveloperUi::textIn(std::string_view s, const SDL_FRect& box, float size, SDL_Color color) {
+void DeveloperUi::textIn(std::string_view s, const SDL_FRect& box, float size, SDL_Color colour) {
     TextBlock& b = block(font(size), s);
     const Clip clipped(*this, box);
-    b.drawIn(r, box, 0.5f, 0.5f, color);
+    b.drawIn(r, box, 0.5f, 0.5f, colour);
 }
 
 DeveloperUi::Clip::Clip(DeveloperUi& ui, const SDL_FRect& box, bool clicks) : ui_(ui), within_(ui.within_) {
@@ -451,9 +451,9 @@ bool DeveloperUi::tab(const SDL_FRect& box, std::string_view label, bool chosen,
     return click(box);
 }
 
-void DeveloperUi::textAround(std::string_view s, float x, float middle, float size, SDL_Color color, float wrap) {
+void DeveloperUi::textAround(std::string_view s, float x, float middle, float size, SDL_Color colour, float wrap) {
     TextBlock& b = block(font(size), s, wrap);
-    b.draw(r, x, middle - b.size().y / 2, color);
+    b.draw(r, x, middle - b.size().y / 2, colour);
 }
 
 std::optional<std::string> DeveloperUi::field(const std::string& id, const SDL_FRect& box, const std::string& value, float size, std::string_view hint,
@@ -615,7 +615,7 @@ std::optional<std::string> DeveloperUi::field(const std::string& id, const SDL_F
             i = j;
         }
         if (spelling)
-            for (const auto& [from, to] : misspelled(d.spelling, text, spellingLanguage(engine_.config().language), names())) {
+            for (const auto& [from, to] : misspelled(d.spelling, text, spellingLanguage(engine_.gameSettings().language), names())) {
                 const float a = prefix(text, from), b = prefix(text, to);
                 const float step = 4 * k;
                 for (int n = 0; static_cast<float>(n) * step < b - a; ++n) { // (a wavy line)
@@ -657,21 +657,21 @@ std::optional<std::string> DeveloperUi::listButton(const std::string& id, const 
     return picked;
 }
 
-float DeveloperUi::swatch(float x, float middle, SDL_Color color, bool dim, std::optional<SDL_Color> bottom, float size) const {
+float DeveloperUi::swatch(float x, float middle, SDL_Color colour, bool dim, std::optional<SDL_Color> bottom, float size) const {
     const float side = size * k;
     const SDL_FRect box{x, std::round(middle - side / 2), side, side};
-    if (dim) color.a = static_cast<Uint8>(color.a / 2);
+    if (dim) colour.a = static_cast<Uint8>(colour.a / 2);
     if (bottom) { // (a gradient: fading down in the square too)
         if (dim) bottom->a = static_cast<Uint8>(bottom->a / 2);
-        draw::gradient(r, box, color, *bottom);
+        draw::gradient(r, box, colour, *bottom);
     } else {
-        draw::rect(r, box, color);
+        draw::rect(r, box, colour);
     }
     draw::outline(r, box, kEdge);
     return x + side + 8 * k;
 }
 
-std::optional<std::string> DeveloperUi::colorField(const std::string& id, const SDL_FRect& box, const StoryEditor::Field& f, float size) {
+std::optional<std::string> DeveloperUi::colourField(const std::string& id, const SDL_FRect& box, const StoryEditor::Field& f, float size) {
     std::optional<std::string> changed = takePicked(id);
     auto open = [&] { openPopup(id, f, box); };
     if (d.openList == id) {
@@ -688,15 +688,15 @@ std::optional<std::string> DeveloperUi::colorField(const std::string& id, const 
     draw::outline(r, box, shown ? kAccent : over(box) ? kButtonHover : kEdge);
     const SDL_FRect arrow{box.x + box.w - box.h, box.y, box.h, box.h};
     // The colour as a square (its default's, dimmed, while the box is empty) and its name: its
-    // own, or for a code what it's called or most like (never the code). A picture's name or
+    // own, or for a code what it's called or most like (never the code). An image's name or
     // other words: as they are.
     const std::string_view text = value.empty() ? f.hint : std::string_view(value);
     std::string said(value.empty() ? tr(text) : text);
     float tx = box.x + 8 * k;
-    if (const auto color = text.empty() ? std::nullopt : parseColor(text, &engine_.palette())) {
+    if (const auto colour = text.empty() ? std::nullopt : parseColour(text, &engine_.palette())) {
         const auto grad = parseGradient(text, &engine_.palette());
-        said = std::string(tr(colorWords(text, &engine_.palette()))); // (its name, a code's likeness, "navy down to black"; None in the tools' language)
-        tx = swatch(tx, box.y + box.h / 2, *color, value.empty(), grad ? std::optional(grad->second) : std::nullopt); // (dimmed: its default's)
+        said = std::string(tr(colourWords(text, &engine_.palette()))); // (its name, a code's likeness, "navy down to black"; None in the tools' language)
+        tx = swatch(tx, box.y + box.h / 2, *colour, value.empty(), grad ? std::optional(grad->second) : std::nullopt); // (dimmed: its default's)
     }
     textAround(fitted(said, size, std::max(0.0f, arrow.x - tx - 4 * k)), tx, box.y + box.h / 2, size, value.empty() ? theme::dim : theme::text); // (one line: cut to fit)
     draw::rect(r, arrow, shown ? kChosen : over(arrow) ? kButtonHover : kButton);
@@ -714,7 +714,7 @@ std::optional<std::string> DeveloperUi::colorField(const std::string& id, const 
 std::optional<std::string> DeveloperUi::pickField(const std::string& id, const SDL_FRect& box, const StoryEditor::Field& given, float size) {
     StoryEditor::Field f = given; // (as its kind has it)
     applyBox(f);
-    if (StoryEditor::kindOf(f.box).wheel) return colorField(id, box, f, size); // (a colour's: a square, and the wheel when it opens)
+    if (StoryEditor::kindOf(f.box).wheel) return colourField(id, box, f, size); // (a colour's: a square, and the wheel when it opens)
     if (f.pick == StoryEditor::Pick::None && justNumbers(f.suggest)) return field(id, box, f.value, size, f.hint, f.rich); // (no list: what empty means, in grey)
     std::optional<std::string> changed = takePicked(id); // (picked from its list last frame)
     if (changed && d.focus == id) {
@@ -768,8 +768,8 @@ std::vector<std::string> DeveloperUi::names() const {
     return out;
 }
 
-void DeveloperUi::triangle(float x, float y, float size, Pointing to, SDL_Color color) const {
-    const SDL_FColor c{static_cast<float>(color.r) / 255.0f, static_cast<float>(color.g) / 255.0f, static_cast<float>(color.b) / 255.0f, 1.0f};
+void DeveloperUi::triangle(float x, float y, float size, Pointing to, SDL_Color colour) const {
+    const SDL_FColor c{static_cast<float>(colour.r) / 255.0f, static_cast<float>(colour.g) / 255.0f, static_cast<float>(colour.b) / 255.0f, 1.0f};
     const float tip = to == Pointing::Up ? -size / 2 : size / 2;
     const bool right = to == Pointing::Right;
     const SDL_Vertex v[3]{{.position = right ? SDL_FPoint{x - tip, y - size} : SDL_FPoint{x - size, y - tip}, .color = c, .tex_coord = {}},

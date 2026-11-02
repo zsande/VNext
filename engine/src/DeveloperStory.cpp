@@ -63,6 +63,14 @@ std::size_t rowWords(const StoryEditor& editor, const StoryEditor::Row& row) {
     return words;
 }
 
+// What a phone line's first box says for one of its words ("Message" for message).
+std::string phoneLabel(std::string_view word) {
+    const auto& kind = StoryEditor::kindOf(StoryEditor::Box::PhoneLine);
+    const auto words = wordsOf(kind.choices), labels = wordsOf(kind.labels, '|');
+    const auto at = static_cast<std::size_t>(std::ranges::find(words, word) - words.begin());
+    return at < labels.size() ? std::string(labels[at]) : std::string(word);
+}
+
 // The story as one text file: each scene's lines, choices and messages, without the commands between
 // them (for proofreaders and voice actors).
 std::string storyText(const StoryEditor& editor) {
@@ -83,21 +91,16 @@ std::string storyText(const StoryEditor& editor) {
                 line = who.empty() ? words : who + ": " + words;
                 break;
             }
-            case StoryEditor::Kind::Choice: {
-                const std::string question = value("Question");
-                line = question.empty() ? "Choice:" : "Choice: " + question;
-                break;
-            }
-            case StoryEditor::Kind::Option: {
-                const std::string to = value("Goes to");
-                line = "> " + value("Text") + (to.empty() ? "" : " (-> " + to + ")");
-                break;
-            }
+            case StoryEditor::Kind::Choice: line = "Choice:"; break;
+            case StoryEditor::Kind::Option: line = "> " + value("Text"); break;
             case StoryEditor::Kind::Chapter: line = "# " + value("Title"); break;
-            default:
+            default: { // (a phone line's words after which of them it is: Message, Post...)
+                const auto phone = std::ranges::find(fields, std::string_view("Phone line"), &StoryEditor::Field::name);
+                const std::string kind = phone != fields.end() ? phoneLabel(phone->value) : std::string(StoryEditor::kindName(row.kind));
                 for (const StoryEditor::Field& f : fields)
-                    if (f.rich && !trim(f.value).empty()) line += (line.empty() ? std::string(StoryEditor::kindName(row.kind)) + ": " : " ") + withoutTags(f.value);
+                    if (f.rich && !trim(f.value).empty()) line += (line.empty() ? kind + ": " : " ") + withoutTags(f.value);
                 break;
+            }
             }
             if (!line.empty()) out += std::string(static_cast<std::size_t>(row.depth) * 4, ' ') + line + "\n";
         }
@@ -111,21 +114,25 @@ struct Adding {
     ToolsText label;
     Kind kind;
 };
-const Adding kAddWords[]{{"Line", Kind::Line}, {"Choice", Kind::Choice}, {"Ask", Kind::Ask}, {"Message", Kind::Message}, {"Chapter", Kind::Chapter}, {"Note", Kind::Note}};
+const Adding kAddWords[]{{"Line", Kind::Line}, {"Choice", Kind::Choice}, {"Ask", Kind::Ask}, {"Phone", Kind::Chat}, {"Chapter", Kind::Chapter}, {"Note", Kind::Note}}; // (a phone line starts as a chat)
 const Adding kAddStage[]{{"Character", Kind::Character}, {"Background", Kind::Background},
                              {"Effect", Kind::Effect},       {"Weather", Kind::Weather},       {"Camera", Kind::Camera}, {"Movie", Kind::Movie}};
 const Adding kAddSound[]{{"Music", Kind::Music}, {"Sound", Kind::Sound}, {"Voice", Kind::Voice}, {"Stop", Kind::Stop}};
 const Adding kAddFlow[]{{"If", Kind::If}, {"Set", Kind::Set}, {"Jump", Kind::Jump}, {"End", Kind::End}, {"Wait", Kind::Wait}, {"Together", Kind::Together}};
-const Adding kAddScreens[]{{"Screen", Kind::Screen}, {"Textbox", Kind::Textbox}, {"New page", Kind::NewPage}, {"Notify", Kind::Notify},
-                               {"Phone", Kind::Phone},   {"Unlock", Kind::Unlock},   {"Game", Kind::Game}};
+const Adding kAddScreens[]{{"Screen", Kind::Screen}, {"Textbox", Kind::Textbox}, {"New page", Kind::NewPage}, {"Notice", Kind::Notice},
+                               {"Unlock", Kind::Unlock},   {"Game", Kind::Game}};
 const std::pair<ToolsText, std::span<const Adding>> kAdds[]{
     {"Words", kAddWords}, {"Stage", kAddStage}, {"Sound", kAddSound}, {"Flow", kAddFlow}, {"Screens", kAddScreens}};
 
-SDL_Color kindColor(Kind kind) {
+
+SDL_Color kindColour(Kind kind) {
     switch (kind) {
     case Kind::Line:
     case Kind::Together:
-    case Kind::Message: return kAccent;
+    case Kind::Message:
+    case Kind::Chat:
+    case Kind::Call:
+    case Kind::Missed: return kAccent; // (the phone's lines: one kind)
     case Kind::Background:
     case Kind::Effect:
     case Kind::Weather:
@@ -151,12 +158,12 @@ SDL_Color kindColor(Kind kind) {
     }
 }
 
-// The voice file a story line plays ("voices/aiko/start_3", in audio/), when its speaker has voices=.
+// The voice file a story line plays ("voices/aiko/start_3", in sounds/), when its speaker has voice_files=.
 std::string voiceFileAt(const Script& s, const std::string& path, std::size_t line) {
     for (const Instruction& ins : s.code)
         if (ins.line == static_cast<int>(line) + 1 && s.files[ins.file] == path)
             if (const auto* say = std::get_if<cmd::Say>(&ins.command))
-                if (const CharacterDef* def = s.character(say->character); def && !def->voices.empty()) return def->voices + "/" + say->voiceId;
+                if (const CharacterDef* def = s.character(say->character); def && !def->voiceFiles.empty()) return def->voiceFiles + "/" + say->voiceId;
     return {};
 }
 
@@ -164,7 +171,7 @@ std::string voiceFileAt(const Script& s, const std::string& path, std::size_t li
 // from its list, or to type), not made up.
 std::vector<std::string> newLines(Kind kind, const StoryEditor& editor) {
     std::string record = "ending"; // (one the game lists, if any)
-    for (const char* k : {"ending", "achievement", "tip", "unlock"})
+    for (const char* k : {"ending", "achievement", "tip", "gallery"})
         if (!editor.names(StoryEditor::Pick::Records, k).empty()) {
             record = k;
             break;
@@ -176,16 +183,35 @@ std::vector<std::string> newLines(Kind kind, const StoryEditor& editor) {
     case Kind::If: return {"if", "    \"\""};
     case Kind::Else: return {"else", "    \"\""};
     case Kind::Set: return {"set"};
-    case Kind::Background: return {"scene"};
+    case Kind::Background: return {"background"};
     case Kind::Character: return {"show"};
     case Kind::Weather: return {"weather rain"};
     case Kind::Together: return {"together", "    \"\"", "    \"\""};
     case Kind::Unlock: return {record};
-    case Kind::Message: return {"message"}; // (no form table of its own)
+    case Kind::Missed: return {"missed:", "    \"\""};
     default:
+        if (const auto phone = StoryEditor::phoneLines(kind); !phone.empty()) return phone; // (the phone's lines)
         if (const CommandForm* form = formOf(kind)) return {std::string(spaced(wordsOf(form->verbs).front()))}; // (its form's first word)
         return {"#"};
     }
+}
+
+// Who writes the phone lines of the chat a new row goes into, after the chosen row or inside it: the chat's
+// person (not picked yet: the player, me). None: it isn't in one.
+std::optional<std::string> chatWriter(const StoryEditor& editor, const std::vector<StoryEditor::Row>& rows, const StoryEditor::Row* selected, bool inside) {
+    if (!selected) return std::nullopt;
+    int depth = selected->depth + (inside ? 1 : 0); // (the new row's)
+    for (std::size_t j = static_cast<std::size_t>(selected - rows.data()) + 1; j-- > 0;) {
+        const StoryEditor::Row& r = rows[j];
+        if (r.depth >= depth) continue;
+        depth = r.depth;
+        if (r.kind != Kind::Chat) continue;
+        std::string who;
+        for (const StoryEditor::Field& field : editor.fields(r))
+            if (field.name == "Who") who = field.value;
+        return who.empty() ? std::string("me") : who;
+    }
+    return std::nullopt;
 }
 
 // The box a new row is typed into (or picked from) first, if it has one: its words, or who or what
@@ -194,10 +220,11 @@ std::string_view mainField(Kind kind) {
     switch (kind) {
     case Kind::Line: return "Words";
     case Kind::Option: return "Text";
-    case Kind::Choice: return "Question";
     case Kind::Note: return "Note";
-    case Kind::Notify:
-    case Kind::Message: return kind == Kind::Notify ? "Message" : "Text";
+    case Kind::Notice: return "Message";
+    case Kind::Message: return "Image"; // (a chat's new one: someone sends an image)
+    case Kind::Chat: return "Who";
+    case Kind::Call: return "Who";
     case Kind::Chapter: return "Title";
     case Kind::Ask: return "Question";
     case Kind::Background: return "Image";
@@ -216,7 +243,7 @@ std::string_view mainField(Kind kind) {
     }
 }
 
-// The licenses, line by line; a heading is a line with a line of - or = under it.
+// The licences, line by line; a heading is a line with a line of - or = under it.
 struct AboutLine {
     std::string_view text;
     bool heading = false;
@@ -225,7 +252,7 @@ struct AboutLine {
 const std::vector<AboutLine>& aboutLines() {
     static const std::vector<AboutLine> lines = [] {
         std::vector<AboutLine> out;
-        for (auto&& part : std::views::split(licenses(), '\n')) out.push_back({std::string_view(part.begin(), part.end())});
+        for (auto&& part : std::views::split(licences(), '\n')) out.push_back({std::string_view(part.begin(), part.end())});
         for (std::size_t i = 0; i + 1 < out.size(); ++i)
             out[i].heading = !out[i + 1].text.empty() && out[i + 1].text.find_first_not_of("-=") == std::string_view::npos;
         return out;
@@ -249,7 +276,7 @@ std::string libraries() {
 
 } // namespace
 
-// The log, the newest at the bottom; or About from the top: the versions, then the licenses.
+// The log, the newest at the bottom; or About from the top: the versions, then the licences.
 void Developer::drawLines(DeveloperUi& ui, const SDL_FRect& box) {
     DeveloperTools& d = tools;
     const float k = ui.k, rowHeight = layout::logRowH * k;
@@ -294,7 +321,7 @@ void Developer::drawLines(DeveloperUi& ui, const SDL_FRect& box) {
     }
     const DeveloperUi::Clip clipped(ui, box);
     float y = d.view == View::About ? box.y + 6 * k : box.y + box.h - 6 * k - rowHeight * static_cast<float>(lines.size());
-    for (const auto& [text, color] : lines) {
+    for (const auto& [text, colour] : lines) {
         // "story.vnscript line 12: ..." leads to that line (in the developer tools' tabs) when clicked.
         std::optional<std::pair<std::string, std::size_t>> place;
         static constexpr std::string_view kExtension = ".vnscript", kLine = " line ";
@@ -308,7 +335,7 @@ void Developer::drawLines(DeveloperUi& ui, const SDL_FRect& box) {
         }
         const SDL_FRect row{box.x, y, box.w, rowHeight};
         if (place && ui.over(row)) draw::rect(ui.r, row, kButtonHover);
-        ui.text(text, box.x + 10 * k, y, layout::listText, color);
+        ui.text(text, box.x + 10 * k, y, layout::listText, colour);
         if (place && ui.click(row) && !goTo(place->first, place->second)) {
             d.failed = true;
             d.status = "{} line {} isn't in a scene, a screen, a setting, a character or the Library: change it in a text editor."_tr(
@@ -499,9 +526,12 @@ bool Developer::drawStoryLists(const StoryFrame& f) {
     switch (event.kind) {
     case ListKind::Chosen:
         if (!entries[event.item].scene) break;
-        if (d.scene != *entries[event.item].scene) d.rowsScroll = 0.0f;
-        d.scene = *entries[event.item].scene;
         f.choose({}, {});
+        if (d.scene != *entries[event.item].scene) { // (another scene: its lines are drawn from the next frame)
+            d.rowsScroll = 0.0f;
+            d.scene = *entries[event.item].scene;
+            return true;
+        }
         break;
     case ListKind::Renamed:
         if (trim(event.name).empty()) return true; // (emptied: it keeps its name)
@@ -573,7 +603,7 @@ bool Developer::drawStoryLists(const StoryFrame& f) {
                                   .paint = // (its name colour as a square before its name, as its box shows it)
                                       [&](std::size_t i, const SDL_FRect& at) {
                                           float x = at.x + layout::listPad * k;
-                                          if (const auto c = d.characterColor(engine.palette(), characters[i].name)) x = ui.swatch(x, at.y + at.h / 2, *c);
+                                          if (const auto c = d.characterColour(engine.palette(), characters[i].name)) x = ui.swatch(x, at.y + at.h / 2, *c);
                                           ui.textAround(characters[i].name, x, at.y + at.h / 2, layout::listText, theme::text);
                                       }});
     switch (who.kind) {
@@ -676,7 +706,8 @@ bool Developer::drawStoryRows(StoryFrame& f) {
 
     // New line: after the chosen line (and what's inside it), or inside a choice's option, an "if" or
     // "else", or "together"; with none chosen, at the scene's end. Its heading says which.
-    const bool inside = selected && (selected->kind == Kind::Option || selected->kind == Kind::If || selected->kind == Kind::Else || selected->kind == Kind::Together);
+    const bool inside = selected && (selected->kind == Kind::Option || selected->kind == Kind::If || selected->kind == Kind::Else || selected->kind == Kind::Together ||
+                                     selected->kind == Kind::Chat || selected->kind == Kind::Call || selected->kind == Kind::Missed);
     const float addsY = rowsBox.y + rowsBox.h + listGap;
     ui.heading(!selected ? "New line, at the scene's end"_tr : inside ? "New line, inside the chosen one"_tr : "New line, after the chosen one"_tr, middle.x, addsY, middle.w);
     if (const auto clicked = ui.groupedButtons(addGroups, addPlaces, middle.x, addsY + headingH)) {
@@ -686,7 +717,10 @@ bool Developer::drawStoryRows(StoryFrame& f) {
                 i -= adds.size();
                 continue;
             }
-            f.startTyping(editor.add(scene, selected, inside, newLines(adds[i].kind, editor)));
+            std::vector<std::string> lines = newLines(adds[i].kind, editor);
+            if (adds[i].kind == Kind::Chat) // (in a chat: one of its own phone lines, someone sending an image)
+                if (const auto who = chatWriter(editor, rows, selected, inside)) lines = {*who + " sends"};
+            f.startTyping(editor.add(scene, selected, inside, lines));
             return true; // (the lines have moved: drawn again next frame)
         }
     }
@@ -874,7 +908,7 @@ bool Developer::drawRowList(const StoryFrame& f, const SDL_FRect& rowsBox) {
                      draw::outline(ui.r, box, kAccent);
                      draw::outline(ui.r, {box.x + k, box.y + k, box.w - 2 * k, box.h - 2 * k}, kAccent);
                  }
-                 ui.textAround(tr(StoryEditor::kindName(row.kind)), box.x + 10 * k, box.y + box.h / 2, layout::smallText, kindColor(row.kind));
+                 ui.textAround(tr(StoryEditor::kindName(row.kind)), box.x + 10 * k, box.y + box.h / 2, layout::smallText, kindColour(row.kind));
                  std::string summary = i < d.rowSummaries.size() ? d.rowSummaries[i] : editor.summary(row);
                  float sx = box.x + 96 * k;
                  if (row.kind == Kind::Background) { // (a colour: a square and what it's called, never its code, as its box shows it)
@@ -882,10 +916,10 @@ bool Developer::drawRowList(const StoryFrame& f, const SDL_FRect& rowsBox) {
                      for (std::string_view word : wordsOf(summary)) {
                          const bool comma = word.ends_with(',');
                          if (comma) word.remove_suffix(1);
-                         const auto color = parseColor(word, &engine.palette());
+                         const auto colour = parseColour(word, &engine.palette());
                          const auto grad = parseGradient(word, &engine.palette());
-                         if (color && named.empty()) sx = ui.swatch(sx, box.y + box.h / 2, *color, false, grad ? std::optional(grad->second) : std::nullopt); // (the first: the background)
-                         named += (named.empty() ? "" : " ") + (color ? colorWords(word, &engine.palette()) : std::string(word)) + (comma ? "," : "");
+                         if (colour && named.empty()) sx = ui.swatch(sx, box.y + box.h / 2, *colour, false, grad ? std::optional(grad->second) : std::nullopt); // (the first: the background)
+                         named += (named.empty() ? "" : " ") + (colour ? colourWords(word, &engine.palette()) : std::string(word)) + (comma ? "," : "");
                      }
                      summary = named;
                  }
@@ -987,7 +1021,7 @@ bool Developer::storyClipboard(const StoryFrame& f) {
             }
             if (lines.empty()) return true;
             const std::string first = lower(firstWord(lines.front()));
-            if (first == "label") {
+            if (first == "scene") {
                 d.scene = editor.pasteScene(d.scene, lines);
                 f.choose({}, {});
             } else if (first == "character" && lines.size() == 1 && !characters.empty()) {
@@ -998,7 +1032,7 @@ bool Developer::storyClipboard(const StoryFrame& f) {
                 bool inside = false;
                 if (selected && what != 'd')
                     inside = selected->kind == Kind::If || selected->kind == Kind::Else || selected->kind == Kind::Together ||
-                             (selected->kind == Kind::Option && !options) || ((selected->kind == Kind::Choice || selected->kind == Kind::Message) && options);
+                             (selected->kind == Kind::Option && !options) || (selected->kind == Kind::Choice && options);
                 f.choose(editor.add(scene, selected, inside, lines), {});
             }
             return true;
@@ -1048,7 +1082,7 @@ void Developer::drawStoryForm(const StoryFrame& f) {
                 return;
             }
             auto fields = editor.fields(c);
-            showConfigValues(fields, engine.config());
+            showGameSettingValues(fields, engine.gameSettings());
             const std::string id = std::format("character:{}", c.line);
             if (const auto edit = drawForm(ui, id, fields, right.x, right.w, labelW, y)) {
                 const auto e = d.edited(id, Kind::Other, fields, edit->typed, edit->name, edit->value);
@@ -1067,7 +1101,7 @@ void Developer::drawStoryForm(const StoryFrame& f) {
             return;
         }
         const Row row = *selected;
-        ui.formTitle(tr(StoryEditor::kindName(row.kind)), right.x, right.y, kindColor(row.kind));
+        ui.formTitle(tr(StoryEditor::kindName(row.kind)), right.x, right.y, kindColour(row.kind));
         const bool asForm = row.kind != Kind::Other;
         const std::string scenePath = editor.path(scene.file);
         float titleRight = right.x + right.w; // (the title row's buttons, from its right)
@@ -1087,25 +1121,31 @@ void Developer::drawStoryForm(const StoryFrame& f) {
             return;
         }
         auto fields = editor.fields(row);
-        showConfigValues(fields, engine.config());
+        showGameSettingValues(fields, engine.gameSettings());
         if (std::ranges::all_of(fields, &Field::hidden)) { // (nothing to set)
             const std::string_view about = row.kind == Kind::Together ? "The lines inside it happen at the same time. Choose it and add them with the buttons under the lines."_tr
-                                         : row.kind == Kind::NewPage  ? "The textbox starts a new page (with textbox page)."_tr
+                                         : row.kind == Kind::NewPage  ? "The textbox starts a new page, if it has a page part."_tr
                                                                       : "There's nothing to set."_tr;
             y += ui.text(about, right.x, y, layout::noteText, theme::dim, right.w).y + rowGap;
         }
         const std::string id = std::format("row:{}", row.line);
         if (const auto edit = drawForm(ui, id, fields, right.x, right.w, labelW, y)) {
             const auto e = d.edited(id, row.kind, fields, edit->typed, edit->name, edit->value);
-            editor.setText(scene, row, editor.lineOf(e.kind, e.fields), e.key);
+            const std::string line = editor.lineOf(e.kind, e.fields);
+            if (const Kind to = StoryEditor::phoneKind(edit->name == "Phone line" ? edit->value : std::string{}); to != Kind::Other && to != row.kind) {
+                auto lines = StoryEditor::phoneLines(to); // (another of the phone's lines: the lines it starts with inside it, in place of blank ones)
+                editor.setRowLines(scene, row, line, std::vector(lines.begin() + 1, lines.end()), e.key);
+            } else {
+                editor.setText(scene, row, line, e.key);
+            }
         }
-        // Someone with voices=: the file the line plays.
+        // Someone with voice_files=: the file the line plays.
         if (const std::string voice = row.kind == Kind::Line && d.script ? voiceFileAt(*d.script, editor.path(scene.file), row.line) : std::string{};
             !voice.empty()) {
             label("Voice file"_tr);
-            const auto found = engine.assets().findAudio(voice);
+            const auto found = engine.assets().findSound(voice);
             const bool there = found.has_value();
-            ui.textAround(there ? "audio/" + voice : "audio/{} (not there yet)"_tr(voice), fieldX, y + boxH / 2, layout::noteText, there ? theme::text : theme::dim,
+            ui.textAround(there ? "sounds/" + voice : "sounds/{} (not there yet)"_tr(voice), fieldX, y + boxH / 2, layout::noteText, there ? theme::text : theme::dim,
                           fieldW - 70 * k);
             if (found) listenButton(ui, {right.x + right.w - layout::listenW * k, y, layout::listenW * k, boxH}, *found);
             y += boxH + rowGap;
@@ -1129,8 +1169,16 @@ void Developer::drawStoryForm(const StoryFrame& f) {
         bool inside = true;
         if (row.kind == Kind::Choice && ui.button({fieldX, y, std::min(fieldW, ui.buttonWidth("+ Option"_tr, layout::buttonText, layout::optionButtonW)), boxH}, "+ Option"_tr, false, true, layout::buttonText))
             adding = newLines(Kind::Option, editor);
-        if (row.kind == Kind::Message && ui.button({fieldX, y, std::min(fieldW, ui.buttonWidth("+ Answer"_tr, layout::buttonText, layout::optionButtonW)), boxH}, "+ Answer"_tr, false, true, layout::buttonText))
-            adding = std::vector<std::string>{"\"\""};
+        // A chat adds answers among its lines (at their end), and a call what happens when nobody answers.
+        if (row.kind == Kind::Chat &&
+            ui.button({fieldX, y, std::min(fieldW, ui.buttonWidth("+ Answer"_tr, layout::buttonText, layout::optionButtonW)), boxH}, "+ Answer"_tr, false, true, layout::buttonText))
+            adding = std::vector<std::string>{"\"\":"};
+        bool missed = false; // (a call has its missed: lines already)
+        for (std::size_t j = at + 1; j < rows.size() && rows[j].depth > row.depth; ++j) missed = missed || (rows[j].depth == row.depth + 1 && rows[j].kind == Kind::Missed);
+        if (row.kind == Kind::Call && !missed &&
+            ui.button({fieldX, y, std::min(fieldW, ui.buttonWidth("+ If nobody answers"_tr, layout::buttonText, layout::optionButtonW)), boxH}, "+ If nobody answers"_tr, false, true,
+                      layout::buttonText))
+            adding = std::vector<std::string>{"missed:", "    \"\""};
         if (row.kind == Kind::If) {
             const Row* last = &row; // the chain's last "else if" or "else"
             for (std::size_t j = at + 1; j < rows.size() && rows[j].depth >= row.depth; ++j)
@@ -1156,7 +1204,8 @@ void Developer::drawStoryForm(const StoryFrame& f) {
             f.startTyping(editor.add(scene, after, inside, *adding));
             return;
         }
-        if (row.kind == Kind::Choice || row.kind == Kind::Message || row.kind == Kind::If) y += boxH + rowGap;
+        if (row.kind == Kind::Choice || row.kind == Kind::If || row.kind == Kind::Chat || (row.kind == Kind::Call && !missed))
+            y += boxH + rowGap;
     };
     form();
     ui.formDrawn(formBox, y);
@@ -1179,7 +1228,7 @@ void Developer::recordReached() {
 void Developer::recordReached(Game& game, const Script& script) {
     const std::vector<std::size_t> ran = game.takeRan();
     DeveloperTools& d = tools;
-    if (!engine.config().developer || !d.editor.loaded() || engine.prefPath().empty()) return;
+    if (!engine.gameSettings().developer || !d.editor.loaded() || engine.prefPath().empty()) return;
     bool added = false;
     for (const std::size_t pc : ran) {
         if (pc >= script.code.size()) continue;

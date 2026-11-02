@@ -21,7 +21,7 @@ public:
 
     TextBlock& block(const Font& font, std::string_view s, float wrap = 0.0f); // (laid out, kept by what it is: DeveloperTools::texts)
     Font& font(float size) { return fonts_.get("", size * k); } // (the system's: not the game's own)
-    SDL_FPoint text(std::string_view s, float x, float y, float size, SDL_Color color, float wrap = 0.0f);
+    SDL_FPoint text(std::string_view s, float x, float y, float size, SDL_Color colour, float wrap = 0.0f);
     float width(std::string_view s, float size);
     // A button's width: its label and room either side, and at least `least` (the editor's pixels), so
     // the short ones in a row keep one size.
@@ -58,8 +58,8 @@ public:
     [[nodiscard]] Columns columns(const SDL_FRect& area, bool form = true) const;
     // A form's title ("Line", "Style: shout"...), the same on every tab: at the top of its row
     // (layout::titleH high from `y`), level with a button there (As text).
-    void formTitle(std::string_view title, float x, float y, SDL_Color color = kAccent);
-    void textIn(std::string_view s, const SDL_FRect& box, float size, SDL_Color color);
+    void formTitle(std::string_view title, float x, float y, SDL_Color colour = kAccent);
+    void textIn(std::string_view s, const SDL_FRect& box, float size, SDL_Color colour);
     // Drawing stays inside `box` (and the box before it) while it lives; with `clicks`, clicks count only
     // in there too (a list that scrolls). Then both are as they were.
     class Clip {
@@ -140,7 +140,7 @@ public:
     // A tab in the bar at the top (red: what it shows has a mistake).
     bool tab(const SDL_FRect& box, std::string_view label, bool chosen, bool wrong, float size = layout::tabText);
     // Text centred on `middle` (up and down).
-    void textAround(std::string_view s, float x, float middle, float size, SDL_Color color, float wrap = 0.0f);
+    void textAround(std::string_view s, float x, float middle, float size, SDL_Color colour, float wrap = 0.0f);
 
     // A box to type into, showing `value` (while it's typed into, what's typed; when it's empty, the
     // `hint`), with what's in braces ({bold}) dimmer. A click puts the caret there; dragging, Shift (with
@@ -156,10 +156,10 @@ public:
     std::optional<std::string> listButton(const std::string& id, const SDL_FRect& box, std::string_view label, const StoryEditor::Field& given);
     // A colour as a small square at `x`, centred on `middle` (dim: half seen, for a default); gives
     // the x after it. Every colour shows this way: in a box, a list, a popup's entry.
-    float swatch(float x, float middle, SDL_Color color, bool dim = false, std::optional<SDL_Color> bottom = std::nullopt, float size = layout::swatch) const;
+    float swatch(float x, float middle, SDL_Color colour, bool dim = false, std::optional<SDL_Color> bottom = std::nullopt, float size = layout::swatch) const;
     // A colour's box: the colour and its name or code, not typed into. A click opens its wheel under it,
     // with the colour's code to type and the game's colours to pick. Gives what's picked there.
-    std::optional<std::string> colorField(const std::string& id, const SDL_FRect& box, const StoryEditor::Field& f, float size);
+    std::optional<std::string> colourField(const std::string& id, const SDL_FRect& box, const StoryEditor::Field& f, float size);
     // A box to type into (as field()) with a list to pick from under it, when `f` has names or values
     // to list: a click on the box or its arrow opens it. Gives the new text, typed or picked.
     std::optional<std::string> pickField(const std::string& id, const SDL_FRect& box, const StoryEditor::Field& given, float size = 16);
@@ -173,7 +173,7 @@ public:
     // A small triangle around (x, y): a dropdown's, pointing down (open: up), or the same turned to point
     // right (a play button).
     enum class Pointing : std::uint8_t { Down, Up, Right };
-    void triangle(float x, float y, float size, Pointing to, SDL_Color color) const;
+    void triangle(float x, float y, float size, Pointing to, SDL_Color colour) const;
 
 private:
     void clip(const SDL_FRect& box); // (Clip's, in and out)

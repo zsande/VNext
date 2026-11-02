@@ -5,10 +5,10 @@ engine/build/*
 dist/
 # The game being made: it stays on this computer (the repository is the engine)
 /game/
-# The packed game (Pack the game / VNext --pack), and the licenses.txt written next to it
+# The packed game (Pack the game / VNext --pack), and the licences.txt written next to it
 *.vnext
 *.vnext.part
-/licenses.txt
+/licences.txt
 # The player built into the project folder
 /VNext.app/
 /VNext.exe

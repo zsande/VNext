@@ -117,7 +117,7 @@ FetchContent_Declare(SDL3_mixer
     EXCLUDE_FROM_ALL
     SYSTEM)
 
-# pl_mpeg: plays MPEG-1 videos with MP2 sound (.mpg), one header of C.
+# pl_mpeg: plays MPEG-1 movies with MP2 sound (.mpg), one header of C.
 FetchContent_Declare(pl_mpeg
     GIT_REPOSITORY https://github.com/phoboslab/pl_mpeg.git
     GIT_TAG c871f2be022ece7ef4f64230b4fb8e1fb9eb6023
@@ -171,9 +171,9 @@ add_executable(vnext
     src/Translation.cpp           # ...translations
     src/Game.cpp                  # the story as it plays: the game, the stage, the flowchart
     src/Screens.cpp               # fonts, text, shapes and the script's screens
-    src/Assets.cpp                # pictures, sound, made-up voices and videos
+    src/Assets.cpp                # images, sound, made-up voices and movies
     src/System.cpp                # helpers, the game's files (folder or pack), saves, the player's settings
-    src/Licenses.cpp              # the licenses of what's built in (licenses.txt), for About and next to packs
+    src/Licences.cpp              # the licences of what's built in (licences.txt), for About and next to packs
     ${CMAKE_CURRENT_BINARY_DIR}/pl_mpeg.c
 )
 set_target_properties(vnext PROPERTIES OUTPUT_NAME "VNext"
@@ -185,14 +185,14 @@ target_include_directories(vnext PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/generat
 target_include_directories(vnext SYSTEM PRIVATE ${pl_mpeg_SOURCE_DIR})
 target_link_libraries(vnext PRIVATE SDL3_mixer::SDL3_mixer SDL3_ttf::SDL3_ttf SDL3_image::SDL3_image SDL3::SDL3 vn_sheenbidi)
 if(APPLE)
-    # What macOS offers: spelling (the editor), reading text aloud and MP4 videos (for players), in Objective-C++.
+    # What macOS offers: spelling (the editor), reading text aloud and MP4 movies (for players), in Objective-C++.
     target_sources(vnext PRIVATE src/Apple.mm)
     set_source_files_properties(src/Apple.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(vnext PRIVATE "-framework CoreFoundation" "-framework Foundation" # finding the real place of a downloaded app; the Trash
                                         "-framework AppKit" "-framework AVFoundation" "-framework CoreMedia" "-framework CoreVideo")
 elseif(WIN32)
     target_link_libraries(vnext PRIVATE shell32) # the Recycle Bin
-    # Spelling (its spell checker), reading aloud (SAPI) and MP4/MOV/M4V videos (Media Foundation): src/Windows.cpp
+    # Spelling (its spell checker), reading aloud (SAPI) and MP4/MOV/M4V movies (Media Foundation): src/Windows.cpp
     target_sources(vnext PRIVATE src/Windows.cpp)
     target_link_libraries(vnext PRIVATE ole32 mfplat mfreadwrite mfuuid)
 endif()
@@ -204,7 +204,7 @@ else()
     target_compile_options(vnext PRIVATE "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-Wno-missing-field-initializers>")
 endif()
 
-# Linux: spelling (Hunspell), reading aloud (speech-dispatcher) and MP4/MOV/M4V videos (GStreamer), where the
+# Linux: spelling (Hunspell), reading aloud (speech-dispatcher) and MP4/MOV/M4V movies (GStreamer), where the
 # player's system has them (looked for when needed: nothing more to install to build it): src/Linux.cpp.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(vnext PRIVATE src/Linux.cpp)
@@ -235,7 +235,7 @@ function(vn_embed file name inc)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${file})
 endfunction()
 vn_embed(${vn_icon} kIconPng icon_png.inc)                                   # the window's icon
-vn_embed(${CMAKE_CURRENT_SOURCE_DIR}/licenses.txt kLicensesTxt licenses_txt.inc) # About, packs
+vn_embed(${CMAKE_CURRENT_SOURCE_DIR}/licences.txt kLicencesTxt licences_txt.inc) # About, packs
 
 if(APPLE)
     file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/Info.plist.in [=[<?xml version="1.0" encoding="UTF-8"?>

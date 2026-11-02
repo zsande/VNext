@@ -51,7 +51,7 @@ bool showsKeyNames(const Script& script) {
 std::unordered_set<std::string> shownTexts(Script& script) {
     std::unordered_set<std::string> shown;
     script.forEachText([&](std::string& text, const Script::TextPlace& place) {
-        if (!text.empty() && !(place.what == "title" && text == GameConfig{}.title)) shown.insert(text);
+        if (!text.empty() && !(place.what == "title" && text == GameSettings{}.title)) shown.insert(text);
     });
     if (showsKeyNames(script))
         for (const auto& [key, word] : kKeyWords) shown.insert(std::string(word));
@@ -79,7 +79,7 @@ Translation Translation::parse(std::string id, std::string_view source, std::vec
         if (!original || translated) return;
         const std::string head = lower(firstWord(*original));
         error(originalLine, head == "language" || head == "font"
-                                ? "language and font lines go at the top, before the texts."_tr()
+                                ? "The language and font lines go at the top, before the texts."_tr()
                                 : "This text has no translation under it."_tr());
     };
     int number = 0;
@@ -213,7 +213,7 @@ TranslationFile translationFile(Script& script, std::string_view id, const std::
         ++out.added;
     };
     script.forEachText([&](std::string& text, const Script::TextPlace& place) {
-        if (place.what == "title" && text == GameConfig{}.title) return; // (the player's own name, not the game's)
+        if (place.what == "title" && text == GameSettings{}.title) return; // (the player's own name, not the game's)
         if (text.empty() || !seen.insert(text).second || have.texts.contains(text)) return;
         std::string heading, note;
         if (const Instruction* ins = place.line) {
@@ -228,7 +228,7 @@ TranslationFile translationFile(Script& script, std::string_view id, const std::
             } else if (const auto* m = std::get_if<cmd::Message>(&ins->command)) {
                 const CharacterDef* def = script.character(m->character);
                 const std::string from = m->mine ? "the player" : def ? def->name : m->sender;
-                note += &text == &m->sender ? ", the sender's name" : &text == &m->text ? ", a message from " + from : ", an answer to it";
+                note += &text == &m->sender ? ", the sender's name" : ", a message from " + from;
             }
         } else if (place.what == "title") {
             heading = "The game's name";

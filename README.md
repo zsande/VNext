@@ -9,10 +9,10 @@ Open VNext in developer mode and you get an editor that fits any window size, wi
 - **Story**: scenes and their lines as forms, with a live preview of what players see at each line, and "Play from this line".
 - **Map**: every scene as a box, with arrows where the story branches and jumps.
 - **Screens**: the title screen, menus and textbox, designed by dragging their parts around, with "Try it" to click through them.
-- **Library**: images, audio, videos and fonts, and the styles, animations (on a timeline) and gallery entries a game uses.
+- **Library**: images, sounds, movies and fonts, and the styles, animations (on a timeline) and gallery entries a game uses.
 - **Settings** and **Translate**: the game's options, and its translations, with a spreadsheet for translators.
 
-Games made with it can have voices and made-up "speech" sounds, videos, timed and locked choices, phone-style messages, a story flowchart, a gallery, music room and achievements, saving, loading and rewinding, controller and touch support, text read aloud, high-contrast and text-size options, and right-to-left languages. A finished game packs into one file, game.vnext, which also keeps its players' saves and progress: with VNext next to it, it plays on Windows, macOS and Linux.
+Games made with it can have voices and made-up "speech" sounds, movies, timed and locked choices, a phone (chats, calls and apps), a story flowchart, a gallery, music room and achievements, saving, loading and rewinding, controller and touch support, text read aloud, high-contrast and text-size options, and right-to-left languages. A finished game packs into one file, game.vnext, which also keeps its players' saves and progress: with VNext next to it, it plays on Windows, macOS and Linux.
 
 ## How it's made
 
@@ -20,7 +20,7 @@ The idea, the design and the direction of VNext are mine, and every line of its 
 
 ## Download
 
-Get VNext from the [Releases page](https://github.com/zsande/VNext/releases): a zip for Windows, macOS or Linux, with the player and licenses.txt (on Linux, the player is an AppImage). VNext isn't signed by Apple or Microsoft yet, so the first time, macOS asks you to allow it in System Settings → Privacy & Security (Open Anyway), and Windows says it protected your PC (More info, then Run anyway). The [code signing policy](CODE_SIGNING.md) says how the players are signed.
+Get VNext from the [Releases page](https://github.com/zsande/VNext/releases): a zip for Windows, macOS or Linux, with the player and licences.txt (on Linux, the player is an AppImage). VNext isn't signed by Apple or Microsoft yet, so the first time, macOS asks you to allow it in System Settings → Privacy & Security (Open Anyway), and Windows says it protected your PC (More info, then Run anyway). The [code signing policy](CODE_SIGNING.md) says how the players are signed.
 
 ## Status
 
@@ -30,9 +30,9 @@ VNext is made and tested on macOS. The Windows and Linux versions are new: GitHu
 
 In `engine/`, run `cmake --preset release`, then `cmake --build --preset release`. You need CMake 3.28 or newer and a recent C++ compiler (the automatic builds use Apple Clang, GCC 14 and Visual C++ 2022); SDL3 and the other libraries VNext uses are downloaded the first time. On Linux, first install the development packages listed in [the build workflow](.github/workflows/build.yml), which builds VNext for Windows, Linux and macOS.
 
-## License
+## Licence
 
-VNext is free to use under the [zlib license](LICENSE.txt): you may use it, change it and share it, also in games you sell, as long as you don't claim you wrote it.
+VNext is free to use under the [zlib licence](LICENCE.txt): you may use it, change it and share it, also in games you sell, as long as you don't claim you wrote it.
 
 ## Supporting VNext
 

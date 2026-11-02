@@ -79,39 +79,39 @@ std::vector<std::string> toolsTexts() {
 namespace {
 
 // A colour as a hint says it: its name, or what it's most like (never a code); none (see-through) as None.
-std::string colorText(SDL_Color c, const Palette& palette) {
-    return c.a == 0 ? "None" : colorName(c, &palette);
+std::string colourText(SDL_Color c, const Palette& palette) {
+    return c.a == 0 ? "None" : colourName(c, &palette);
 }
 
 // A style's value for a setting, as a form shows it in grey where a box is empty (what the part or
 // style gets from its style then): colours by their name, sizes as numbers, nothing as None; empty
 // for a setting that isn't a style's.
 std::string styleValueText(const Style& s, std::string_view key, const Palette& palette) {
-    auto color = [&](SDL_Color c) { return colorText(c, palette); };
+    auto colour = [&](SDL_Color c) { return colourText(c, palette); };
     auto name = [](const std::string& n) { return n.empty() ? std::string("None") : n; };
     auto state = [&](const Style::State& st, std::string_view what) { // (a look's own value, else the usual one)
-        return what == "color"  ? color(st.color.value_or(s.color))
-             : what == "bg"     ? color(st.bg.value_or(s.bg))
-             : what == "border" ? color(st.border.value_or(s.border))
+        return what == "colour"  ? colour(st.colour.value_or(s.colour))
+             : what == "background" ? colour(st.background.value_or(s.background))
+             : what == "border" ? colour(st.border.value_or(s.border))
                                 : name(st.image.empty() ? s.image : st.image);
     };
     std::string out;
     if (key == "font") out = s.font;
     else if (key == "size") out = std::format("{:g}", s.size);
-    else if (key == "color") out = color(s.color);
+    else if (key == "colour") out = colour(s.colour);
     else if (key == "line_spacing") out = std::format("{:g}", s.lineSpacing);
-    else if (key == "shadow_color") out = color(s.shadow.color);
+    else if (key == "shadow_colour") out = colour(s.shadow.colour);
     else if (key == "shadow_offset") out = std::format("{:g}", s.shadow.offset);
-    else if (key == "bg") out = color(s.bg);
-    else if (key == "border") out = color(s.border);
+    else if (key == "background") out = colour(s.background);
+    else if (key == "border") out = colour(s.border);
     else if (key == "image") out = name(s.image);
     else if (key == "padding") out = std::format("{:g}", s.padding);
     else if (key == "opacity") out = std::format("{:g}%", s.opacity * 100.0f);
-    else if (key == "hover_sound") out = name(s.hoverSound);
+    else if (key == "pointed_sound") out = name(s.pointedSound);
     else if (key == "click_sound") out = name(s.clickSound);
-    else if (key.starts_with("hover_")) out = state(s.hover, key.substr(6));
-    else if (key.starts_with("selected_")) out = state(s.selected, key.substr(9));
-    else if (key.starts_with("disabled_")) out = state(s.disabled, key.substr(9));
+    else if (key.starts_with("pointed_")) out = state(s.pointed, key.substr(8));
+    else if (key.starts_with("chosen_")) out = state(s.chosen, key.substr(7));
+    else if (key.starts_with("unclickable_")) out = state(s.unclickable, key.substr(12));
     else return {};
     return out;
 }
@@ -153,10 +153,10 @@ std::string secondsText(float seconds) {
     return s;
 }
 
-void showConfigValues(std::vector<StoryEditor::Field>& fields, const GameConfig& config) {
+void showGameSettingValues(std::vector<StoryEditor::Field>& fields, const GameSettings& gameSettings) {
     auto value = [&](std::string_view name) { return lower(fieldValue(fields, name)); };
     for (StoryEditor::Field& f : fields) {
-        if (f.name == "Image" && f.hint.empty()) { // (a character's pictures, an atlas's: named after them)
+        if (f.name == "Image" && f.hint.empty()) { // (a character's images, an atlas's: named after them)
             f.hint = lower(value("Name"));
             continue;
         }
@@ -167,12 +167,12 @@ void showConfigValues(std::vector<StoryEditor::Field>& fields, const GameConfig&
         if (f.hint != "From Settings") continue;
         std::string v;
         if (f.name == "Animation on show" || f.name == "Animation on hide") { // (the game's, from Settings: none, or its name)
-            const std::string& named = f.name == "Animation on show" ? config.showAnimation : config.hideAnimation;
+            const std::string& named = f.name == "Animation on show" ? gameSettings.animationOnShow : gameSettings.animationOnHide;
             v = named.empty() ? std::string("None"_hint) : named;
         }
-        else if (f.name == "Its speed") v = std::format("{:g}", config.babbleSpeed);
-        else if (f.name == "Blinks every") v = std::format("{:g}", config.blinkEvery);
-        else if (f.name == "Mouth's speed") v = std::format("{:g}", config.talkSpeed);
+        else if (f.name == "Its speed") v = std::format("{:g}", gameSettings.madeUpVoiceSpeed);
+        else if (f.name == "Blinks every") v = std::format("{:g}", gameSettings.secondsBetweenBlinks);
+        else if (f.name == "Mouth's speed") v = std::format("{:g}", gameSettings.mouthSpeed);
         else continue;
         f.hint = std::move(v);
     }
@@ -301,30 +301,30 @@ std::vector<std::pair<std::size_t, std::size_t>> misspelled(std::map<std::string
 
 // What the developer tools keep, looked up and kept up to date (Developer.hpp has them).
 
-std::optional<SDL_Color> DeveloperTools::characterColor(const Palette& palette, std::string_view name) {
+std::optional<SDL_Color> DeveloperTools::characterColour(const Palette& palette, std::string_view name) {
     if (colourVersion != editor.version()) { // (found again after a change, not every frame)
         colourVersion = editor.version();
         characterColours.clear();
-        for (const StoryEditor::Character& c : editor.characters()) characterColours[lower(c.name)] = parseColor(fieldValue(editor.fields(c), "Colour"), &palette);
+        for (const StoryEditor::Character& c : editor.characters()) characterColours[lower(c.name)] = parseColour(fieldValue(editor.fields(c), "Colour"), &palette);
     }
     const auto it = characterColours.find(lower(name));
     return it != characterColours.end() ? it->second : std::nullopt;
 }
 
-const std::string& DeveloperTools::cachedAudio(const Assets& assets, const std::string& name) {
-    if (audioGeneration != filesGeneration) {
-        audioGeneration = filesGeneration;
-        audioPaths.clear();
-        foundAudio.clear();
+const std::string& DeveloperTools::cachedSound(const Assets& assets, const std::string& name) {
+    if (soundGeneration != filesGeneration) {
+        soundGeneration = filesGeneration;
+        soundPaths.clear();
+        foundSound.clear();
     }
-    const auto it = audioPaths.find(name);
-    return it != audioPaths.end() ? it->second : audioPaths.emplace(name, assets.audio(name)).first->second;
+    const auto it = soundPaths.find(name);
+    return it != soundPaths.end() ? it->second : soundPaths.emplace(name, assets.sound(name)).first->second;
 }
 
-std::optional<std::string> DeveloperTools::cachedFoundAudio(const Assets& assets, const std::string& name) {
-    static_cast<void>(cachedAudio(assets, name)); // (the generation)
-    const auto it = foundAudio.find(name);
-    return it != foundAudio.end() ? it->second : foundAudio.emplace(name, assets.findAudio(name)).first->second;
+std::optional<std::string> DeveloperTools::cachedFoundSound(const Assets& assets, const std::string& name) {
+    static_cast<void>(cachedSound(assets, name)); // (the generation)
+    const auto it = foundSound.find(name);
+    return it != foundSound.end() ? it->second : foundSound.emplace(name, assets.findSound(name)).first->second;
 }
 
 const ScriptError* DeveloperTools::problemAt(std::size_t file, std::size_t line) const {

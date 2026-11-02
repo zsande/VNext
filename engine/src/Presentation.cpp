@@ -164,19 +164,17 @@ float Element::dragDirection() const {
     case ElementKind::Songs:
     case ElementKind::Achievements:
     case ElementKind::Tips:
-    case ElementKind::Contacts:
-    case ElementKind::Chart:
+    case ElementKind::Flowchart:
         return -1.0f;
     case ElementKind::History:
-    case ElementKind::Phone:
         return 1.0f;
     default:
         return 0.0f;
     }
 }
 
-SDL_Color Element::color(std::string_view name, SDL_Color fallback) const {
-    if (auto it = colors.find(name); it != colors.end()) return it->second;
+SDL_Color Element::colour(std::string_view name, SDL_Color fallback) const {
+    if (auto it = colours.find(name); it != colours.end()) return it->second;
     return fallback;
 }
 
@@ -212,11 +210,11 @@ Animation::Look Animation::Look::with(const Look& other) const {
     out.y += other.y;
     out.opacity *= other.opacity;
     out.zoom *= other.zoom;
-    out.rotate += other.rotate;
-    if (other.color) out.color = other.color;
+    out.rotation += other.rotation;
+    if (other.colour) out.colour = other.colour;
     if (other.fade > out.fade) {
         out.fade = other.fade;
-        out.fadeColor = other.fadeColor;
+        out.fadeColour = other.fadeColour;
     }
     if (other.wipe < out.wipe) {
         out.wipe = other.wipe;
@@ -237,7 +235,7 @@ Animation::Look Animation::at(float seconds, SDL_Color own, const Offset& offset
         switch (c.what) {
         case Value::X: return c.by ? c.to * screen.x : std::isnan(c.to) ? 0.0f : offset(true, c.to); // (home: its own place)
         case Value::Y: return c.by ? -c.to * screen.y : std::isnan(c.to) ? 0.0f : offset(false, c.to);
-        case Value::Fade: return c.color.a == 0 ? 0.0f : 1.0f; // (covered, or uncovered again)
+        case Value::Fade: return c.colour.a == 0 ? 0.0f : 1.0f; // (covered, or uncovered again)
         default: return c.to;
         }
     };
@@ -258,21 +256,21 @@ Animation::Look Animation::at(float seconds, SDL_Color own, const Offset& offset
         return last ? std::lerp(from, target(*last), progress(*last, t)) : initial;
     };
     Look now{.x = number(Value::X, start.x), .y = number(Value::Y, start.y), .opacity = number(Value::Opacity, start.opacity),
-             .zoom = number(Value::Zoom, start.zoom), .rotate = number(Value::Rotate, start.rotate), .color = start.color,
-             .fade = number(Value::Fade, start.fade), .fadeColor = start.fadeColor, .wipe = std::clamp(number(Value::Wipe, start.wipe), 0.0f, 1.0f),
+             .zoom = number(Value::Zoom, start.zoom), .rotation = number(Value::Rotation, start.rotation), .colour = start.colour,
+             .fade = number(Value::Fade, start.fade), .fadeColour = start.fadeColour, .wipe = std::clamp(number(Value::Wipe, start.wipe), 0.0f, 1.0f),
              .wipeShape = start.wipeShape};
     const Change* last = nullptr;
-    const SDL_Color first = start.color.value_or(own);
+    const SDL_Color first = start.colour.value_or(own);
     SDL_Color from = first;
     for (const Change& c : changes) {
         if (t < c.start) break;
-        if (c.what == Value::Fade && c.color.a != 0) now.fadeColor = {c.color.r, c.color.g, c.color.b, 255}; // (going away again: from the one it had)
+        if (c.what == Value::Fade && c.colour.a != 0) now.fadeColour = {c.colour.r, c.colour.g, c.colour.b, 255}; // (going away again: from the one it had)
         if (c.what == Value::Wipe) now.wipeShape = c.shape;
-        if (c.what != Value::Color) continue;
-        from = last ? mix(from, last->color, progress(*last, c.start)) : first;
+        if (c.what != Value::Colour) continue;
+        from = last ? mix(from, last->colour, progress(*last, c.start)) : first;
         last = &c;
     }
-    if (last) now.color = mix(from, last->color, progress(*last, t));
+    if (last) now.colour = mix(from, last->colour, progress(*last, t));
     return now;
 }
 
@@ -291,10 +289,10 @@ void Script::forEachText(const std::function<void(std::string& text, const TextP
     };
     auto commands = [&](Commands& list, const TextPlace& place) { // messages buttons and keys show
         for (Command& c : list)
-            if (auto* ui = std::get_if<cmd::Ui>(&c); ui && ui->verb == "notify") f(ui->arg, place);
+            if (auto* ui = std::get_if<cmd::Ui>(&c); ui && ui->verb == "notice") f(ui->arg, place);
     };
 
-    f(config.title, {.what = "title"});
+    f(gameSettings.title, {.what = "title"});
     for (Instruction& ins : code) {
         const TextPlace place{.line = &ins};
         std::visit(Overloaded{
@@ -303,7 +301,6 @@ void Script::forEachText(const std::function<void(std::string& text, const TextP
                            f(c.text, place);
                        },
                        [&](cmd::Menu& c) {
-                           if (!c.prompt.empty()) f(c.prompt, place);
                            for (auto& choice : c.choices) {
                                f(choice.text, place);
                                if (!choice.note.empty()) f(choice.note, place);
@@ -314,33 +311,40 @@ void Script::forEachText(const std::function<void(std::string& text, const TextP
                            if (!c.fallback.empty()) f(c.fallback, place);
                        },
                        [&](cmd::Ui& c) {
-                           if (c.verb == "notify") f(c.arg, place);
+                           if (c.verb == "notice") f(c.arg, place);
                        },
                        [&](cmd::Chapter& c) { f(c.title, place); },
                        [&](cmd::Mark& c) { f(c.title, place); },
                        [&](cmd::Message& c) {
                            if (!c.sender.empty()) f(c.sender, place);
-                           f(c.text, place);
-                           for (auto& reply : c.replies) {
-                               f(reply.text, place);
-                               if (!reply.note.empty()) f(reply.note, place);
-                           }
+                           if (!c.text.empty()) f(c.text, place);
+                       },
+                       [&](cmd::Chat& c) { f(c.with, place); },
+                       [&](cmd::Call& c) {
+                           if (!c.sender.empty()) f(c.sender, place);
                        },
                        [](auto&) {},
                    },
                    ins.command);
     }
-    for (auto [key, def] : sorted(characters)) f(def->name, {.what = "character", .name = *key});
+    for (auto [key, def] : sorted(characters)) {
+        f(def->name, {.what = "character", .name = *key});
+        if (!def->about.empty()) f(def->about, {.what = "character", .name = *key});
+    }
     for (auto [key, screen] : sorted(screens)) {
         const TextPlace place{.what = "screen", .name = *key};
         for (Element& el : screen->elements) {
             if (el.kind == ElementKind::Text || el.kind == ElementKind::Button) f(el.text, place);
             if (!el.confirm.empty()) f(el.confirm, place);
-            if (auto it = el.props.find("hint"); it != el.props.end()) f(it->second, place); // (an input's)
+            // (the words parts show: an input's placeholder, the pages' tabs, the saves' questions, a control's while it
+            // waits for a key, a phone app's title)
+            static constexpr std::string_view kWords[]{"placeholder", "secret", "auto", "quick", "load_confirm", "delete_confirm", "waiting", "title"};
+            for (std::string_view word : kWords)
+                if (auto it = el.props.find(word); it != el.props.end()) f(it->second, place);
             commands(el.actions, place);
         }
-        commands(screen->onShow, place);
-        commands(screen->onHide, place);
+        commands(screen->actionOnOpen, place);
+        commands(screen->actionOnClose, place);
     }
     for (Control& c : controls) commands(c.actions, {.what = "control", .name = c.name});
     for (std::size_t k = 0; k < lists.size(); ++k)

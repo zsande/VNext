@@ -40,7 +40,7 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
         d.dropPreviews();
         return;
     }
-    if (engine.waiting_ && head.button(d.previewSound ? "Audio on"_tr : "Audio off"_tr, d.previewSound)) {
+    if (engine.waiting_ && head.button(d.previewSound ? "Sound on"_tr : "Sound off"_tr, d.previewSound)) {
         d.previewSound = !d.previewSound;
         d.dropPreviews(); // (made again, heard or not)
         return;
@@ -70,18 +70,30 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
             d.previewAt.reset();
         }
         d.previewTicks = now;
-        if (paintCanvas([&] { // drawn again every frame, as the game would draw it (pictures may still be loading), with the screens as they are now
+        if (paintCanvas([&] { // drawn again every frame, as the game would draw it (images may still be loading), with the screens as they are now
                 const SwappedIn previewGame(engine.game_, d.preview);
                 const SetFor previewViews(engine.viewsFrom_, d.script.get());
                 engine.drawGame(true);
                 if (engine.game_->openingScreen() && !engine.game_->playingMovie()) // (the screen the line opens)
                     if (ScreenView* v = engine.view(engine.game_->request().name)) v->draw(engine.renderer());
+                // (a chat scene's line or a call's: the phone shows it, on the chat or the call)
+                if (const ScreenDef* phone = d.script->screen("phone"); phone && (!engine.game_->chatScene().empty() || engine.game_->call())) {
+                    auto view = engine.phone_;
+                    view.locked = false;
+                    view.image.clear();
+                    if (const std::string& with = engine.game_->chatScene(); !with.empty()) {
+                        view.chat = with;
+                        if (std::string app = engine.appHolding(*phone, "messages"); !app.empty() || !(app = engine.appHolding(*phone, "chats")).empty()) view.app = std::move(app);
+                    }
+                    const SwappedIn shownPhone(engine.phone_, view);
+                    if (ScreenView* v = engine.view("phone")) v->draw(engine.renderer());
+                }
                 for (const std::string& name : d.previewOverlays) // (the screens its buttons opened)
                     if (ScreenView* v = engine.view(name)) v->draw(engine.renderer());
                 auto under = [&]() -> ScreenView* { // (the screen on top of the preview: a button's, else the line's)
                     return !d.previewOverlays.empty() ? engine.view(d.previewOverlays.back()) : engine.game_->openingScreen() ? engine.view(engine.game_->request().name) : nullptr;
                 };
-                std::erase_if(d.previewLeaving, [&](const std::string& name) { // (the ones closed: drawn while their hide_animation= plays)
+                std::erase_if(d.previewLeaving, [&](const std::string& name) { // (the ones closed: drawn while their animation_on_close= plays)
                     const ScreenView* v = engine.view(name);
                     if (v && v->leaving()) return false;
                     if (ScreenView* top = under(); top && ((v && v->endsCovered()) || top->hasLeft())) top->opened(); // (what was under comes back into view)
@@ -121,13 +133,13 @@ void Developer::drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEd
                 const float perPixel = engine.canvas().w / shown.w; // (the engine.canvas()'s pixels a pixel of the preview is)
                 DeveloperTools::PlaceDrag g{.x = d.mouseX, .y = d.mouseY, .across = 0.0f, .up = 0.0f, .perX = 0.0f, .perY = 0.0f, .moving = false,
                                             .key = ++d.focusCount};
-                // (its picture lines up with the screen as much as its place is across: it moves by the room left beside it)
+                // (its image lines up with the screen as much as its place is across: it moves by the room left beside it)
                 const Stage::ObjectState& o = *object;
                 std::string key = o.image;
                 const CharacterDef* def = o.character.empty() || !d.script ? nullptr : d.script->character(o.character);
-                if (def) key = def->pictureOf(o.expression);
-                const Picture pic = engine.assets().picture(key);
-                const float sized = (def && pic ? std::min(1.0f, engine.canvas().h * (d.script ? d.script->config.spriteHeight : 0.95f) / pic.h()) : 1.0f) * o.zoom;
+                if (def) key = def->imageOf(o.expression);
+                const Image pic = engine.assets().image(key);
+                const float sized = (def && pic ? std::min(1.0f, engine.canvas().h * (d.script ? d.script->gameSettings.characterHeight : 0.95f) / pic.h()) : 1.0f) * o.zoom;
                 const float w = pic ? pic.w() * sized : engine.canvas().w * 0.5f * o.zoom, h = pic ? pic.h() * sized : engine.canvas().h * 0.5f * o.zoom;
                 g.across = o.x * 2.0f - 1.0f;
                 g.up = 1.0f - o.y * 2.0f;
@@ -219,7 +231,7 @@ void Developer::previewEvent(const SDL_Event& e) {
                 if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat)) engine.game_->setUiHidden(false);
                 return true;
             }
-            if (ScreenView* v = engine.view(engine.game_->choiceScreen()); v && engine.game_->showingChoices() && v->handleEvent(e)) return true;
+            if (ScreenView* v = engine.view("choice"); v && engine.game_->showingChoices() && v->handleEvent(e)) return true;
             if (ScreenView* v = engine.textbox(); v && engine.game_->showingSay() && v->handleEvent(e)) return true;
             const std::vector<std::string> shown = engine.game_->shownScreens();
             for (const std::string& name : shown | std::views::reverse)
@@ -238,7 +250,7 @@ void Developer::previewEvent(const SDL_Event& e) {
 }
 
 // The screens that came onto the preview since last frame (the one the line opens, the ones the story
-// shows, the ones its buttons opened) and the ones that went: their on_show= and on_hide=, as the
+// shows, the ones its buttons opened) and the ones that went: their action_on_open= and action_on_close=, as the
 // game runs them (a title screen's music plays through the preview, when it's heard).
 void Developer::previewHooks() {
     DeveloperTools& d = tools;
@@ -253,9 +265,9 @@ void Developer::previewHooks() {
         if (!std::ranges::contains(before, name)) runScreenHook(name, true);
 }
 
-void Developer::runTrying(const Commands& commands, const std::string& confirm) {
+void Developer::runTrying(const Commands& commands, const std::string& confirm, const Variables& item) {
     const SetFor _(engine.trying_, true);
-    engine.run(commands, confirm);
+    engine.run(commands, confirm, item);
 }
 
 void Developer::tryScreenHook(const ScreenDef& def, bool opening) {
@@ -285,7 +297,7 @@ void Developer::previewDid() {
     const SetFor _(engine.viewsFrom_, d.script.get());
     for (auto& [name, v] : d.previewViews)
         if (auto did = v->takePressed()) {
-            runTrying(did->first, did->second);
+            runTrying(did->actions, did->confirm, did->item);
         }
     std::vector<std::string> said;
     for (std::vector<Command> batch = std::exchange(engine.tried_, {}); !batch.empty(); batch = std::exchange(engine.tried_, {})) { // (what one does may ask for more)
@@ -298,9 +310,9 @@ void Developer::previewDid() {
                 continue;
             }
             const std::string& v = u->verb;
-            if (v == "advance") {
+            if (v == "next line") {
                 if (d.preview->skipMode()) d.preview->toggleSkip();
-                else d.preview->advance();
+                else d.preview->nextLine();
                 d.previewPlaying = true;
             } else if (v == "rollback") {
                 d.preview->rollback();
@@ -357,8 +369,8 @@ void Developer::makePreview(const StoryEditor::Scene& scene, const StoryEditor::
     DeveloperTools& d = tools;
     if (!d.script || !d.script->errors.empty()) return;
     const bool heard = d.previewSound && engine.waiting_;
-    if (heard) d.heard = &engine.audio();
-    d.preview = playedTo(*d.script, scene, row ? std::optional(row->line) : std::nullopt, heard ? engine.audio() : d.silence, d.previewReached);
+    if (heard) d.heard = &engine.sound();
+    d.preview = playedTo(*d.script, scene, row ? std::optional(row->line) : std::nullopt, heard ? engine.sound() : d.silence, d.previewReached);
     if (d.preview && d.preview->openingScreen()) { // (the screen the line opens: with NAME and close with NAME, as in the game)
         const SetFor previewViews(engine.viewsFrom_, d.script.get());
         if (ScreenView* v = engine.view(d.preview->request().name))
@@ -366,10 +378,10 @@ void Developer::makePreview(const StoryEditor::Scene& scene, const StoryEditor::
     }
 }
 
-std::unique_ptr<Game> Developer::playedTo(const Script& s, const StoryEditor::Scene& scene, std::optional<std::size_t> line, Audio& audio, bool& reached,
+std::unique_ptr<Game> Developer::playedTo(const Script& s, const StoryEditor::Scene& scene, std::optional<std::size_t> line, Sound& sound, bool& reached,
                                        bool before) {
     DeveloperTools& d = tools;
-    const auto start = s.findLabel(scene.name);
+    const auto start = s.findScene(scene.name);
     if (!start) return nullptr;
     // The commands it may stop at: the line's (an option's: its choice's), or the scene's after it.
     const std::string file = d.editor.path(scene.file);
@@ -385,17 +397,17 @@ std::unique_ptr<Game> Developer::playedTo(const Script& s, const StoryEditor::Sc
         return s.files[ins.file] == file && ins.line > static_cast<int>(from) && ins.line <= static_cast<int>(scene.end);
     };
     std::optional<std::size_t> target;
-    for (std::size_t pc = 0; pc < s.code.size(); ++pc)
-        if (there(pc) && (!target || s.code[pc].line < s.code[*target].line)) target = pc;
+    for (std::size_t pc = 0; pc < s.code.size(); ++pc) // (not a jump or return ending what's under a line: the story isn't at that line then)
+        if (there(pc) && !s.code[pc].tail && (!target || s.code[pc].line < s.code[*target].line)) target = pc;
     if (!target) return nullptr;
     // (so nothing the player has changes)
     d.previewRead = engine.readLog();
     d.previewPersistent = engine.persistent();
-    d.previewChart = engine.chart();
-    // (a scene the story calls ends at its return, as a splash screen does)
-    const bool called = std::ranges::any_of(d.editor.links(), [&](const StoryEditor::Link& l) { return l.call && l.to == lower(scene.name); });
+    d.previewFlowchart = engine.flowchart();
+    // (a scene the story calls ends at its return, as a splash screen does; so does a chat= or call= scene)
+    const bool called = !d.editor.phoneSceneOf(scene).empty() || std::ranges::any_of(d.editor.links(), [&](const StoryEditor::Link& l) { return l.call && l.to == lower(scene.name); });
     auto play = [&](std::size_t pc, bool& got, bool& skipped) {
-        auto game = std::make_unique<Game>(Context{engine.renderer(), engine.assets(), audio, engine.settings_, d.previewRead, d.previewPersistent, d.previewChart, engine.canvas(),
+        auto game = std::make_unique<Game>(Context{engine.renderer(), engine.assets(), sound, engine.settings_, d.previewRead, d.previewPersistent, d.previewFlowchart, engine.canvas(),
                                                    [this](std::string_view name) { return engine.builtin(name); }},
                                            s);
         if (before) game->stopBefore(*target);
@@ -447,21 +459,20 @@ void Developer::makeSample(bool choice) {
     d.sample.reset();
     if (!d.script || !d.script->errors.empty()) return;
     const Script& s = *d.script;
-    const auto start = s.findLabel("start");
+    const auto start = s.findScene("start");
     if (!start) return;
     d.previewRead = engine.readLog();
     d.previewPersistent = engine.persistent();
-    d.previewChart = engine.chart();
+    d.previewFlowchart = engine.flowchart();
     const bool heard = d.trying && d.previewSound && engine.waiting_; // (a screen tried with its sound on: heard, as the Story tab's preview is)
-    if (heard) d.heard = &engine.audio();
-    d.sample = std::make_unique<Game>(Context{engine.renderer(), engine.assets(), heard ? engine.audio() : d.silence, engine.settings_, d.previewRead, d.previewPersistent, d.previewChart, engine.canvas(),
+    if (heard) d.heard = &engine.sound();
+    d.sample = std::make_unique<Game>(Context{engine.renderer(), engine.assets(), heard ? engine.sound() : d.silence, engine.settings_, d.previewRead, d.previewPersistent, d.previewFlowchart, engine.canvas(),
                                               [this](std::string_view name) { return engine.builtin(name); }},
                                       s);
     d.sample->start(*start);
     d.sample->playTo(SIZE_MAX, [&](std::size_t pc) {
         return choice ? std::holds_alternative<cmd::Menu>(s.code[pc].command) : std::holds_alternative<cmd::Say>(s.code[pc].command);
     });
-    d.sample->addSamples(); // (history and phone screens have something to show)
 }
 
 } // namespace vn

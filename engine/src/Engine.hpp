@@ -26,12 +26,12 @@ namespace vn {
 
 inline constexpr const char* kVersion = VN_VERSION; // the player's (CMakeLists.txt)
 
-// The licenses of the software built into the player (Licenses.cpp).
-[[nodiscard]] std::string_view licenses();
+// The licences of the software built into the player (Licences.cpp).
+[[nodiscard]] std::string_view licences();
 
 class DeveloperUi;
 
-// The player: owns the window, renderer, audio, fonts and saves, and runs the game's script.
+// The player: owns the window, renderer, sound, fonts and saves, and runs the game's script.
 // Every screen (title, textbox, menus, settings, save/load...) is defined by the script; the
 // engine shows them and carries out what their buttons do.
 class Engine final {
@@ -56,19 +56,20 @@ public:
     // Where the log is written, and the window: what the player is shown if the game has to stop.
     [[nodiscard]] const std::string& logFile() const { return logFile_; }
     [[nodiscard]] SDL_Window* window() const { return window_.get(); }
-    Picture picture(std::string_view name, Frame frame = {}) { return assets_->picture(name, frame); }
-    void run(const Commands& commands, const std::string& confirm = {}); // what a button does
+    Image image(std::string_view name, Frame frame = {});
+    // What a button does (`item`: a list item's values when it's in one: {chat.name}, and what send, like... act on).
+    void run(const Commands& commands, const std::string& confirm = {}, const Variables& item = {});
     // What a screen does as it opens (or closes): the music and the voice line stop when its stop_music_on_open=
-    // and stop_voice_on_open= (or _on_close=) say so, then its on_show= (on_hide=) runs.
+    // and stop_voice_on_open= (or _on_close=) say so, then its action_on_open= (action_on_close=) runs.
     void screenHook(const ScreenDef& def, bool opening);
     [[nodiscard]] Game& game() { return *game_; }
     [[nodiscard]] const Lookup& lookup() const { return game_->lookup(); }
     void wantTextInput() { textInputWanted_ = true; }
-    void playSound(const std::string& file) { audio_.playSound(assets_->audio(file)); }
-    [[nodiscard]] const GameConfig& config() const { return script_.config; }
+    void playSound(const std::string& file) { sound_.playSound(assets_->sound(file)); }
+    [[nodiscard]] const GameSettings& gameSettings() const { return script_.gameSettings; }
     [[nodiscard]] const Palette& palette() const { return script_.palette; }
     [[nodiscard]] Assets& assets() { return *assets_; }
-    [[nodiscard]] Audio& audio() { return audio_; }
+    [[nodiscard]] Sound& sound() { return sound_; }
     [[nodiscard]] std::uint64_t frameNumber() const { return frameNumber_; }
     [[nodiscard]] std::uint64_t pointerMoves() const { return pointerMoves_; } // (how many times the pointer has moved: screens tell whether the last move came to them)
     [[nodiscard]] float time() const { return time_; } // the game's clock: it stands still while the developer tools are open over it
@@ -77,39 +78,60 @@ public:
     void settingsChanged(bool testSound);
     [[nodiscard]] SlotBrowser& slots() { return slots_; }
     // A save slot clicked (the questions, if any, before saving over a save and before loading while a
-    // game is on) and its delete button (the question before deleting); a place on the flowchart clicked.
+    // game is on) and its delete button (the question before deleting); a point on the flowchart clicked.
     void slotPressed(std::size_t index, std::string overwriteQuestion, std::string loadQuestion);
     void slotDelete(std::size_t index, std::string question);
     // The history's buttons: hear entry `entry`'s voice again; go back to its line (closing the menus).
     void historyVoice(std::size_t entry);
     void historyBack(std::size_t entry);
-    // The phone part: sends an answer to a message (the menus close when the story moves on).
-    void reply(std::size_t message, std::size_t option);
     // Something dragged (its drag=) dropped on a part: its drop= runs, with {dropped} what it was.
     void drop(const std::string& what, const Commands& commands);
     // The music room: plays song `index` (one the player has heard); what was playing comes back
     // when the screen with the songs closes.
     void playSong(std::size_t index);
-    // The flowchart: its places, and going back to one (asking first during a game).
-    [[nodiscard]] const Chart& chart() const { return chart_; }
+    // The flowchart: its points, and going back to one (asking first during a game).
+    [[nodiscard]] const Flowchart& flowchart() const { return flowchart_; }
     [[nodiscard]] bool playing() const; // a game is on (not the title screen)
     void goToPlace(const std::string& id, std::string question);
     // Where a place is in the scripts (its command), if it's still there.
-    [[nodiscard]] std::optional<std::size_t> placeCommand(std::string_view id) const;
+    [[nodiscard]] std::optional<std::size_t> pointCommand(std::string_view id) const;
     [[nodiscard]] const Script& script() const { return script_; }
-    // The gallery's pictures, endings, songs, achievements and tips: whether the player has the
+    // The gallery's images, endings, songs, achievements and tips: whether the player has the
     // index-th of a kind, and how many they have.
     [[nodiscard]] bool has(RecordKind kind, std::size_t index) const;
     [[nodiscard]] int count(RecordKind kind) const;
-    void viewCg(std::size_t index) { cg_ = index; } // the gallery picture being looked at ({cg})
-    [[nodiscard]] bool galleryMovie(std::size_t index) const; // the index-th in the gallery is a video (movies/NAME.mpg)
+    void viewGalleryImage(std::size_t index) { galleryImage_ = index; } // the gallery image being looked at ({gallery_image})
+    [[nodiscard]] bool galleryMovie(std::size_t index) const; // the index-th in the gallery is a movie (movies/NAME.mpg)
     // The tip being read ({tip}); a tip the player has but hasn't read yet is new.
     void viewTip(std::size_t index);
     [[nodiscard]] bool newTip(std::size_t index) const;
     [[nodiscard]] std::optional<std::size_t> tip() const { return tip_; }
-    // The person whose messages the phone shows ({contact}; none: everyone's).
-    void viewContact(std::string name) { contact_ = std::move(name); }
-    [[nodiscard]] const std::string& contact() const { return contact_; }
+    // The phone screen: the app open (its first while none is; its call or lock app while those are up),
+    // the chat open in it ({open_chat}; none: the list of chats), the image open (one from a chat), and
+    // whether its lock screen is up. Opening one of each, and Back: the image, the chat, the app (to the
+    // one before, or home), then the phone itself. A chat scene or a call keeps it where it is.
+    [[nodiscard]] std::string phoneApp(const ScreenDef& def) const;
+    [[nodiscard]] bool appOn(const Element& app) const; // the phone has it (while its when= is true)
+    [[nodiscard]] std::string passcode() const;          // the phone's (the variable phone_passcode; none: "")
+    [[nodiscard]] const std::string& openChat() const { return phone_.chat; }
+    [[nodiscard]] const std::string& openImage() const { return phone_.image; }
+    void openApp(const ScreenDef& def, std::string name);
+    void openImage(std::string name) { phone_.image = std::move(name); }
+    void back();
+    bool phoneBack(); // a step back on the phone (the image, the chat, the app); false: none to take (Back then closes it)
+    bool unlockPhone(std::string_view code); // its lock screen goes (with the passcode, if it has one: right or not)
+    void openNotice();                       // the notice of a message clicked: the phone opens on it
+    // Controllers rumble (unless the player's Vibration setting is off): `strength` from 0 to 1, for `ms`.
+    void rumble(float strength, Uint32 ms);
+    [[nodiscard]] std::string appHolding(const ScreenDef& def, std::string_view list) const; // the app with a list= of that in it (none: "")
+    void openChat(const ScreenDef& def, std::string with); // someone's chat, in the app it's in
+    // What the phone's parts do (a screen being tried in the developer tools only says so): send what the player can
+    // text, call someone, answer (or decline) a call, comment on a post.
+    void callPerson(const std::string& who);
+    void pickOnPhone(std::size_t option); // an option of a chat or call scene's choice waiting on the phone
+    void answerCall(bool answer);
+    void keypad(std::string_view key); // the lock screen's keypad: a digit (once there are enough, they're tried), or back
+    // A photo of the stage (as "photo" took it, a save's lines), as an image.
     // Languages: the game's own first, then its translations (the "language" setting).
     [[nodiscard]] std::vector<std::string> languageNames() const;
     [[nodiscard]] int languageIndex() const;
@@ -186,14 +208,14 @@ private:
     std::string openGame();
     void loadPlayerData();
     void begin();
-    void play(); // the game from the beginning: the splash screen, then label start
+    void play(); // the game from the beginning: the splash screen, then scene start
     bool lookForGame(); // developer mode without a game: one found next to the player begins (false: still none)
     [[nodiscard]] Script readScript() const;
     // Packs the game folder into `file` (game.vnext next to the folder): what was done, or why not.
     [[nodiscard]] std::expected<std::string, std::string> pack(const std::string& file) const;
     [[nodiscard]] std::expected<std::string, std::string> packInto(const std::string& file) const; // (what pack() and finishGame() share)
     [[nodiscard]] std::string packPath() const;
-    // Pack the game (and --pack): game.vnext and licenses.txt in a folder named after the game, next to
+    // Pack the game (and --pack): game.vnext and licences.txt in a folder named after the game, next to
     // the game folder (finishedFolder()): what was made, or why not.
     [[nodiscard]] std::expected<std::string, std::string> finishGame() const;
     [[nodiscard]] std::string finishedFolder() const;
@@ -201,7 +223,7 @@ private:
     [[nodiscard]] bool writeTranslation(const std::string& id);
     void loadTranslations(); // translations/*.vnscript (their errors join the script's)
     [[nodiscard]] const Translation* language() const; // the one shown, if any
-    void useLanguage();      // its texts, fonts, pictures and sounds
+    void useLanguage();      // its texts, fonts, images and sounds
     void configureFonts();
     void configure(); // applies the script: canvas, fonts, screens...
     [[nodiscard]] std::unique_ptr<Game> makeGame();
@@ -231,15 +253,18 @@ private:
     void newGame(std::string_view label, bool subroutine = false);
     void startAt(std::size_t pc, bool subroutine = false, const Variables* carried = nullptr); // (`carried`: the variables it begins with)
     void leaveTitle();
-    void beginStory(); // label start, as the game begins
-    void newStory();   // New Game: on from where the story opened the title screen (or label start)
+    void beginStory(); // scene start, as the game begins
+    void newStory();   // New Game: on from where the story opened the title screen (or scene start)
     void fromTitle(std::function<void()> then); // the story goes on from the title screen: through its closing fade, if it has one
-    [[nodiscard]] std::optional<std::size_t> titleLine() const; // the line in label start that opens the title screen
+    [[nodiscard]] std::optional<std::size_t> titleLine() const; // the line in scene start that opens the title screen
     [[nodiscard]] ScreenView* view(std::string_view name);
+    [[nodiscard]] bool showsPhone(std::string_view screen); // it has the phone's parts: apps, chats, calls...
+    void showPhone(const cmd::Ui& c);                      // the story's: a chat scene, a call or a message shown on it
+    void hidePhone();                                      // ...over: it goes, if the story opened it
     [[nodiscard]] ScreenView* topView(); // the screen on top: the top overlay, else the title on the title screen
     [[nodiscard]] ScreenView* textbox();
     // A screen opened over the rest, playing `opening` and later `closing` this time (with NAME and close
-    // with NAME; none: its own show_animation= and hide_animation=).
+    // with NAME; none: its own animation_on_open= and animation_on_close=).
     bool open(const std::string& name, ScreenView::Played opening = std::nullopt, ScreenView::Played closing = std::nullopt);
     bool openNow(const std::string& name, ScreenView::Played opening = std::nullopt,
                  ScreenView::Played closing = std::nullopt); // (open(), once the screen under it has faded out, when it must first)
@@ -247,7 +272,7 @@ private:
     // goes on, if it waited for it).
     void close(bool fade = true);
     void closeNow();
-    void left(const std::string& name); // a "show screen" one hidden: its hide_animation= plays (the story goes on)
+    void left(const std::string& name); // a "show screen" one hidden: its animation_on_close= plays (the story goes on)
     void closeAll();
     void syncShownScreens();
     void command(const Command& c);
@@ -255,7 +280,7 @@ private:
     void ask(std::string question, std::function<void()> yes);
     void loadPersistent();
     void savePersistent();
-    // The player's progress (persistent.txt, read.txt, chart.txt): in game.vnext with the saves when the
+    // The player's progress (persistent.txt, read.txt, flowchart.txt): in game.vnext with the saves when the
     // game is a pack that keeps them (inPack_), else in the player's own folder. Without one, a write
     // keeps nothing, and that's no failure.
     [[nodiscard]] std::optional<std::string> readProgress(std::string_view file) const;
@@ -268,7 +293,7 @@ private:
     std::expected<std::string, std::string> resume(std::string_view state);
     [[nodiscard]] SurfacePtr captureThumbnail();
     void reload();
-    void notify(std::string message);
+    void notice(std::string message, std::string phone = {}); // (a message's: `phone`, its chat, opens when it's clicked)
     void readAloud(); // (the player's setting: what's new on screen, once)
 
     // Display
@@ -281,16 +306,16 @@ private:
     [[nodiscard]] std::string windowTitle() const;
 
     // The developer tools
-    [[nodiscard]] bool developerMode() const { return noGame_ || config().developer; }
+    [[nodiscard]] bool developerMode() const { return noGame_ || gameSettings().developer; }
 
     Session session_;
     Log log_;
     Developer developer_{*this};
     WindowPtr window_;
     RendererPtr renderer_;
-    Canvas canvas_; // (config resolution)
+    Canvas canvas_; // (setting game_size)
     GameFiles files_; // (the game's files: before what reads through them, so they go after it)
-    Audio audio_{files_};
+    Sound sound_{files_};
     Settings defaults_, settings_, applied_; // applied_: what is in effect, to apply only changes
     ReadLog readLog_;
     std::set<std::string> reached_; // "FILE\tLINE TEXT" for each line run (the editor marks the others)
@@ -312,7 +337,10 @@ private:
     SaveStore saves_;
     SlotBrowser slots_;
     std::optional<std::string> musicBeforeSongs_; // what played before the music room (a path; empty: nothing)
-    std::deque<std::string> noticeQueue_;         // messages waiting for the one showing to go
+    struct Notice {
+        std::string text, phone; // (a message's: its chat)
+    };
+    std::deque<Notice> noticeQueue_;              // messages waiting for the one showing to go
     std::string topScreen_;                       // the screen on top, and since when (close_after=)
     float topSince_ = 0.0f;
     [[nodiscard]] bool songsOpen() const;         // a screen with a songs part is open
@@ -320,34 +348,43 @@ private:
     std::vector<Translation> translations_;
     std::uint64_t frameNumber_ = 0;
     std::uint64_t pointerMoves_ = 0;
-    bool covered_ = false; // a menu covers the game (its voice and video wait)
+    bool covered_ = false; // a menu covers the game (its voice and movie wait)
     std::unique_ptr<Game> game_;                          // idle (not started) on the title screen
     std::map<std::string, ScreenView, std::less<>> views_; // every screen of the script
     const Script* viewsFrom_ = nullptr; // (the preview: view() gives the editor's screens, as they are now)
     std::vector<std::string> overlays_;                   // open menus, the top one last
-    std::vector<std::string> shown_;                      // "show screen" screens last frame (on_show / on_hide)
+    std::vector<std::string> shown_;                      // "show screen" screens last frame (action_on_open / action_on_close)
     std::size_t calledDepth_ = 0;                         // overlays_ size while a screen the story waits for is open
     struct Leaving {
         std::string name;
         std::function<void()> then; // (once its animation is over; none: a "show screen" one, drawn on top until then)
     };
-    std::vector<Leaving> leaving_; // screens playing their hide_animation=
-    bool coveredClose_ = false;    // (the top screen's hide_animation= ended covered: what was under it comes back into view)
+    std::vector<Leaving> leaving_; // screens playing their animation_on_close=
+    bool coveredClose_ = false;    // (the top screen's animation_on_close= ended covered: what was under it comes back into view)
     // "open NAME" for a screen open under others, or for the title screen under menus: back to it. The
-    // ones over it close, the top one first, each as it does (with its hide_animation= and what it does
+    // ones over it close, the top one first, each as it does (with its animation_on_close= and what it does
     // on closing), until it's on top; then it opens again (what it does on opening: its music...).
     std::optional<std::string> backTo_;
     void backTo(const std::string& name);
     void closeTowards(); // (the next one over it, once the top has closed)
     std::optional<Value> answer_;                         // what the screen the story waits for answers
     Variables persistent_;                                // "persistent.*", kept in persistent.txt
-    Chart chart_;                                         // the flowchart, kept in chart.txt
+    Flowchart flowchart_;                                         // the flowchart, kept in flowchart.txt
     std::vector<std::vector<KeyChord>> controlKeys_;      // keys in effect, one list per script_.controls
     std::optional<std::pair<std::string, std::size_t>> rebinding_; // control + slot waiting for a key
-    std::size_t cg_ = 0;                                  // gallery picture being looked at
-    mutable std::map<std::string, bool, std::less<>> movies_; // gallery names that are videos (looked up once)
+    std::size_t galleryImage_ = 0;                                  // gallery image being looked at
+    mutable std::map<std::string, bool, std::less<>> movies_; // gallery names that are movies (looked up once)
     std::optional<std::size_t> tip_;                      // tip being read
-    std::string contact_;                                 // conversation on the phone
+    struct PhoneView {
+        std::string app, chat, image; // (see phoneApp())
+        std::vector<std::string> back;     // the apps before it (Back goes to them)
+        bool locked = false;               // its lock screen is up (whenever the player opens it: it locks as it's put away)
+        bool straight = false;             // (opening for the story: no lock screen)
+        bool pinned = false;               // (the Screens tab's preview: on `app`, even while a call is on)
+        std::string code;                  // the lock screen's keypad: the passcode so far
+        std::optional<float> wrongAt;      // ...and when a wrong one was tried
+    } phone_;
+    float ringPulse_ = 0.0f; // a call coming: seconds to the controllers' next buzz
     bool dataFolder_ = false;                             // --data: everything, saves too, goes there
     bool packed_ = false;                                 // the game is a pack (game.vnext): finished
     bool inPack_ = false;                                 // ...that keeps its players' saves and progress itself
@@ -355,9 +392,9 @@ private:
     bool storyStarted_ = false;                           // without a title screen, the story's end closes the player
     bool waiting_ = false;                                // developer mode: no game is going on, the developer tools wait for Play
     bool textInputWanted_ = false, textInputActive_ = false;
-    bool splash_ = false;                                 // running "label splashscreen"
-    bool opening_ = false;                                // label start before it opens the title screen (nothing's saved then)
-    bool titleShown_ = false;                             // (its on_hide runs when a game starts)
+    bool splash_ = false;                                 // running "scene splashscreen"
+    bool opening_ = false;                                // scene start before it opens the title screen (nothing's saved then)
+    bool titleShown_ = false;                             // (its action_on_close runs when a game starts)
     // The scripts' animation a line names for a screen to open or close with: none said (its own), "none"
     // (null), or that one.
     std::optional<std::size_t> storyStart_;               // where New Game starts: the line after the one that opened the title screen
@@ -371,7 +408,7 @@ private:
     Mode mode_ = Mode::Title;
     std::string question_;
     std::function<void()> confirmYes_;
-    std::string notice_;
+    std::string notice_, noticePhone_; // (a message's notice: its chat)
     float noticeTime_ = 0.0f;
     std::vector<SDL_Point> windowSizes_;
     bool hasSave_ = false;
@@ -381,7 +418,7 @@ private:
     TextBlock errorTitle_, errorText_, errorHint_;
 
     std::string gameRoot_; // the game folder, or the pack, with a slash after it
-    std::string startLabel_;
+    std::string startScene_;
     std::string screenshotPath_;   // --screenshot: save one after 30 frames and quit
     std::string screenshotRequest_; // the screenshot command: saved at the end of the next frame
     std::string prefPath_;

@@ -17,9 +17,9 @@ namespace vn {
 
 namespace {
 
-constexpr std::string_view kMagic = "vnext-chart 1";
+constexpr std::string_view kMagic = "vnext-flowchart 1";
 
-// A save is several lines; in chart.txt it's one.
+// A save is several lines; in flowchart.txt it's one.
 std::string flatten(std::string_view text) {
     std::string out;
     for (char c : text) {
@@ -41,7 +41,7 @@ std::string unflatten(std::string_view text) {
 
 } // namespace
 
-void Chart::visit(const std::string& id, Kind kind, const std::string& from, int option, std::string state,
+void Flowchart::visit(const std::string& id, Kind kind, const std::string& from, int option, std::string state,
                   std::vector<Option> options) {
     auto it = std::ranges::find(nodes_, id, &Node::id);
     if (it == nodes_.end()) it = nodes_.insert(nodes_.end(), Node{.id = id, .order = static_cast<int>(nodes_.size())});
@@ -54,19 +54,19 @@ void Chart::visit(const std::string& id, Kind kind, const std::string& from, int
     changed_ = true;
 }
 
-const Chart::Node* Chart::node(std::string_view id) const {
+const Flowchart::Node* Flowchart::node(std::string_view id) const {
     auto it = std::ranges::find(nodes_, id, &Node::id);
     return it != nodes_.end() ? &*it : nullptr;
 }
 
-void Chart::clear() {
+void Flowchart::clear() {
     nodes_.clear();
     edges_.clear();
     changed_ = true;
 }
 
-// chart.txt:  node ID KIND ORDER [OPTION:OPEN ...]   state ID SAVE   edge FROM TO OPTION
-bool Chart::read(std::string_view saved) {
+// flowchart.txt:  node ID KIND ORDER [OPTION:OPEN ...]   state ID SAVE   edge FROM TO OPTION
+bool Flowchart::read(std::string_view saved) {
     nodes_.clear();
     edges_.clear();
     std::istringstream in{std::string(saved)};
@@ -99,7 +99,7 @@ bool Chart::read(std::string_view saved) {
     return true;
 }
 
-std::string Chart::text() const {
+std::string Flowchart::text() const {
     std::string out = std::format("{}\n", kMagic);
     for (const Node& n : nodes_) {
         out += std::format("node {} {} {}", n.id, static_cast<int>(n.kind), n.order);
@@ -117,7 +117,7 @@ std::string Chart::text() const {
 namespace {
 
 std::array<float, 8> values(const Stage::ObjectState& s) {
-    return {s.x, s.y, s.zoom, s.opacity, s.rotate, static_cast<float>(s.tint.r), static_cast<float>(s.tint.g), static_cast<float>(s.tint.b)};
+    return {s.x, s.y, s.zoom, s.opacity, s.rotation, static_cast<float>(s.tint.r), static_cast<float>(s.tint.g), static_cast<float>(s.tint.b)};
 }
 
 void setValues(Stage::ObjectState& s, const std::array<float, 8>& v) {
@@ -125,7 +125,7 @@ void setValues(Stage::ObjectState& s, const std::array<float, 8>& v) {
     s.y = v[1];
     s.zoom = v[2];
     s.opacity = v[3];
-    s.rotate = v[4];
+    s.rotation = v[4];
     auto u8 = [](float c) { return static_cast<Uint8>(std::clamp(std::lround(c), 0L, 255L)); };
     s.tint = {u8(v[5]), u8(v[6]), u8(v[7]), 255};
 }
@@ -145,7 +145,7 @@ void Stage::setBackground(std::string key, std::shared_ptr<const Animation> entr
 void Stage::dropPrevious() {
     previous_.clear();
     previousAnimations_ = {};
-    std::erase_if(objects_, [](const Object& o) { return o.oldScene; });
+    std::erase_if(objects_, [](const Object& o) { return o.oldBackground; });
 }
 
 Stage::Object* Stage::find(std::string_view tag) {
@@ -160,7 +160,7 @@ void Stage::apply(Object& o, const StageProps& p, float seconds, Ease ease) {
     if (p.y) target[1] = *p.y;
     if (p.zoom) target[2] = std::max(0.0f, *p.zoom);
     if (p.opacity) target[3] = std::clamp(*p.opacity, 0.0f, 1.0f);
-    if (p.rotate) target[4] = *p.rotate;
+    if (p.rotation) target[4] = *p.rotation;
     if (p.tint) target[5] = p.tint->r, target[6] = p.tint->g, target[7] = p.tint->b;
     if (p.flip) o.s.flip = *p.flip;
     if (p.layer) o.s.layer = *p.layer;
@@ -184,8 +184,8 @@ void Stage::show(const std::string& tag, const CharacterDef* def, const std::str
         o.animations.set(std::move(played), false, done || still_);
     };
     if (Object* o = find(tag)) {
-        if (o->leaving || o->oldScene) { // (going: it stays, as it was before it began to go)
-            o->leaving = o->oldScene = false;
+        if (o->leaving || o->oldBackground) { // (going: it stays, as it was before it began to go)
+            o->leaving = o->oldBackground = false;
             o->s.played.clear();
             o->animations.set(nullptr, false, true);
         }
@@ -208,7 +208,7 @@ void Stage::show(const std::string& tag, const CharacterDef* def, const std::str
 }
 
 bool Stage::has(std::string_view tag) const {
-    return std::ranges::any_of(objects_, [&](const Object& o) { return o.s.tag == tag && !o.leaving && !o.oldScene; });
+    return std::ranges::any_of(objects_, [&](const Object& o) { return o.s.tag == tag && !o.leaving && !o.oldBackground; });
 }
 
 void Stage::setExpression(std::string_view tag, const std::string& expression) {
@@ -262,9 +262,9 @@ bool Stage::Animations::going() const { return played && playedTime < played->to
 Animation::Look Stage::Animations::look(SDL_Color tint, const Animation::Offset& offset, SDL_FPoint screen) const {
     Animation::Look out;
     if (own) out = own->at(ownTime, tint, offset, screen);
-    if (played) out = out.with(playedLook(out.color.value_or(tint), offset, screen));
-    else if (playedFrom.x != 0.0f || playedFrom.y != 0.0f || playedFrom.opacity != 1.0f || playedFrom.zoom != 1.0f || playedFrom.rotate != 0.0f ||
-             playedFrom.color || playedFrom.fade > 0.0f || playedFrom.wipe < 1.0f)
+    if (played) out = out.with(playedLook(out.colour.value_or(tint), offset, screen));
+    else if (playedFrom.x != 0.0f || playedFrom.y != 0.0f || playedFrom.opacity != 1.0f || playedFrom.zoom != 1.0f || playedFrom.rotation != 0.0f ||
+             playedFrom.colour || playedFrom.fade > 0.0f || playedFrom.wipe < 1.0f)
         out = out.with(playedFrom); // (the camera: where the one before left it, when the one played now is gone from the scripts)
     return out;
 }
@@ -321,9 +321,9 @@ Animation::Look Stage::cameraStartFor(const Animation& next) const {
         case V::Y: out.y = now.y; break;
         case V::Opacity: out.opacity = now.opacity; break;
         case V::Zoom: out.zoom = now.zoom; break;
-        case V::Rotate: out.rotate = now.rotate; break;
-        case V::Color: out.color = now.color; break;
-        case V::Fade: out.fade = now.fade, out.fadeColor = now.fadeColor; break;
+        case V::Rotation: out.rotation = now.rotation; break;
+        case V::Colour: out.colour = now.colour; break;
+        case V::Fade: out.fade = now.fade, out.fadeColour = now.fadeColour; break;
         case V::Wipe: out.wipe = now.wipe, out.wipeShape = now.wipeShape; break;
         }
     return out;
@@ -368,7 +368,7 @@ void Stage::spawn(const cmd::Weather& w, std::vector<Particle>& out) {
         std::string_view name;
         int count;
         float vy0, vy1, size0, size1, sway;
-        SDL_Color color;
+        SDL_Color colour;
     };
     static constexpr std::array kinds{
         Kind{"rain", 180, 700, 1000, 14, 26, 0, {200, 216, 255, 130}},
@@ -392,7 +392,7 @@ void Stage::spawn(const cmd::Weather& w, std::vector<Particle>& out) {
         p.spin = (unit(rng_) - 0.5f) * 180.0f;
         p.phase = unit(rng_) * 6.2831853f;
         p.sway = kind->sway * (0.5f + unit(rng_));
-        p.color = w.color ? *w.color : kind->name == "leaves" ? autumn[static_cast<std::size_t>(unit(rng_) * 2.99f)] : kind->color;
+        p.colour = w.tint ? *w.tint : kind->name == "leaves" ? autumn[static_cast<std::size_t>(unit(rng_) * 2.99f)] : kind->colour;
         out.push_back(p);
     }
 }
@@ -421,12 +421,12 @@ void Stage::updateWeather(float dt) {
 void Stage::drawWeather(SDL_Renderer* r, Assets& assets) {
     auto drawAll = [&](const std::vector<Particle>& ps, const cmd::Weather& w, float alpha) {
         if (alpha <= 0.0f || ps.empty()) return;
-        const Picture pic = w.image.empty() ? Picture{} : assets.picture(w.image, {}, colorAlpha_ >= 0.5f ? colorMask_ : 0);
+        const Image pic = w.image.empty() ? Image{} : assets.image(w.image, {}, colourAlpha_ >= 0.5f ? colourMask_ : 0);
         for (const auto& p : ps) {
             const float x = p.x, y = p.y;
             float a = alpha;
             if (w.kind == "embers") a *= 0.6f + 0.4f * std::sin(clock_ * 7.0f + p.phase); // flicker
-            const SDL_Color c = withAlpha(shade(p.color), a);
+            const SDL_Color c = withAlpha(shade(p.colour), a);
             if (pic) {
                 const float s = p.size * 4.0f;
                 pic.draw(r, {x - s * 0.5f, y - s * 0.5f, s, s * pic.h() / std::max(1.0f, pic.w())}, a, p.angle);
@@ -476,24 +476,24 @@ void Stage::updateEffects(float dt) {
         const float target = want & (1u << i) ? 1.0f : 0.0f, by = sudden & (1u << i) ? 1.0f : step;
         strength_[i] = strength_[i] < target ? std::min(target, strength_[i] + by) : std::max(target, strength_[i] - by);
     }
-    const unsigned colors = want & kColorLooks;
-    const float by = sudden & kColorLooks ? 1.0f : step, target = !colors ? 0.0f : burst_ & kColorLooks ? burstAmount_ : lookAmount_;
-    if (colors) colorMask_ = colors;
-    colorAlpha_ = colorAlpha_ < target ? std::min(target, colorAlpha_ + by) : std::max(target, colorAlpha_ - by);
-    if (colorAlpha_ <= 0.0f) colorMask_ = 0;
+    const unsigned colours = want & kColourLooks;
+    const float by = sudden & kColourLooks ? 1.0f : step, target = !colours ? 0.0f : burst_ & kColourLooks ? burstAmount_ : lookAmount_;
+    if (colours) colourMask_ = colours;
+    colourAlpha_ = colourAlpha_ < target ? std::min(target, colourAlpha_ + by) : std::max(target, colourAlpha_ - by);
+    if (colourAlpha_ <= 0.0f) colourMask_ = 0;
 }
 
-void Stage::paint(Assets& assets, std::string_view name, Frame frame, const std::function<void(const Picture&, float)>& draw) const {
-    if (colorAlpha_ < 1.0f)
-        if (const Picture pic = assets.picture(name, frame)) draw(pic, 1.0f);
-    if (colorAlpha_ > 0.0f)
-        if (const Picture pic = assets.picture(name, frame, colorMask_)) draw(pic, colorAlpha_);
+void Stage::paint(Assets& assets, std::string_view name, Frame frame, const std::function<void(const Image&, float)>& draw) const {
+    if (colourAlpha_ < 1.0f)
+        if (const Image pic = assets.image(name, frame)) draw(pic, 1.0f);
+    if (colourAlpha_ > 0.0f)
+        if (const Image pic = assets.image(name, frame, colourMask_)) draw(pic, colourAlpha_);
 }
 
 SDL_Color Stage::shade(SDL_Color c, bool tint) const {
-    if (colorAlpha_ <= 0.0f) return c;
-    const SDL_Color to = looked(c, tint ? colorMask_ & ~kLookInvert : colorMask_);
-    auto mix = [&](Uint8 a, Uint8 b) { return static_cast<Uint8>(std::lround(std::lerp(static_cast<float>(a), static_cast<float>(b), colorAlpha_))); };
+    if (colourAlpha_ <= 0.0f) return c;
+    const SDL_Color to = looked(c, tint ? colourMask_ & ~kLookInvert : colourMask_);
+    auto mix = [&](Uint8 a, Uint8 b) { return static_cast<Uint8>(std::lround(std::lerp(static_cast<float>(a), static_cast<float>(b), colourAlpha_))); };
     return {mix(c.r, to.r), mix(c.g, to.g), mix(c.b, to.b), c.a};
 }
 
@@ -559,7 +559,7 @@ void Stage::drawEffects(SDL_Renderer* r, SDL_Texture* view) {
         }
 }
 
-// TV static: a picture of random dots, a different part of it each frame.
+// TV static: an image of random dots, a different part of it each frame.
 void Stage::drawNoise(SDL_Renderer* r, float alpha) {
     constexpr int w = 960, h = 540; // grains of grey; a part of them, somewhere else each frame, covers the stage
     if (!noise_) {
@@ -578,7 +578,7 @@ void Stage::drawNoise(SDL_Renderer* r, float alpha) {
 }
 
 void Stage::clearObjects() {
-    for (auto& o : objects_) o.oldScene = true;
+    for (auto& o : objects_) o.oldBackground = true;
 }
 
 void Stage::reset() {
@@ -643,7 +643,7 @@ void Stage::finish() {
 std::vector<Stage::ObjectState> Stage::objects() const {
     std::vector<ObjectState> out;
     for (const auto& o : objects_) {
-        if (o.leaving || o.oldScene) continue;
+        if (o.leaving || o.oldBackground) continue;
         ObjectState s = o.s;
         if (o.tweenTime < 1.0f) setValues(s, o.to); // save where it is going
         out.push_back(std::move(s));
@@ -657,7 +657,7 @@ TextBlock& Stage::label(const Font& font, const std::string& text) {
     return it->second;
 }
 
-void Stage::draw(SDL_Renderer* r, Assets& assets, const Font& labelFont, bool labels, float spriteHeight, const FrameOf& frameOf) {
+void Stage::draw(SDL_Renderer* r, Assets& assets, const Font& labelFont, bool labels, float characterHeight, const FrameOf& frameOf) {
     const Font* font = labels ? &labelFont : nullptr;
     // Blur, pixelate and glitch work on the stage drawn into a texture first.
     SDL_Texture* view = nullptr;
@@ -672,7 +672,7 @@ void Stage::draw(SDL_Renderer* r, Assets& assets, const Font& labelFont, bool la
             SDL_RenderClear(r);
         }
     }
-    drawView(r, assets, font, spriteHeight, frameOf);
+    drawView(r, assets, font, characterHeight, frameOf);
     if (view) {
         into.reset();
         drawEffects(r, view);
@@ -680,10 +680,10 @@ void Stage::draw(SDL_Renderer* r, Assets& assets, const Font& labelFont, bool la
     if (strength(kLookNoise) > 0.0f) drawNoise(r, 0.35f * strength(kLookNoise) * (burst_ & kLookNoise ? burstAmount_ : lookAmount_));
 }
 
-void Stage::drawView(SDL_Renderer* r, Assets& assets, const Font* font, float spriteHeight, const FrameOf& frameOf) {
+void Stage::drawView(SDL_Renderer* r, Assets& assets, const Font* font, float characterHeight, const FrameOf& frameOf) {
     const Animation::Look look = cameraLook();
-    if (look.x == 0.0f && look.y == 0.0f && look.zoom == 1.0f && look.rotate == 0.0f && look.opacity >= 1.0f && !look.color && look.fade <= 0.0f && look.wipe >= 0.999f)
-        return drawScene(r, assets, font, spriteHeight, frameOf);
+    if (look.x == 0.0f && look.y == 0.0f && look.zoom == 1.0f && look.rotation == 0.0f && look.opacity >= 1.0f && !look.colour && look.fade <= 0.0f && look.wipe >= 0.999f)
+        return drawStage(r, assets, font, characterHeight, frameOf);
     // The camera's animations have it moved (or fading, tinting, covering or wiping the stage): the stage
     // is drawn into a texture (sharp enough for its zoom), then that is zoomed and turned around the point
     // the camera looks at.
@@ -692,13 +692,13 @@ void Stage::drawView(SDL_Renderer* r, Assets& assets, const Font* font, float sp
     const float density = std::max(1.0f, std::min(static_cast<float>(outW) / canvas.w, static_cast<float>(outH) / canvas.h));
     const float zoom = std::max(look.zoom, 0.1f);
     const float scale = std::min(density * std::max(1.0f, zoom), 8192.0f / std::max(canvas.w, canvas.h));
-    SDL_Texture* scene = canvasTexture(r, scene_, static_cast<int>(std::ceil(canvas.w * scale)), static_cast<int>(std::ceil(canvas.h * scale)));
-    if (!scene) return drawScene(r, assets, font, spriteHeight, frameOf);
+    SDL_Texture* drawn = canvasTexture(r, drawn_, static_cast<int>(std::ceil(canvas.w * scale)), static_cast<int>(std::ceil(canvas.h * scale)));
+    if (!drawn) return drawStage(r, assets, font, characterHeight, frameOf);
     {
-        const RenderTarget _(r, scene, scale);
+        const RenderTarget _(r, drawn, scale);
         SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
         SDL_RenderClear(r);
-        drawScene(r, assets, font, spriteHeight, frameOf);
+        drawStage(r, assets, font, characterHeight, frameOf);
     }
     // Keep the view inside the stage when zoomed in (turning still shows its corners).
     const float half = 0.5f / zoom, x = 0.5f + look.x / canvas.w, y = 0.5f + look.y / canvas.h;
@@ -708,28 +708,28 @@ void Stage::drawView(SDL_Renderer* r, Assets& assets, const Font* font, float sp
     const SDL_FRect dst{canvas.w * 0.5f - fx * canvas.w * zoom, canvas.h * 0.5f - fy * canvas.h * zoom, canvas.w * zoom, canvas.h * zoom};
     const SDL_FPoint pivot{fx * canvas.w * zoom, fy * canvas.h * zoom};
     const float seen = std::clamp(look.opacity, 0.0f, 1.0f);
-    const SDL_Color tint = shade(look.color.value_or(SDL_Color{255, 255, 255, 255}), true);
-    SDL_SetTextureColorMod(scene, tint.r, tint.g, tint.b);
-    SDL_SetTextureAlphaMod(scene, static_cast<Uint8>(std::lround(seen * 255.0f)));
+    const SDL_Color tint = shade(look.colour.value_or(SDL_Color{255, 255, 255, 255}), true);
+    SDL_SetTextureColorMod(drawn, tint.r, tint.g, tint.b);
+    SDL_SetTextureAlphaMod(drawn, static_cast<Uint8>(std::lround(seen * 255.0f)));
     auto paint = [&] {
-        SDL_RenderTextureRotated(r, scene, &src, &dst, look.rotate, &pivot, SDL_FLIP_NONE);
-        if (look.fade > 0.0f) draw::rect(r, whole(), withAlpha(shade(look.fadeColor), seen * std::min(1.0f, look.fade))); // (covered with a colour)
+        SDL_RenderTextureRotated(r, drawn, &src, &dst, look.rotation, &pivot, SDL_FLIP_NONE);
+        if (look.fade > 0.0f) draw::rect(r, whole(), withAlpha(shade(look.fadeColour), seen * std::min(1.0f, look.fade))); // (covered with a colour)
     };
     if (look.wipe >= 0.999f) paint();
     else cameraWiper_.draw(r, assets, {canvas.w, canvas.h}, whole(), look.wipe, look.wipeShape, paint);
-    SDL_SetTextureColorMod(scene, 255, 255, 255);
-    SDL_SetTextureAlphaMod(scene, 255);
+    SDL_SetTextureColorMod(drawn, 255, 255, 255);
+    SDL_SetTextureAlphaMod(drawn, 255);
 }
 
-void Stage::drawScene(SDL_Renderer* r, Assets& assets, const Font* font, float spriteHeight, const FrameOf& frameOf) {
+void Stage::drawStage(SDL_Renderer* r, Assets& assets, const Font* font, float characterHeight, const FrameOf& frameOf) {
     // What's on stage, in its layers (and, among those, in the order they came).
     auto drawObjects = [&](bool old) {
         std::vector<const Object*> sorted;
         sorted.reserve(objects_.size());
         for (const auto& o : objects_)
-            if (o.oldScene == old) sorted.push_back(&o);
+            if (o.oldBackground == old) sorted.push_back(&o);
         std::ranges::stable_sort(sorted, [](const Object* a, const Object* b) { return a->s.layer != b->s.layer ? a->s.layer < b->s.layer : a->order < b->order; });
-        for (const Object* o : sorted) drawObject(r, assets, font, *o, spriteHeight, frameOf ? frameOf(o->s) : Frame{});
+        for (const Object* o : sorted) drawObject(r, assets, font, *o, characterHeight, frameOf ? frameOf(o->s) : Frame{});
     };
     // The background before, with what was on stage then, under the new one while it comes in.
     if (!previous_.empty()) {
@@ -762,12 +762,12 @@ void Stage::drawBackground(SDL_Renderer* r, Assets& assets, const Font* font, bo
         return Placed{{box.x + look.x + (box.w - w) / 2, box.y + look.y + (box.h - h) / 2, w, h}, {w / 2, h / 2}, look, std::clamp(look.opacity, 0.0f, 1.0f)};
     };
     auto tinted = [](SDL_Color c, const Animation::Look& look) { // (multiplied by its animations' colour)
-        if (!look.color) return c;
+        if (!look.colour) return c;
         auto times = [](Uint8 a, Uint8 b) { return static_cast<Uint8>(a * b / 255); };
-        return SDL_Color{times(c.r, look.color->r), times(c.g, look.color->g), times(c.b, look.color->b), c.a};
+        return SDL_Color{times(c.r, look.colour->r), times(c.g, look.colour->g), times(c.b, look.colour->b), c.a};
     };
     auto covered = [&](const Placed& at) {
-        if (at.look.fade > 0.0f) draw::rect(r, at.box, withAlpha(shade(at.look.fadeColor), at.alpha * std::min(1.0f, at.look.fade)));
+        if (at.look.fade > 0.0f) draw::rect(r, at.box, withAlpha(shade(at.look.fadeColour), at.alpha * std::min(1.0f, at.look.fade)));
     };
 
     auto wiped = [&](const Placed& at, const auto& paint) { // (a std::function made only for a wipe)
@@ -777,29 +777,29 @@ void Stage::drawBackground(SDL_Renderer* r, Assets& assets, const Font* font, bo
 
     if (key.starts_with('#')) { // a colour, or "#top-#bottom": one fading down to another
         const Placed at = placed(screen);
-        auto colorOf = [&](std::string_view text) { return withAlpha(shade(tinted(parseColor(text).value_or(SDL_Color{0, 0, 0, 255}), at.look)), at.alpha); };
+        auto colourOf = [&](std::string_view text) { return withAlpha(shade(tinted(parseColour(text).value_or(SDL_Color{0, 0, 0, 255}), at.look)), at.alpha); };
         wiped(at, [&] {
             if (const auto dash = key.find('-'); dash != std::string::npos) {
-                draw::gradient(r, at.box, colorOf(key.substr(0, dash)), colorOf(key.substr(dash + 1)));
+                draw::gradient(r, at.box, colourOf(key.substr(0, dash)), colourOf(key.substr(dash + 1)));
             } else {
-                const float turn = at.look.rotate * std::numbers::pi_v<float> / 180.0f, c = std::cos(turn), s = std::sin(turn);
+                const float turn = at.look.rotation * std::numbers::pi_v<float> / 180.0f, c = std::cos(turn), s = std::sin(turn);
                 const SDL_FPoint mid{at.box.x + at.pivot.x, at.box.y + at.pivot.y};
                 auto corner = [&](float x, float y) { return SDL_FPoint{mid.x + x * c - y * s, mid.y + x * s + y * c}; };
                 const float hw = at.box.w / 2, hh = at.box.h / 2;
-                draw::quad(r, corner(-hw, -hh), corner(hw, -hh), corner(hw, hh), corner(-hw, hh), colorOf(key));
+                draw::quad(r, corner(-hw, -hh), corner(hw, -hh), corner(hw, hh), corner(-hw, hh), colourOf(key));
             }
             covered(at);
         });
         return;
     }
-    if (assets.picture(key)) {
-        paint(assets, key, {}, [&](const Picture& pic, float a) {
+    if (assets.image(key)) {
+        paint(assets, key, {}, [&](const Image& pic, float a) {
             const float w = pic.w(), h = pic.h();
             const float scale = std::max(canvas.w / w, canvas.h / h); // cover
             const Placed at = placed({screen.x + (canvas.w - w * scale) * 0.5f, screen.y + (canvas.h - h * scale) * 0.5f, w * scale, h * scale});
             wiped(at, [&] {
-                pic.draw(r, at.box, at.alpha * a, at.look.rotate, &at.pivot, false, shade(at.look.color.value_or(SDL_Color{255, 255, 255, 255}), true));
-                if (at.look.fade > 0.0f) drawCovered(r, pic, at.box, at.look.rotate, at.pivot, false, shade(at.look.fadeColor), at.alpha * a * std::min(1.0f, at.look.fade));
+                pic.draw(r, at.box, at.alpha * a, at.look.rotation, &at.pivot, false, shade(at.look.colour.value_or(SDL_Color{255, 255, 255, 255}), true));
+                if (at.look.fade > 0.0f) drawCovered(r, pic, at.box, at.look.rotation, at.pivot, false, shade(at.look.fadeColour), at.alpha * a * std::min(1.0f, at.look.fade));
             });
         });
         return;
@@ -817,22 +817,22 @@ void Stage::drawBackground(SDL_Renderer* r, Assets& assets, const Font* font, bo
     });
 }
 
-void Stage::drawObject(SDL_Renderer* r, Assets& assets, const Font* font, const Object& o, float spriteHeight, Frame frame) {
+void Stage::drawObject(SDL_Renderer* r, Assets& assets, const Font* font, const Object& o, float characterHeight, Frame frame) {
     const ObjectState& s = o.s;
     const float alpha = s.opacity;
     if (alpha <= 0.0f) return;
     const bool character = !s.character.empty();
     std::string key = s.image;
     if (character) {
-        key = o.def.pictureOf(s.expression);
-        if (!assets.picture(key, frame) && !s.expression.empty() && assets.picture(o.def.image, frame)) key = o.def.image;
+        key = o.def.imageOf(s.expression);
+        if (!assets.image(key, frame) && !s.expression.empty() && assets.image(o.def.image, frame)) key = o.def.image;
     }
-    // The point of the picture as far across (and down) it as its place is across the screen goes
+    // The point of the image as far across (and down) it as its place is across the screen goes
     // there: 0 lines up the left edges, 0.5 the middles. Past the edges it slides on, still lined up.
     const float px = s.x * canvas.w, py = s.y * canvas.h;
     const float ax = std::clamp(s.x, 0.0f, 1.0f), ay = std::clamp(s.y, 0.0f, 1.0f);
     // Its animations move it, fade it, zoom and turn it around that point (as its own zoom and turn
-    // do), tint it, cover it with a colour and wipe it: where a picture `w` x `h` (as it is) goes, and how
+    // do), tint it, cover it with a colour and wipe it: where an image `w` x `h` (as it is) goes, and how
     // it looks.
     struct Placed {
         SDL_FRect box;
@@ -849,14 +849,14 @@ void Stage::drawObject(SDL_Renderer* r, Assets& assets, const Font* font, const 
         wiper_.draw(r, assets, {canvas.w, canvas.h}, at.box, at.look.wipe, at.look.wipeShape, paint);
     };
 
-    if (assets.picture(key, frame)) {
-        paint(assets, key, frame, [&](const Picture& pic, float a) {
-            const float scale = (character ? std::min(1.0f, canvas.h * spriteHeight / pic.h()) : 1.0f) * s.zoom;
+    if (assets.image(key, frame)) {
+        paint(assets, key, frame, [&](const Image& pic, float a) {
+            const float scale = (character ? std::min(1.0f, canvas.h * characterHeight / pic.h()) : 1.0f) * s.zoom;
             const Placed at = placed(pic.w() * scale, pic.h() * scale);
-            const float seen = alpha * a * std::clamp(at.look.opacity, 0.0f, 1.0f), turn = s.rotate + at.look.rotate;
+            const float seen = alpha * a * std::clamp(at.look.opacity, 0.0f, 1.0f), turn = s.rotation + at.look.rotation;
             wiped(at, [&] {
-                pic.draw(r, at.box, seen, turn, &at.pivot, s.flip, shade(at.look.color.value_or(s.tint), true));
-                if (at.look.fade > 0.0f) drawCovered(r, pic, at.box, turn, at.pivot, s.flip, shade(at.look.fadeColor), seen * std::min(1.0f, at.look.fade));
+                pic.draw(r, at.box, seen, turn, &at.pivot, s.flip, shade(at.look.colour.value_or(s.tint), true));
+                if (at.look.fade > 0.0f) drawCovered(r, pic, at.box, turn, at.pivot, s.flip, shade(at.look.fadeColour), seen * std::min(1.0f, at.look.fade));
             });
         });
         return;
@@ -866,7 +866,7 @@ void Stage::drawObject(SDL_Renderer* r, Assets& assets, const Font* font, const 
     if (!character) {
         // Placeholder image: a tinted panel with its file name.
         const Placed at = placed(canvas.w * 0.5f * s.zoom, canvas.h * 0.5f * s.zoom);
-        const SDL_Color tint = at.look.color.value_or(s.tint);
+        const SDL_Color tint = at.look.colour.value_or(s.tint);
         auto look = [&](SDL_Color c) {
             auto times = [](Uint8 a, Uint8 b) { return static_cast<Uint8>(a * b / 255); };
             return shade({times(c.r, tint.r), times(c.g, tint.g), times(c.b, tint.b), c.a});
@@ -876,7 +876,7 @@ void Stage::drawObject(SDL_Renderer* r, Assets& assets, const Font* font, const 
         wiped(at, [&] {
             const float hue = static_cast<float>(fnv1a(key) % 1000) / 1000.0f;
             draw::gradient(r, rr, look(draw::hsv(hue, 0.3f, 0.55f, static_cast<Uint8>(230 * seen))), look(draw::hsv(hue + 0.1f, 0.5f, 0.25f, static_cast<Uint8>(230 * seen))));
-            if (at.look.fade > 0.0f) draw::rect(r, rr, withAlpha(shade(at.look.fadeColor), seen * std::min(1.0f, at.look.fade)));
+            if (at.look.fade > 0.0f) draw::rect(r, rr, withAlpha(shade(at.look.fadeColour), seen * std::min(1.0f, at.look.fade)));
             draw::outline(r, rr, withAlpha({255, 255, 255, 90}, seen));
             if (font) {
                 auto& file = label(*font, std::format("images/{}.png", key));
@@ -888,28 +888,28 @@ void Stage::drawObject(SDL_Renderer* r, Assets& assets, const Font* font, const 
 
     // Placeholder silhouette in the character's colour.
     const Placed at = placed(300.0f * s.zoom, 506.0f * s.zoom);
-    const SDL_Color tint = at.look.color.value_or(s.tint);
+    const SDL_Color tint = at.look.colour.value_or(s.tint);
     auto look = [&](SDL_Color c) {
         auto times = [](Uint8 a, Uint8 b) { return static_cast<Uint8>(a * b / 255); };
         const SDL_Color tinted = shade({times(c.r, tint.r), times(c.g, tint.g), times(c.b, tint.b), c.a});
         auto toward = [&](Uint8 from, Uint8 to) { return static_cast<Uint8>(std::lround(from + (to - from) * std::clamp(at.look.fade, 0.0f, 1.0f))); };
-        const SDL_Color cover = shade(at.look.fadeColor);
+        const SDL_Color cover = shade(at.look.fadeColour);
         return SDL_Color{toward(tinted.r, cover.r), toward(tinted.g, cover.g), toward(tinted.b, cover.b), tinted.a};
     };
     const float alphaSeen = alpha * std::clamp(at.look.opacity, 0.0f, 1.0f);
     const float k = s.zoom * std::max(0.0f, at.look.zoom), w = at.box.w, h = at.box.h;
     const float cx = at.box.x + w * 0.5f, bottom = at.box.y + h;
-    const SDL_Color body = withAlpha(look({static_cast<Uint8>(o.def.color.r * 0.55f), static_cast<Uint8>(o.def.color.g * 0.55f),
-                                           static_cast<Uint8>(o.def.color.b * 0.55f), 235}),
+    const SDL_Color body = withAlpha(look({static_cast<Uint8>(o.def.nameColour.r * 0.55f), static_cast<Uint8>(o.def.nameColour.g * 0.55f),
+                                           static_cast<Uint8>(o.def.nameColour.b * 0.55f), 235}),
                                      alphaSeen);
-    const SDL_Color rim = withAlpha(look(o.def.color), alphaSeen * 0.9f);
+    const SDL_Color rim = withAlpha(look(o.def.nameColour), alphaSeen * 0.9f);
     wiped(at, [&] {
         draw::quad(r, {cx - 105 * k, bottom - 345 * k}, {cx + 105 * k, bottom - 345 * k}, {cx + 150 * k, bottom}, {cx - 150 * k, bottom}, body);
         draw::circle(r, cx, bottom - 440 * k, 66 * k, rim);
         draw::circle(r, cx, bottom - 440 * k, 60 * k, body);
         if (!font) return;
         auto& name = label(*font, o.def.name);
-        name.draw(r, cx - name.size().x * 0.5f, bottom - 300 * k, withAlpha(o.def.color, alphaSeen));
+        name.draw(r, cx - name.size().x * 0.5f, bottom - 300 * k, withAlpha(o.def.nameColour, alphaSeen));
         auto& file = label(*font, std::format("images/{}.png", key));
         file.draw(r, cx - file.size().x * 0.5f, bottom - 300 * k + font->lineHeight(), withAlpha(theme::dim, alphaSeen));
     });
@@ -923,10 +923,10 @@ Animation::Look Stage::lookOf(const Animations& animations, SDL_Color tint, cons
     return animations.look(tint, offset, {canvas.w, canvas.h});
 }
 
-void Stage::drawCovered(SDL_Renderer* r, const Picture& pic, const SDL_FRect& box, float angle, const SDL_FPoint& pivot, bool flip, SDL_Color color,
+void Stage::drawCovered(SDL_Renderer* r, const Image& pic, const SDL_FRect& box, float angle, const SDL_FPoint& pivot, bool flip, SDL_Color colour,
                         float amount) {
     if (amount <= 0.0f || box.w <= 0.0f || box.h <= 0.0f) return;
-    // Drawn into a picture of its own (as sharp as the screen), its colours replaced by the one and its
+    // Drawn into an image of its own (as sharp as the screen), its colours replaced by the one and its
     // see-through parts kept, then that is laid over it.
     static const SDL_BlendMode fill = SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ZERO, SDL_BLENDOPERATION_ADD,
                                                                  SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_ADD);
@@ -947,13 +947,13 @@ void Stage::drawCovered(SDL_Renderer* r, const Picture& pic, const SDL_FRect& bo
         SDL_RenderClear(r);
         pic.draw(r, {0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h)}, 1.0f, 0.0, nullptr, flip);
         if (SDL_SetRenderDrawBlendMode(r, fill)) {
-            SDL_SetRenderDrawColor(r, color.r, color.g, color.b, 255);
+            SDL_SetRenderDrawColor(r, colour.r, colour.g, colour.b, 255);
             const SDL_FRect all{0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h)};
             filled = SDL_RenderFillRect(r, &all);
         }
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
     }
-    if (!filled) return pic.draw(r, box, amount, angle, &pivot, flip, color);
+    if (!filled) return pic.draw(r, box, amount, angle, &pivot, flip, colour);
     const SDL_FRect part{0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h)};
     SDL_SetTextureAlphaModFloat(cover_.get(), amount);
     SDL_RenderTextureRotated(r, cover_.get(), &part, &box, angle, &pivot, SDL_FLIP_NONE);
@@ -967,7 +967,7 @@ void Stage::drawCovered(SDL_Renderer* r, const Picture& pic, const SDL_FRect& bo
 namespace {
 
 constexpr int kInstructionBudget = 100000;
-constexpr std::string_view kSaveMagic = "vnext-save 2";
+constexpr std::string_view kSaveMagic = "vnext-save 3";
 
 // Saves keep one value per line: spaces, backslashes and newlines are escaped.
 std::string escape(std::string_view s) {
@@ -976,6 +976,45 @@ std::string escape(std::string_view s) {
 
 std::string unescape(std::string_view s) {
     return toString(decodeValue(std::format("s {}", s)));
+}
+
+// A text as one word of a save line (spaces and all; nothing: "~"), and back.
+std::string field(std::string_view s) { return s.empty() ? std::string("~") : "=" + escape(s); }
+std::string unfield(std::string_view s) { return s.size() < 2 || s.front() != '=' ? std::string{} : unescape(s.substr(1)); }
+
+// An image on stage as a save has it ("object TAG char=... x=..."), and read back (after "object").
+std::string objectLine(const Stage::ObjectState& o) {
+    return std::format("object {} char={} image={} expr={} x={} y={} zoom={} alpha={} rotation={} flip={} layer={} tint=#{:02x}{:02x}{:02x}{}{}\n",
+                       escape(o.tag), escape(o.character), escape(o.image), escape(o.expression), std::lround(o.x * 10000.0f),
+                       std::lround(o.y * 10000.0f), std::lround(o.zoom * 10000.0f), std::lround(o.opacity * 10000.0f), std::lround(o.rotation * 100.0f),
+                       o.flip ? 1 : 0, o.layer, o.tint.r, o.tint.g, o.tint.b, o.animation.empty() ? "" : " animation=" + escape(o.animation),
+                       o.played.empty() ? "" : " played=" + escape(o.played));
+}
+Stage::ObjectState readObject(std::istream& ls) {
+    Stage::ObjectState o;
+    std::string tag, field;
+    ls >> tag;
+    o.tag = unescape(tag);
+    while (ls >> field) {
+        const auto eq = field.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = field.substr(0, eq), v = unescape(field.substr(eq + 1));
+        const float n = static_cast<float>(toInt(v));
+        if (k == "char") o.character = v;
+        else if (k == "image") o.image = v;
+        else if (k == "expr") o.expression = v;
+        else if (k == "x") o.x = n / 10000.0f;
+        else if (k == "y") o.y = n / 10000.0f;
+        else if (k == "zoom") o.zoom = n / 10000.0f;
+        else if (k == "alpha") o.opacity = n / 10000.0f;
+        else if (k == "rotation") o.rotation = n / 100.0f;
+        else if (k == "flip") o.flip = n != 0.0f;
+        else if (k == "layer") o.layer = static_cast<int>(n);
+        else if (k == "tint") o.tint = parseColour(v).value_or(o.tint);
+        else if (k == "animation") o.animation = v;
+        else if (k == "played") o.played = v;
+    }
+    return o;
 }
 
 } // namespace
@@ -991,6 +1030,10 @@ void Game::start(std::size_t pc, bool subroutine) {
     choiceItems_.clear();
     trigger_.reset();
     pass_.reset();
+    asked_.reset();
+    parked_.reset();
+    chatOpen_.clear();
+    putAway_.clear();
     hiddenLines_ = 0;
     others_.clear();
     together_ = false;
@@ -998,18 +1041,21 @@ void Game::start(std::size_t pc, bool subroutine) {
     screens_.clear();
     textboxScreen_.clear();
     page_.clear();
-    messages_.clear();
-    phoneOn_ = true;
+    phone_ = {};
+    call_.reset();
+    chat_.clear();
+    change_.reset();
+    messageCount_ = arrivals_ = chatWait_ = 0;
     loops_.clear();
     expressions_.clear();
     error_.clear();
     music_.clear();
     chapter_.clear();
-    chartNode_.clear();
-    chartOption_ = -1;
+    flowchartNode_.clear();
+    flowchartOption_ = -1;
     pendingVoice_.reset();
     past_.clear();
-    ctx_.audio.stopAll(0.5f);
+    ctx_.sound.stopAll(0.5f);
     if (subroutine) callStack_.push_back(script_.code.size()); // its "return" ends the game
     pc_ = resumePc_ = pc;
     wait_ = Wait::None;
@@ -1017,7 +1063,7 @@ void Game::start(std::size_t pc, bool subroutine) {
 }
 
 bool Game::skipping() const {
-    return skip_ || (config().skipHold != 0 && (SDL_GetModState() & config().skipHold) != 0);
+    return skip_ || (gameSettings().holdToSkip != 0 && (SDL_GetModState() & gameSettings().holdToSkip) != 0);
 }
 
 std::string Game::summary() const {
@@ -1080,10 +1126,25 @@ void Game::waitFor(Wait wait, std::size_t here) {
     wait_ = wait;
 }
 
+namespace {
+// The computer's clock, as a phone shows it: "20:41".
+std::string clockNow() {
+    SDL_Time now = 0;
+    SDL_DateTime t{};
+    if (!SDL_GetCurrentTime(&now) || !SDL_TimeToDateTime(now, &t, true)) return {};
+    return std::format("{}:{:02}", t.hour, t.minute);
+}
+} // namespace
+
 Value Game::variable(std::string_view name) const {
-    if (const auto it = vars_.find(name); it != vars_.end()) return it->second;
-    if (const auto it = ctx_.persistent.find(name); it != ctx_.persistent.end()) return it->second;
-    if (const auto it = script_.startValues.find(name); it != script_.startValues.end()) return it->second;
+    if (item_)
+        if (const auto it = item_->find(name); it != item_->end()) return it->second;
+    const Value* kept = nullptr;
+    if (const auto it = vars_.find(name); it != vars_.end()) kept = &it->second;
+    else if (const auto p = ctx_.persistent.find(name); p != ctx_.persistent.end()) kept = &p->second;
+    else if (const auto s = script_.startValues.find(name); s != script_.startValues.end()) kept = &s->second;
+    if (name == "phone_clock" && (!kept || toString(*kept).empty())) return clockNow(); // (none: the computer's clock)
+    if (kept) return *kept;
     if (ctx_.builtin)
         if (auto v = ctx_.builtin(name)) return *v;
     return 0;
@@ -1100,24 +1161,26 @@ void Game::setVariable(const std::string& name, Value value) {
 
 RichText richText(std::string_view source, const Lookup& lookup, const Palette* palette, const TagHandler& other) {
     RichText out;
-    std::vector<std::pair<std::size_t, SDL_Color>> colors;              // open {color} tags
-    std::map<std::string, std::vector<std::size_t>, std::less<>> styles; // open {bold} {italic} {underline} {strike}
-    std::vector<std::pair<std::size_t, std::string>> rubies;             // open {ruby READING} tags
+    std::vector<std::pair<std::size_t, SDL_Color>> colours;              // open {colour} tags
+    std::map<std::string, std::vector<std::size_t>, std::less<>> styles; // open {bold} {italic} {underline} {crossed_out}
+    std::vector<std::pair<std::size_t, std::string>> rubies;             // open {furigana READING} tags
     std::vector<std::size_t> tips;                                       // open {tip NAME} tags
-    // A tip's words: underlined, in the colour called "tip" ("color tip ...", in the built-in menus).
+    // A tip's words: underlined, in the colour called "tip" ("colour tip ...", in the built-in menus).
     auto tip = [&](std::size_t begin, std::size_t end) {
-        out.spans.push_back({.begin = begin, .end = end, .color = parseColor("tip", palette).value_or(SDL_Color{126, 200, 255, 255}),
+        out.spans.push_back({.begin = begin, .end = end, .colour = parseColour("tip", palette).value_or(SDL_Color{126, 200, 255, 255}),
                              .style = TTF_STYLE_UNDERLINE});
     };
     static const std::map<std::string, TTF_FontStyleFlags, std::less<>> kStyles{
-        {"bold", TTF_STYLE_BOLD}, {"italic", TTF_STYLE_ITALIC}, {"underline", TTF_STYLE_UNDERLINE}, {"strike", TTF_STYLE_STRIKETHROUGH}};
+        {"bold", TTF_STYLE_BOLD}, {"italic", TTF_STYLE_ITALIC}, {"underline", TTF_STYLE_UNDERLINE}, {"crossed_out", TTF_STYLE_STRIKETHROUGH}};
     out.text = expand(source, lookup, [&](std::string_view tag, std::string_view arg, std::size_t at) {
-        if (tag == "color") {
-            colors.emplace_back(at, parseColor(arg, palette).value_or(SDL_Color{255, 255, 255, 255}));
-        } else if (tag == "/color") {
-            if (colors.empty()) return;
-            out.spans.push_back({.begin = colors.back().first, .end = at, .color = colors.back().second});
-            colors.pop_back();
+        if (tag == "colour") { // (a colour, or a value holding one: {colour chat.colour})
+            auto colour = parseColour(arg, palette);
+            if (!colour && !arg.empty()) colour = parseColour(toString(lookup(trim(arg))), palette);
+            colours.emplace_back(at, colour.value_or(SDL_Color{255, 255, 255, 255}));
+        } else if (tag == "/colour") {
+            if (colours.empty()) return;
+            out.spans.push_back({.begin = colours.back().first, .end = at, .colour = colours.back().second});
+            colours.pop_back();
         } else if (kStyles.contains(tag)) {
             styles[std::string(tag)].push_back(at);
         } else if (tag.starts_with('/') && kStyles.contains(tag.substr(1))) {
@@ -1125,9 +1188,9 @@ RichText richText(std::string_view source, const Lookup& lookup, const Palette* 
             if (open.empty()) return;
             out.spans.push_back({.begin = open.back(), .end = at, .style = kStyles.at(std::string(tag.substr(1)))});
             open.pop_back();
-        } else if (tag == "ruby") {
+        } else if (tag == "furigana") {
             rubies.emplace_back(at, std::string(arg));
-        } else if (tag == "/ruby") {
+        } else if (tag == "/furigana") {
             if (rubies.empty()) return;
             out.spans.push_back({.begin = rubies.back().first, .end = at, .ruby = rubies.back().second});
             rubies.pop_back();
@@ -1142,7 +1205,7 @@ RichText richText(std::string_view source, const Lookup& lookup, const Palette* 
         }
     });
     const std::size_t length = utf8::length(out.text); // unclosed tags run to the end
-    for (const auto& [start, col] : colors) out.spans.push_back({.begin = start, .end = length, .color = col});
+    for (const auto& [start, col] : colours) out.spans.push_back({.begin = start, .end = length, .colour = col});
     for (const auto& [tag, starts] : styles)
         for (auto start : starts) out.spans.push_back({.begin = start, .end = length, .style = kStyles.at(tag)});
     for (auto start : tips) tip(start, length);
@@ -1150,17 +1213,17 @@ RichText richText(std::string_view source, const Lookup& lookup, const Palette* 
 }
 
 // Starts a new line: fills in {expressions} and reads its text tags.
-void Game::say(std::string speaker, SDL_Color color, std::string_view text, const CharacterDef* def) {
+void Game::say(std::string speaker, SDL_Color colour, std::string_view text, const CharacterDef* def) {
     speaker_ = std::move(speaker);
     speakerKey_ = def ? def->key : std::string{};
-    speakerColor_ = color;
-    voiced_ = syncVoice_ = typing_ = false;
+    speakerColour_ = colour;
+    voiced_ = textFollowsVoice_ = typing_ = false;
     lineTime_ = 0.0f;
-    textColor_ = def ? def->textColor : std::nullopt;
+    textColour_ = def ? def->textColour : std::nullopt;
     textbox_ = boxOf(def);
     source_ = fillValues(text, lookup_);
-    blip_ = def ? def->blip : std::string{};
-    revealMode_ = def && def->reveal ? *def->reveal : config().reveal;
+    typingSound_ = def ? def->typingSound : std::string{};
+    revealMode_ = def && def->textAppears ? *def->textAppears : gameSettings().textAppears;
     face_ = faceBase_ = faceSide_ = {};
     if (def && !def->face.empty()) {
         faceSide_ = def->faceSide;
@@ -1174,10 +1237,10 @@ void Game::say(std::string speaker, SDL_Color color, std::string_view text, cons
     RichText rich = richText(text, lookup_, &script_.palette, [&](std::string_view tag, std::string_view arg, std::size_t at) {
         const auto n = parseNumber(arg);
         if (tag == "pause") stops_.push_back({at, n ? std::max(0.0f, *n) : -1.0f});
-        else if (tag == "nowait") noWait_ = true;
+        else if (tag == "no_wait") noWait_ = true;
         else if (tag == "speed") speeds_.push_back({at, n ? std::max(0, static_cast<int>(*n)) : -1});
         else if (tag == "/speed") speeds_.push_back({at, -1});
-        else if (tag == "reveal") revealMode_ = arg == "line" ? Reveal::Line : arg == "word" ? Reveal::Word : Reveal::Letter;
+        else if (tag == "appears") revealMode_ = arg == "line" ? TextAppears::Line : arg == "word" ? TextAppears::Word : TextAppears::Letter;
     });
     text_ = std::move(rich.text);
     spans_ = std::move(rich.spans);
@@ -1191,7 +1254,7 @@ const Game::Stop* Game::pendingStop() const {
 }
 
 std::string Game::boxOf(const CharacterDef* def) const {
-    return def && !def->textbox.empty() ? def->textbox : !textboxScreen_.empty() ? textboxScreen_ : "say";
+    return def && !def->textbox.empty() ? def->textbox : !textboxScreen_.empty() ? textboxScreen_ : "textbox";
 }
 
 bool Game::keeps(std::string_view box) const {
@@ -1208,10 +1271,10 @@ bool Game::othersTyping() const {
     return std::ranges::any_of(others_, [](const BoxLine& l) { return l.reveal < static_cast<float>(l.length); });
 }
 
-Game::BoxLine Game::boxLine(std::string box, std::string speaker, SDL_Color color, std::string source, const CharacterDef* def) const {
+Game::BoxLine Game::boxLine(std::string box, std::string speaker, SDL_Color colour, std::string source, const CharacterDef* def) const {
     RichText rich = richText(source, lookup_, &script_.palette);
     BoxLine l{.box = std::move(box), .speaker = std::move(speaker), .speakerKey = def ? def->key : std::string{}, .source = std::move(source),
-              .text = std::move(rich.text), .speakerColor = color, .spans = std::move(rich.spans)};
+              .text = std::move(rich.text), .speakerColour = colour, .spans = std::move(rich.spans)};
     l.keep = keeps(l.box);
     l.length = utf8::length(l.text);
     if (def && !def->face.empty()) {
@@ -1224,20 +1287,20 @@ Game::BoxLine Game::boxLine(std::string box, std::string speaker, SDL_Color colo
 // A line of a together block, before its last: it shows now in its own textbox (typing at that
 // textbox's speed, without a voice), and the story goes on to the next line.
 void Game::sayTogether(const cmd::Say& c, const CharacterDef* def) {
-    BoxLine l = boxLine(boxOf(def), def ? def->name : c.speaker, def ? def->color : config().narratorColor, fillValues(c.text, lookup_), def);
+    BoxLine l = boxLine(boxOf(def), def ? def->name : c.speaker, def ? def->nameColour : gameSettings().narrationColour, fillValues(c.text, lookup_), def);
     if (skipping() || ctx_.settings.textSpeed == 0) l.reveal = static_cast<float>(l.length);
     std::erase_if(others_, [&](const BoxLine& other) { return other.box == l.box; });
     together_ = true;
     learnTips(c.text);
     ctx_.read.insert(c.id);
-    addHistory({.speaker = l.speaker, .color = l.speakerColor, .text = l.text, .spans = l.spans});
+    addHistory({.speaker = l.speaker, .colour = l.speakerColour, .text = l.text, .spans = l.spans});
     others_.push_back(std::move(l));
 }
 
 std::optional<Game::LineView> Game::line(std::string_view box) const {
     if (showingSay() && box == textbox_)
-        return LineView{.speaker = speaker_, .text = text_, .face = face_, .faceBase = faceBase_, .faceSide = faceSide_, .speakerColor = speakerColor_,
-                        .textColor = textColor_, .spans = &spans_, .revealed = revealed(), .limit = revealLimit(), .mode = revealMode_,
+        return LineView{.speaker = speaker_, .text = text_, .face = face_, .faceBase = faceBase_, .faceSide = faceSide_, .speakerColour = speakerColour_,
+                        .textColour = textColour_, .spans = &spans_, .revealed = revealed(), .limit = revealLimit(), .mode = revealMode_,
                         .complete = textComplete(), .atPause = atPause(), .character = speakerCharacter(), .faceFrame = faceFrame()};
     const auto it = std::ranges::find(others_, box, &BoxLine::box);
     if (it == others_.end()) return std::nullopt;
@@ -1245,13 +1308,13 @@ std::optional<Game::LineView> Game::line(std::string_view box) const {
     const bool typing = it->reveal < static_cast<float>(it->length);
     Frame face;
     if (def) {
-        face.mouth = typing ? mouth(def->faceTalk, flapping(it->speakerKey + " face", clock_, def->talkSpeed), false) : 0.0f; // (said together: no voice)
-        if (def->faceBlink) face.eyes = blinking(it->speakerKey, clock_, def->blinkEvery);
+        face.mouth = typing ? mouth(def->faceMouth, flapping(it->speakerKey + " face", clock_, def->mouthSpeed), false) : 0.0f; // (said together: no voice)
+        if (def->faceBlink) face.eyes = blinking(it->speakerKey, clock_, def->secondsBetweenBlinks);
     }
     return LineView{.speaker = it->speaker, .text = it->text, .face = it->face, .faceBase = def ? std::string_view(def->face) : std::string_view{},
-                    .faceSide = def && !def->face.empty() ? std::string_view(def->faceSide) : std::string_view{}, .speakerColor = it->speakerColor,
-                    .textColor = def ? def->textColor : std::nullopt, .spans = &it->spans, .revealed = static_cast<std::size_t>(it->reveal),
-                    .limit = it->length, .mode = def && def->reveal ? *def->reveal : config().reveal, .complete = !typing, .character = def, .faceFrame = face};
+                    .faceSide = def && !def->face.empty() ? std::string_view(def->faceSide) : std::string_view{}, .speakerColour = it->speakerColour,
+                    .textColour = def ? def->textColour : std::nullopt, .spans = &it->spans, .revealed = static_cast<std::size_t>(it->reveal),
+                    .limit = it->length, .mode = def && def->textAppears ? *def->textAppears : gameSettings().textAppears, .complete = !typing, .character = def, .faceFrame = face};
 }
 
 std::vector<std::string> Game::boxes() const {
@@ -1284,9 +1347,9 @@ bool Game::textComplete() const {
 void Game::revealTo(std::size_t position) {
     const auto before = static_cast<std::size_t>(reveal_);
     reveal_ = static_cast<float>(std::min(position, length_));
-    if (!blip_.empty() && ctx_.settings.typingSounds && !voiced_ && static_cast<std::size_t>(reveal_) > before && blipTimer_ <= 0.0f && !skipping()) {
-        ctx_.audio.playSound(ctx_.assets.audio(blip_), config().blipVolume);
-        blipTimer_ = config().blipEvery;
+    if (!typingSound_.empty() && ctx_.settings.typingSounds && !voiced_ && static_cast<std::size_t>(reveal_) > before && typingSoundTimer_ <= 0.0f && !skipping()) {
+        ctx_.sound.playSound(ctx_.assets.sound(typingSound_), gameSettings().typingSoundVolume);
+        typingSoundTimer_ = gameSettings().typingSoundGap;
     }
 }
 
@@ -1298,28 +1361,43 @@ void Game::execute(const Command& command, std::size_t here) {
     std::visit(
         Overloaded{
             [&](const cmd::Say& c) { sayLine(c, here, fast); },
-            [&](const cmd::Scene& c) { // a new background (what was on stage goes with the one before), or the one there played on
+            [&](const cmd::Background& c) { // a new background (what was on stage goes with the one before), or the one there played on
                 have(RecordKind::Gallery, c.image);
                 if (c.image != stage_.background()) stage_.clearObjects();
                 stage_.setBackground(c.image, animation(c.with.value_or("")), instant);
                 if (c.animation) stage_.animateBackground(animation(*c.animation), true, fast);
                 if (stage_.backgroundComing()) wait_ = Wait::Background; // (the story goes on once it's in)
             },
-            [&](const cmd::Show& c) { // (one that comes plays the game's show_animation, unless the line says)
+            [&](const cmd::Show& c) { // (one that comes plays the game's animation_on_show, unless the line says)
                 if (!c.image.empty()) have(RecordKind::Gallery, c.image);
                 const CharacterDef* def = c.character.empty() ? nullptr : script_.character(c.character);
-                const std::string played = c.with ? *c.with : stage_.has(c.tag) ? std::string{} : config().showAnimation;
-                stage_.show(c.tag, def, c.image, c.expression, c.props, animation(played), fast ? 0.0f : config().moveTime, instant);
+                const std::string played = c.with ? *c.with : stage_.has(c.tag) ? std::string{} : gameSettings().animationOnShow;
+                stage_.show(c.tag, def, c.image, c.expression, c.props, animation(played), fast ? 0.0f : gameSettings().moveTime, instant);
                 if (c.animation) stage_.animate(c.tag, animation(*c.animation), true, fast);
-                if (def && def->faceSync.expression) // their face looks as their picture does (a new one starts as it is)
+                if (def && def->faceCopies.expression) // their face looks as their image does (a new one starts as it is)
                     expressions_.insert_or_assign(def->key, stage_.expression(c.tag));
                 if (c.wait && !fast && stage_.moving()) wait_ = Wait::Move;
             },
-            [&](const cmd::Hide& c) { // (it plays the game's hide_animation, unless the line says; then it's gone)
-                stage_.hide(c.tag, animation(c.with.value_or(config().hideAnimation)), instant);
+            [&](const cmd::Hide& c) { // (it plays the game's animation_on_hide, unless the line says; then it's gone)
+                stage_.hide(c.tag, animation(c.with.value_or(gameSettings().animationOnHide)), instant);
                 if (c.wait && !fast && stage_.moving()) wait_ = Wait::Move;
             },
-            [&](const cmd::Phone& c) { phoneOn_ = c.on; },
+            [&](const cmd::Chat& c) { // a chat scene: the phone comes up on its chat, until its end
+                if (c.end) {
+                    chat_.clear();
+                    return requests_.push_back(cmd::Ui{.verb = "hide phone", .arg = "chat"});
+                }
+                chat_ = c.with;
+                requests_.push_back(cmd::Ui{.verb = "show phone", .arg = "chat", .phone = c.with});
+            },
+            [&](const cmd::Call& c) {
+                if (!c.end) return startCall(c, here);
+                if (!call_) return;
+                logCall(*call_, false);
+                call_.reset();
+                stopRinging();
+                requests_.push_back(cmd::Ui{.verb = "hide phone", .arg = "call"});
+            },
             [&](const cmd::Effect& c) {
                 if (fast && c.seconds > 0.0f) return; // skipping goes past a moment's effect
                 stage_.setEffect(c, instant);
@@ -1328,16 +1406,23 @@ void Game::execute(const Command& command, std::size_t here) {
             [&](const cmd::Jump& c) {
                 if (c.unless && c.unless->test(lookup_)) return;
                 if (c.call) {
-                    if (callStack_.size() >= 256) return fail("Too many calls inside calls (does a label call itself?)");
+                    if (callStack_.size() >= 256) return fail("Too many calls inside calls (does a scene call itself?)");
                     callStack_.push_back(pc_);
                 }
                 pc_ = c.target;
+                choiceAgain_ = c.again;
             },
             [&](const cmd::Return&) {
-                if (callStack_.empty()) return fail("'return' was reached, but nothing called this label (use jump or end instead?)");
+                if (callStack_.empty()) return fail("'return' was reached, but nothing called this scene (use jump or end instead?)");
                 pc_ = callStack_.back();
                 callStack_.pop_back();
                 if (pass_ && callStack_.size() < pass_->depth) hiddenLines_ = std::exchange(pass_, std::nullopt)->lines; // a choice's return=no
+                if (asked_ && callStack_.size() < asked_->depth) { // a chat or call scene's lines over (or waiting on the phone): the story's line again
+                    const Asked a = *std::exchange(asked_, std::nullopt);
+                    if (a.shown) sayAgain(a.page);
+                    if (a.call && !parking_ && call_) callOver(); // (a call scene's end: the call's over)
+                    if (!a.chat.empty() && !parking_) putAway_ = a.chat, putAwayIn_ = 2.0f; // (a chat scene's: the phone's put away once its messages have come)
+                }
             },
             [&](const cmd::End&) { wait_ = Wait::Finished; },
             [&](const cmd::Set& c) {
@@ -1363,26 +1448,26 @@ void Game::execute(const Command& command, std::size_t here) {
             [&](const cmd::Ask& c) {
                 if (!c.fallback.empty() || !std::holds_alternative<std::string>(variable(c.variable)))
                     setVariable(c.variable, c.fallback);
-                waitForScreen({.name = "ask", .variable = c.variable, .prompt = expand(c.prompt, lookup_), .max = c.max}, here);
+                waitForScreen({.name = "ask", .variable = c.variable, .prompt = expand(c.prompt, lookup_), .mostLetters = c.mostLetters}, here);
             },
-            [&](const cmd::Ui& c) { // open SCREEN: the story waits until the player closes it (unless it's modal=no)
+            [&](const cmd::Ui& c) { // open SCREEN: the story waits until the player closes it (unless it's story=goes_on)
                 const ScreenDef* screen = c.verb == "open" ? script_.screen(c.arg) : nullptr;
-                if (!screen || !screen->modal) return requests_.push_back(c);
+                if (!screen || !screen->storyWaits) return requests_.push_back(c);
                 vars_.insert_or_assign("answer", std::string{}); // until it answers
                 waitForScreen({.name = c.arg, .opening = c.opening, .closing = c.closing}, here);
             },
             [&](const cmd::Chapter& c) { // a new part of the story: its title card, if the screens have one
                 chapter_ = fillValues(c.title, lookup_);
-                passPlace(here, Chart::Kind::Chapter);
+                passPoint(here, Flowchart::Kind::Chapter);
                 if (!fast && script_.screen("chapter")) waitForScreen({.name = "chapter"}, here);
             },
-            [&](const cmd::Mark&) { passPlace(here, Chart::Kind::Point); },
-            [&](const cmd::Record& c) { // a picture unlocked, an ending reached, an achievement earned, a tip learned
-                if (c.kind == RecordKind::Ending && script_.record(c.kind, c.name)) passPlace(here, Chart::Kind::Ending);
+            [&](const cmd::Mark&) { passPoint(here, Flowchart::Kind::Point); },
+            [&](const cmd::Record& c) { // an image unlocked, an ending reached, an achievement earned, a tip learned
+                if (c.kind == RecordKind::Ending && script_.record(c.kind, c.name)) passPoint(here, Flowchart::Kind::Ending);
                 collect(c.kind, c.name);
             },
             [&](const cmd::Movie& c) { playMovie(c, here, fast); },
-            [&](const cmd::Message& c) { sendMessage(c, here); }, // on the phone; a new one from someone closes the answers to their last
+            [&](const cmd::Message& c) { sendMessage(c, here); }, // on the phone (a chat scene's: the story waits for it)
             [&](const cmd::Weather& c) { stage_.setWeather(c, instant ? 0.0f : c.fade); },
             [&](const cmd::Camera& c) {
                 if (c.animation) stage_.animateCamera(animation(*c.animation), true, fast);
@@ -1391,7 +1476,7 @@ void Game::execute(const Command& command, std::size_t here) {
             },
             [&](const cmd::Textbox& c) {
                 if (c.hide) return void(std::erase_if(others_, [&](const BoxLine& l) { return c.screen.empty() || l.box == c.screen; }));
-                if (!c.newPage) textboxScreen_ = c.screen == "say" ? std::string{} : c.screen;
+                if (!c.newPage) textboxScreen_ = c.screen == "textbox" ? std::string{} : c.screen;
                 page_.clear(); // a new textbox starts on an empty page
             },
         },
@@ -1403,10 +1488,7 @@ void Game::execute(const Command& command, std::size_t here) {
 // waiting for a click.
 void Game::sayLine(const cmd::Say& c, std::size_t here, bool fast) {
     const CharacterDef* def = c.character.empty() ? nullptr : script_.character(c.character);
-    if (def && !c.expression.empty()) { // their face, and their picture on stage if the face copies it
-        expressions_.insert_or_assign(def->key, c.expression);
-        if (def->faceSync.expression || def->face.empty()) stage_.setExpression(def->key, c.expression);
-    }
+    takeExpression(c, def);
     if (hiddenLines_ > 0) { // gone past unseen (a choice's return=no)
         --hiddenLines_;
         pendingVoice_.reset();
@@ -1425,28 +1507,28 @@ void Game::sayLine(const cmd::Say& c, std::size_t here, bool fast) {
     std::erase_if(others_, [&](const BoxLine& l) { return l.box == box; });
     if (!text_.empty() && textbox_ != box && keeps(textbox_)) {
         BoxLine kept{.box = textbox_, .speaker = speaker_, .speakerKey = speakerKey_, .source = source_, .text = text_, .face = face_,
-                     .speakerColor = speakerColor_, .spans = spans_, .reveal = static_cast<float>(length_), .length = length_, .keep = true};
+                     .speakerColour = speakerColour_, .spans = spans_, .reveal = static_cast<float>(length_), .length = length_, .keep = true};
         std::erase_if(others_, [&](const BoxLine& l) { return l.box == kept.box; });
         others_.push_back(std::move(kept));
     }
     lineVoice_ = std::exchange(pendingVoice_, std::nullopt).value_or(LineVoice{}); // a voice line just before it
     bool voiced = !lineVoice_.file.empty();
-    const std::optional<bool> sync = lineVoice_.sync;
-    if (!voiced) ctx_.audio.stopVoice();
-    say(def ? def->name : c.speaker, def ? def->color : config().narratorColor, c.text, def);
+    const std::optional<bool> follows = lineVoice_.textFollows;
+    if (!voiced) ctx_.sound.stopVoice();
+    say(def ? def->name : c.speaker, def ? def->nameColour : gameSettings().narrationColour, c.text, def);
     // Its voice (kept in the history to hear again): the voice line, else their own voice file
-    // for this line (voices=), else made-up speech (babble=).
-    HistoryEntry entry{.speaker = speaker_, .color = speakerColor_, .text = text_, .spans = spans_};
-    if (voiced) entry.voice = ctx_.assets.audio(lineVoice_.file), entry.voiceVolume = lineVoice_.volume;
-    else if (def && !def->voices.empty())
-        if (const auto file = ctx_.assets.findAudio(std::format("{}/{}", def->voices, c.voiceId))) entry.voice = *file;
-    if (!voiced && entry.voice.empty() && def && def->babble > 0.0f && ctx_.settings.babble) entry.babble = def->babble, entry.babbleSpeed = def->babbleSpeed;
+    // for this line (voice_files=), else made-up speech (made_up_voice=).
+    HistoryEntry entry{.speaker = speaker_, .colour = speakerColour_, .text = text_, .spans = spans_};
+    if (voiced) entry.voice = ctx_.assets.sound(lineVoice_.file), entry.voiceVolume = lineVoice_.volume;
+    else if (def && !def->voiceFiles.empty())
+        if (const auto file = ctx_.assets.findSound(std::format("{}/{}", def->voiceFiles, c.voiceId))) entry.voice = *file;
+    if (!voiced && entry.voice.empty() && def && def->madeUpVoice > 0.0f && ctx_.settings.madeUpVoices) entry.madeUpVoice = def->madeUpVoice, entry.madeUpVoiceSpeed = def->madeUpVoiceSpeed;
     if (!voiced && !fast) {
-        if (!entry.voice.empty()) ctx_.audio.playVoice(entry.voice), voiced = true;
-        else if (entry.babble > 0.0f) voiced = ctx_.audio.playBabble(text_, entry.babble, entry.babbleSpeed);
+        if (!entry.voice.empty()) ctx_.sound.playVoice(entry.voice), voiced = true;
+        else if (entry.madeUpVoice > 0.0f) voiced = ctx_.sound.playMadeUpVoice(text_, entry.madeUpVoice, entry.madeUpVoiceSpeed);
     }
     voiced_ = voiced;
-    syncVoice_ = voiced && sync.value_or(config().voiceSync);
+    textFollowsVoice_ = voiced && follows.value_or(gameSettings().textFollowsVoices);
     menuPrompt_ = false;
     lineRead_ = !ctx_.read.insert(c.id).second;
     addToPage();
@@ -1456,9 +1538,48 @@ void Game::sayLine(const cmd::Say& c, std::size_t here, bool fast) {
     remember();
 }
 
+// Their face, and their image on stage if the face copies it.
+void Game::takeExpression(const cmd::Say& c, const CharacterDef* def) {
+    if (!def || c.expression.empty()) return;
+    expressions_.insert_or_assign(def->key, c.expression);
+    if (def->faceCopies.expression || def->face.empty()) stage_.setExpression(def->key, c.expression);
+}
+
+// The line the story was on, back as it was once a chat= or call= scene's lines that showed something are over: all there
+// at once, without its voice, not in the history again, its page as it was. (A choice, a wait...: done again.)
+void Game::sayAgain(std::size_t page) {
+    const auto* c = pc_ < script_.code.size() ? std::get_if<cmd::Say>(&script_.code[pc_].command) : nullptr;
+    if (!c || c->together) return; // (a line said with others: said again)
+    const std::size_t here = current_ = pc_++;
+    const CharacterDef* def = c->character.empty() ? nullptr : script_.character(c->character);
+    takeExpression(*c, def);
+    std::erase_if(others_, [](const BoxLine& l) { return !l.keep; });
+    together_ = false;
+    say(def ? def->name : c->speaker, def ? def->nameColour : gameSettings().narrationColour, c->text, def);
+    reveal_ = static_cast<float>(length_);
+    passedStops_ = stops_.size();
+    noWait_ = false;
+    lineVoice_ = {};
+    menuPrompt_ = false;
+    page_.resize(std::min(page_.size(), page));
+    waitFor(Wait::Say, here);
+}
+
 // A choice: its options (none of them pickable: the story goes on), up while the story goes on for some
-// lines, or waited on, its prompt said; and a place on the flowchart.
+// lines, or waited on with the line that asks it; and a point on the flowchart.
 void Game::openMenu(const cmd::Menu& c, std::size_t here) {
+    const bool again = std::exchange(choiceAgain_, false); // (a repeating one up again: without the line that asked it)
+    if (!c.phone.empty() && asked_ && callStack_.size() == asked_->depth) { // a chat= or call= scene's choice: it waits on the phone (passed once the player hung up or left)
+        bool any = false; // (an option that can be picked)
+        for (std::size_t k = 0; k < c.choices.size() && !any; ++k)
+            if (const auto item = offer(c.choices[k], static_cast<int>(k))) any = !item->locked;
+        if (asked_->passing || !any) return void(pc_ = c.after); // (passed: the player hung up or left, or none can be picked)
+        parked_ = Parked{.menu = here, .who = c.phone, .call = c.call};
+        parking_ = true;
+        execute(cmd::Return{}, here); // (the scene's lines over for now: the story goes on meanwhile)
+        parking_ = false;
+        return;
+    }
     trigger_.reset();
     listChoices(c);
     if (std::ranges::all_of(choiceItems_, &ChoiceItem::locked)) {
@@ -1466,103 +1587,78 @@ void Game::openMenu(const cmd::Menu& c, std::size_t here) {
         choiceItems_.clear();
         return;
     }
-    learnTips(c.prompt);
     for (const ChoiceItem& item : choiceItems_) learnTips(item.text);
-    std::vector<Chart::Option> options; // as the flowchart shows it: picked or not, locked or not
+    std::vector<Flowchart::Option> options; // as the flowchart shows it: picked or not, locked or not
     options.reserve(choiceItems_.size());
     for (const ChoiceItem& item : choiceItems_) options.push_back({item.option, !item.locked});
     if (c.lines > 0) { // up while the story goes on, for its next lines
         trigger_ = Trigger{.at = here, .lines = c.lines};
         pc_ = c.after;
-        return passPlace(here, Chart::Kind::Choice, std::move(options));
+        return passPoint(here, Flowchart::Kind::Choice, std::move(options));
     }
     menuTime_ = c.seconds;
-    menuPrompt_ = !c.prompt.empty() || c.optional; // an optional one keeps the line before it
-    if (!c.prompt.empty()) {
-        say("", speakerColor_, c.prompt, nullptr);
-        reveal_ = static_cast<float>(length_);
-        passedStops_ = stops_.size();
-        addToPage();
-    }
+    menuPrompt_ = c.phone.empty() && !text_.empty() && !again; // (the line before it stays on screen: it asks it; not when it's up again, nor a phone's)
     if (!ctx_.settings.skipAfterChoices) skip_ = false;
     autosave_ = true;
     waitFor(Wait::Menu, here);
     remember();
-    passPlace(here, Chart::Kind::Choice, std::move(options));
+    passPoint(here, Flowchart::Kind::Choice, std::move(options));
 }
 
 // Music, a voice or a sound played, or stopped (a voice keeps playing through the next line; a sound on a
 // channel of its own may loop).
 void Game::play(const cmd::Play& c, bool fast) {
-    const std::string path = c.file.empty() ? std::string{} : ctx_.assets.audio(c.file);
+    const std::string file = c.file.contains('{') ? fillValues(c.file, lookup_) : c.file; // (a value's: sound {message.sound})
+    const std::string path = file.empty() ? std::string{} : ctx_.assets.sound(file);
     switch (c.track) {
     case cmd::Play::Track::Music:
-        music_ = c.file;
+        music_ = file;
         musicVolume_ = c.volume;
-        have(RecordKind::Song, c.file); // the music room
-        if (c.file.empty()) ctx_.audio.stopMusic(c.fade);
-        else ctx_.audio.playMusic(path, c.loop, c.fade, c.volume);
+        have(RecordKind::Song, file); // the music room
+        if (file.empty()) ctx_.sound.stopMusic(c.fade);
+        else ctx_.sound.playMusic(path, c.loop, c.fade, c.volume);
         break;
     case cmd::Play::Track::Voice:
-        if (c.file.empty()) return ctx_.audio.stopVoice();
-        if (!fast) ctx_.audio.playVoice(path, c.volume);
-        pendingVoice_ = LineVoice{c.file, c.volume, c.sync}; // keep playing through the next line
+        if (file.empty()) return ctx_.sound.stopVoice();
+        if (!fast) ctx_.sound.playVoice(path, c.volume);
+        pendingVoice_ = LineVoice{file, c.volume, c.textFollows}; // keep playing through the next line
         break;
     case cmd::Play::Track::Sound:
-        if (c.file.empty()) { // stop sound [NAME]
-            ctx_.audio.stopChannel(c.channel, c.fade);
+        if (file.empty()) { // stop sound [NAME]
+            ctx_.sound.stopChannel(c.channel, c.fade);
             if (c.channel.empty()) loops_.clear();
             else loops_.erase(c.channel);
         } else if (c.channel.empty()) {
-            if (!fast) ctx_.audio.playSound(path, c.volume);
+            if (!fast) ctx_.sound.playSound(path, c.volume);
         } else {
-            ctx_.audio.playChannel(c.channel, path, c.loop, c.volume, c.fade);
-            if (c.loop) loops_.insert_or_assign(c.channel, Loop{c.file, c.volume});
+            ctx_.sound.playChannel(c.channel, path, c.loop, c.volume, c.fade);
+            if (c.loop) loops_.insert_or_assign(c.channel, Loop{file, c.volume});
             else loops_.erase(c.channel);
         }
         break;
     }
 }
 
-// A video, full screen: past it when skipping (if it can be skipped); one that can't play is said, and in
+// A movie, full screen: past it when skipping (if it can be skipped); one that can't play is said, and in
 // developer mode a card with its name shows for a moment instead.
 void Game::playMovie(const cmd::Movie& c, std::size_t here, bool fast) {
-    have(RecordKind::Gallery, c.file); // a video in the gallery
+    have(RecordKind::Gallery, c.file); // a movie in the gallery
     const bool skippable = c.skippable && ctx_.settings.skipMovies; // (the player can say no too)
-    const bool stopsHere = watchThere_ && (*watchThere_)(here); // (playTo() stops at one there: its first picture)
-    if ((fast && skippable) || (watch_ != SIZE_MAX && !stopsHere)) return; // skipping goes past videos, and so does playTo()
+    const bool stopsHere = watchThere_ && (*watchThere_)(here); // (playTo() stops at one there: its first image)
+    if ((fast && skippable) || (watch_ != SIZE_MAX && !stopsHere)) return; // skipping goes past movies, and so does playTo()
     const auto file = ctx_.assets.findMovie(c.file);
-    movie_ = file ? std::make_unique<Movie>(ctx_.renderer, ctx_.audio, *file, c.loop, c.volume) : nullptr;
+    movie_ = file ? std::make_unique<Movie>(ctx_.renderer, ctx_.sound, *file, c.loop, c.volume) : nullptr;
     if (!movie_ || !*movie_) {
         movie_.reset();
         logWarn("{}: {}", script_.where(script_.code[here]),
                 file ? std::format("Can't play '{}'.", *file) : std::format("There's no movie called '{}'.", c.file));
-        if (!config().developer) return; // players: the story goes on
+        if (!gameSettings().developer) return; // players: the story goes on
         movieStandIn_ = c.file;    // a labelled card for a moment instead
         timer_ = 3.0f;
     }
     movieSkippable_ = skippable;
-    ctx_.audio.stopVoice();
+    ctx_.sound.stopVoice();
     waitFor(Wait::Movie, here);
-}
-
-// A message on the phone: a new one from someone closes the answers to their last, and one answering back
-// is typed first, about as long as typing it takes.
-void Game::sendMessage(const cmd::Message& c, std::size_t here) {
-    const CharacterDef* def = c.character.empty() ? nullptr : script_.character(c.character);
-    const std::string who = def ? def->name : c.sender;
-    if (!c.mine)
-        for (MessageItem& m : messages_)
-            if (m.from == who) m.replies.reset();
-    MessageItem m{.from = c.mine ? std::string{} : who, .with = who, .color = def ? def->color : config().narratorColor,
-                  .text = fillValues(c.text, lookup_), .read = c.mine, .replies = c.replies.empty() ? std::nullopt : std::optional(here)};
-    if (answering_ && !c.mine && config().phoneTyping > 0.0f) { // an answer back: typed first, about as long as typing it takes, after their others
-        for (const MessageItem& other : messages_)
-            if (other.with == who) m.typing = std::max(m.typing, other.typing);
-        m.typing += 0.8f + static_cast<float>(utf8::length(m.text)) / config().phoneTyping * static_cast<float>(randomNumber(75, 125)) / 100.0f;
-    }
-    messages_.push_back(std::move(m));
-    if (messages_.back().typing <= 0.0f) arrive(messages_.back());
 }
 
 // The language changed: the line, choices or question on screen again in the new one (the line
@@ -1574,37 +1670,36 @@ void Game::retranslate() {
     }
     if (wait_ != Wait::Say && wait_ != Wait::Menu) return;
     const Command& command = script_.code[resumePc_].command;
-    auto again = [&](const std::string& speaker, SDL_Color color, const std::string& text, const CharacterDef* def, bool whole) {
-        const bool voiced = voiced_, sync = syncVoice_;
+    auto again = [&](const std::string& speaker, SDL_Color colour, const std::string& text, const CharacterDef* def, bool whole) {
+        const bool voiced = voiced_, follows = textFollowsVoice_;
         const float time = lineTime_;
-        say(speaker, color, text, def);
+        say(speaker, colour, text, def);
         voiced_ = voiced;
-        syncVoice_ = sync;
+        textFollowsVoice_ = follows;
         lineTime_ = time;
         if (whole) {
             reveal_ = static_cast<float>(length_);
             passedStops_ = stops_.size();
         }
-        if (!page_.empty()) page_.back() = {speaker_, speakerColor_, text_, spans_, textColor_};
+        if (!page_.empty()) page_.back() = {speaker_, speakerColour_, text_, spans_, textColour_};
     };
     if (const auto* c = std::get_if<cmd::Say>(&command)) {
         const CharacterDef* def = c->character.empty() ? nullptr : script_.character(c->character);
-        again(def ? def->name : c->speaker, def ? def->color : config().narratorColor, c->text, def, textComplete() && !pendingStop());
+        again(def ? def->name : c->speaker, def ? def->nameColour : gameSettings().narrationColour, c->text, def, textComplete() && !pendingStop());
         if (!history_.empty()) {
             HistoryEntry& h = history_.back();
             h.speaker = speaker_;
-            h.color = speakerColor_;
+            h.colour = speakerColour_;
             h.text = text_;
             h.spans = spans_;
         }
     } else if (const auto* m = std::get_if<cmd::Menu>(&command)) {
         listChoices(*m);
-        if (!m->prompt.empty()) again("", speakerColor_, m->prompt, nullptr, true);
     }
 }
 
 void Game::addToPage() {
-    page_.push_back({speaker_, speakerColor_, text_, spans_, textColor_});
+    page_.push_back({speaker_, speakerColour_, text_, spans_, textColour_});
     if (page_.size() > 60) page_.erase(page_.begin());
 }
 
@@ -1616,7 +1711,7 @@ std::shared_ptr<const Animation> Game::animation(std::string_view name) const {
 
 void Game::perform(const Command& command) {
     if (const auto* jump = std::get_if<cmd::Jump>(&command)) {
-        const auto pc = script_.findLabel(jump->label);
+        const auto pc = script_.findScene(jump->scene);
         if (!pc) return;
         if (jump->call) callStack_.push_back(wait_ == Wait::None || wait_ == Wait::Finished ? pc_ : resumePc_);
         choiceItems_.clear();
@@ -1628,7 +1723,7 @@ void Game::perform(const Command& command) {
     execute(command, current_);
 }
 
-void Game::advance() {
+void Game::nextLine() {
     switch (wait_) {
     case Wait::Movie:
         if (movieSkippable_) endMovie(); // clicked past
@@ -1663,15 +1758,31 @@ void Game::advance() {
     case Wait::Move:
         stage_.finish();
         break;
-    case Wait::Pause:
     case Wait::Timer:
+        if (!chat_.empty()) return; // (a chat scene's wait holds: it's the chat's own timing)
+        break;
+    case Wait::Pause:
     case Wait::Reached: // (the preview: on from where it stopped)
+        break;
+    case Wait::Chat: // (a click hurries a chat scene's message, or its change)
+        if (change_) change(*std::exchange(change_, std::nullopt));
+        else hurry();
         break;
     default:
         return;
     }
     wait_ = Wait::None;
     run();
+}
+
+// The message a chat scene waits for comes now (someone just typing stops).
+void Game::hurry() {
+    PhoneData& phone = ownPhone();
+    const auto it = std::ranges::find(phone.messages, chatWait_, &MessageItem::number);
+    if (it == phone.messages.end() || it->typing <= 0.0f) return;
+    it->typing = 0.0f;
+    if (it->kind == MessageItem::Kind::Typing) phone.messages.erase(it);
+    else arrive(*it);
 }
 
 bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& there, bool* skipped) {
@@ -1709,7 +1820,7 @@ bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& th
                 return true;
             }
             if (wait_ == Wait::Say) {
-                advance();
+                nextLine();
             } else { // the option that starts last before `target`, else the first
                 const cmd::Menu* m = menu();
                 std::optional<std::size_t> pick, first;
@@ -1735,7 +1846,7 @@ bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& th
                 run();
                 break;
             }
-            if (there(resumePc_)) { // (what the player sees at that line: a video's first picture)
+            if (there(resumePc_)) { // (what the player sees at that line: a movie's first image)
                 stage_.finish();
                 if (movie_) movie_->showFirst();
                 return true;
@@ -1746,8 +1857,37 @@ bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& th
         case Wait::None:
             run();
             break;
-        default: // an animation, a pause or a timer: over at once
-            advance();
+        case Wait::Chat: // a chat scene's message coming: there at once (its line may be the one)
+            if (there(current_)) {
+                if (change_) change(*std::exchange(change_, std::nullopt));
+                else hurry();
+                return true;
+            }
+            nextLine();
+            break;
+        case Wait::Call: { // a call ringing: there (its line may be the one); else answered, or missed for a line of its missed:
+            if (there(current_)) return true;
+            const cmd::Call* c = call_ && call_->at ? std::get_if<cmd::Call>(&script_.code[*call_->at].command) : nullptr;
+            if (c && target >= c->missed && target < c->after) {
+                stopRinging();
+                endCall(true);
+            } else if (call_) {
+                answerCall(true);
+            } else {
+                return false;
+            }
+            break;
+        }
+        case Wait::Timer: // a wait: over at once (a chat scene's too, which a click doesn't end)
+            wait_ = Wait::None;
+            run();
+            break;
+        case Wait::Pause: // a click's wait (a chat scene's message after a click): there, else on
+            if (there(current_)) return true;
+            nextLine();
+            break;
+        default: // an animation: over at once
+            nextLine();
             break;
         }
     }
@@ -1770,7 +1910,7 @@ void Game::endMovie() {
 }
 
 void Game::setCovered(bool covered) {
-    ctx_.audio.pauseVoice(covered);
+    ctx_.sound.pauseVoice(covered);
     if (movie_) movie_->setPaused(covered);
 }
 
@@ -1778,8 +1918,8 @@ Variables Game::savedVariables(std::string_view state) {
     Variables vars;
     std::istringstream in{std::string(state)};
     for (std::string line; std::getline(in, line);)
-        if (line.starts_with("var ")) {
-            std::istringstream ls(line.substr(4));
+        if (line.starts_with("variable ")) {
+            std::istringstream ls(line.substr(9));
             std::string name, value;
             ls >> name;
             std::getline(ls >> std::ws, value);
@@ -1788,17 +1928,17 @@ Variables Game::savedVariables(std::string_view state) {
     return vars;
 }
 
-// The player is at a place on the flowchart (a chapter, a choice, an ending or a "chart" point): it
+// The player is at a point on the flowchart (a chapter, a choice, an ending or a "flowchart" line): it
 // remembers the game here, and which way the player came.
-void Game::passPlace(std::size_t here, Chart::Kind kind, std::vector<Chart::Option> options) {
+void Game::passPoint(std::size_t here, Flowchart::Kind kind, std::vector<Flowchart::Option> options) {
     const auto [label, offset] = script_.locate(here);
     const std::string id = std::format("{}:{}", label.empty() ? "-" : label, offset);
     const std::size_t resume = std::exchange(resumePc_, here); // the game here repeats this command
     std::string state = save();
     resumePc_ = resume;
-    ctx_.chart.visit(id, kind, chartNode_, chartOption_, std::move(state), std::move(options));
-    chartNode_ = id;
-    chartOption_ = -1;
+    ctx_.flowchart.visit(id, kind, flowchartNode_, flowchartOption_, std::move(state), std::move(options));
+    flowchartNode_ = id;
+    flowchartOption_ = -1;
 }
 
 // Options whose condition is false are left out, or shown locked with (needs ...).
@@ -1823,98 +1963,429 @@ const cmd::Menu* Game::menu() const {
     return at ? std::get_if<cmd::Menu>(&script_.code[*at].command) : nullptr;
 }
 
-std::string Game::choiceScreen() const {
-    const cmd::Menu* m = menu();
-    return m && !m->screen.empty() ? m->screen : "choice";
+// ---------------------------------------------------------------------------
+// The phone
+// ---------------------------------------------------------------------------
+
+namespace {
+constexpr SDL_Color kOwnColour{230, 230, 235, 255}; // (the phone owner's own messages)
+constexpr std::string_view kRinging = "phone ringing"; // (the sound channel a call rings on)
+// A message proper: not someone typing, nor a change to one, nor the line saying a chat scene's over.
+bool isMessage(MessageItem::Kind kind) {
+    using Kind = MessageItem::Kind;
+    return kind == Kind::Text || kind == Kind::Image || kind == Kind::Sticker || kind == Kind::Voice;
+}
+} // namespace
+
+const PhoneData& Game::phone() const { return phone_; }
+
+Game::Person Game::person(const std::string& character, const std::string& sender) const {
+    if (const CharacterDef* def = character.empty() ? nullptr : script_.character(character)) return {.name = def->name, .character = def->key, .colour = def->nameColour};
+    return {.name = sender, .colour = gameSettings().narrationColour};
 }
 
-std::vector<ChoiceItem> Game::replies(std::size_t message) const {
-    std::vector<ChoiceItem> out;
-    const auto* m = message < messages_.size() && messages_[message].replies && messages_[message].typing <= 0.0f
-                        ? std::get_if<cmd::Message>(&script_.code[*messages_[message].replies].command) : nullptr;
-    for (std::size_t k = 0; m && k < m->replies.size(); ++k)
-        if (auto item = offer(m->replies[k], static_cast<int>(k))) out.push_back(std::move(*item));
-    return out;
+Game::Person Game::personNamed(std::string_view name) const {
+    for (const auto& [key, def] : script_.characters)
+        if (def.name == name) return {.name = def.name, .character = key, .colour = def.nameColour};
+    return {.name = std::string(name), .colour = gameSettings().narrationColour};
 }
 
-void Game::readMessages(std::string_view with) {
-    for (MessageItem& m : messages_)
-        if (with.empty() || m.with == with) m.read = m.read || m.typing <= 0.0f;
-}
-
-std::vector<Game::Contact> Game::contacts() const {
-    std::vector<Contact> out;
-    for (std::size_t i = 0; i < messages_.size(); ++i) {
-        const MessageItem& m = messages_[i];
-        auto it = std::ranges::find(out, m.with, &Contact::name);
-        if (it == out.end()) it = out.insert(out.end(), {.name = m.with, .color = m.color});
-        it->last = i;
-        it->typing = it->typing || m.typing > 0.0f;
-        if (!m.read && m.typing <= 0.0f) ++it->unread;
+// A chat scene's message on the phone, or a change to one: it comes at once, or typed first (as setting
+// chat_messages says), and the scene waits for it: until it comes, or for a click once it's there.
+void Game::sendMessage(const cmd::Message& c, std::size_t here) {
+    using Kind = cmd::Message::Kind;
+    if (c.kind == Kind::End) return change(c); // (the scene's over: its line at once)
+    const bool scene = !skipping() && !chat_.empty();
+    const bool typed = gameSettings().chatMessages == ChatMessages::Typed;
+    if (c.kind != Kind::Text && c.kind != Kind::Image && c.kind != Kind::Sticker && c.kind != Kind::Voice && c.kind != Kind::Typing) {
+        if (scene && typed) { // (after a moment, as if they thought it over)
+            change_ = c;
+            changeIn_ = 1.0f;
+            return waitFor(Wait::Chat, here);
+        }
+        change(c);
+        if (scene) { // (each after a click)
+            autoTimer_ = 0.0f;
+            wait_ = Wait::Pause;
+        }
+        return;
     }
-    std::ranges::sort(out, std::greater{}, &Contact::last);
-    return out;
+    if (c.kind == Kind::Typing && skipping()) return; // (skipping: nobody waits for it)
+    PhoneData& phone = ownPhone();
+    const Person who = person(c.character, c.sender); // (the player's own: who it goes to)
+    const std::string& with = who.name;
+    const std::string from = c.mine ? std::string{} : who.name;
+    MessageItem m{.kind = c.kind, .from = from, .with = with, .character = c.mine ? std::string{} : who.character, .expression = c.expression,
+                  .colour = c.mine ? kOwnColour : who.colour, .text = fillValues(c.text, lookup_), .file = c.file, .read = c.mine};
+    // How long it takes: someone typing a while; someone else's (as long as typing it takes, after their
+    // others); the player's own a moment; skipping, no time at all. A chat= scene's messages, sent at once, come
+    // one after another: each after the ones still coming there.
+    float after = 0.0f;
+    if (replying_ && !skipping())
+        for (const MessageItem& other : phone.messages)
+            if (other.with == with) after = std::max(after, other.typing);
+    if (c.kind == Kind::Typing) {
+        m.typing = after + (c.seconds > 0.0f ? c.seconds : 2.0f);
+    } else if (!c.mine && ((scene && typed) || (replying_ && !skipping())) && gameSettings().phoneTyping > 0.0f) {
+        for (const MessageItem& other : phone.messages)
+            if (other.with == with && other.from == from) m.typing = std::max(m.typing, other.typing);
+        const std::size_t letters = c.kind == Kind::Text ? utf8::length(m.text) : 12; // (an image: as long as a few words)
+        m.typing = std::max(m.typing, after) + 0.8f + static_cast<float>(letters) / gameSettings().phoneTyping * static_cast<float>(randomNumber(75, 125)) / 100.0f;
+    } else if (c.mine && ((scene && typed) || (replying_ && !skipping()))) {
+        m.typing = after + 0.4f;
+    }
+    const std::uint32_t number = messageCount_ + 1;
+    addMessage(phone, std::move(m));
+    if (!scene) return;
+    if (const MessageItem& added = phone.messages.back(); added.number == number && added.typing > 0.0f) { // a chat scene: until it comes...
+        chatWait_ = number;
+        wait_ = Wait::Chat; // (a save made meanwhile goes on after it: the phone has it, coming)
+    } else if (!typed) { // ...or, each after a click, until one
+        autoTimer_ = 0.0f;
+        wait_ = Wait::Pause;
+    }
 }
+
+// Deletes it, edits it, reacts, reads it: a change to a chat's messages.
+void Game::change(const cmd::Message& c) {
+    using Kind = cmd::Message::Kind;
+    PhoneData& phone = ownPhone();
+    const Person who = person(c.character, c.sender);
+    const std::string& with = who.name;
+    const std::string from = c.mine ? std::string{} : who.name;
+    auto last = [&](auto&& which) -> MessageItem* { // (the newest there that has come, and isn't deleted)
+        for (auto it = phone.messages.rbegin(); it != phone.messages.rend(); ++it)
+            if (it->with == with && it->typing <= 0.0f && isMessage(it->kind) && !it->deleted && which(*it)) return &*it;
+        return nullptr;
+    };
+    switch (c.kind) {
+    case Kind::Delete:
+        if (MessageItem* m = last([&](const MessageItem& item) { return item.from == from; })) m->deleted = true;
+        break;
+    case Kind::Edit:
+        if (MessageItem* m = last([&](const MessageItem& item) { return item.from == from && item.kind == Kind::Text; })) {
+            m->text = fillValues(c.text, lookup_);
+            m->edited = true;
+        }
+        break;
+    case Kind::React: // (on the newest someone else sent)
+        if (MessageItem* m = last([&](const MessageItem& item) { return item.from != from; })) m->reaction = fillValues(c.text, lookup_);
+        break;
+    case Kind::Read: // someone has read the owner's messages there (the owner reading theirs: they're seen)
+        for (MessageItem& m : phone.messages)
+            if (m.with == with && m.typing <= 0.0f) {
+                if (!from.empty() && m.from.empty()) m.seen = true;
+                else if (from.empty() && !m.from.empty()) m.read = true;
+            }
+        break;
+    case Kind::End: // (a chat scene over: a line saying so)
+        addMessage(phone, {.kind = c.kind, .with = with, .read = true});
+        break;
+    default:
+        break;
+    }
+}
+
+void Game::addMessage(PhoneData& phone, MessageItem m) {
+    m.number = ++messageCount_;
+    MessageItem& added = phone.messages.emplace_back(std::move(m));
+    if (added.typing <= 0.0f) arrive(added);
+    else if (!added.from.empty() && !skipping() && hasPhone() && !gameSettings().phoneTypingSound.empty())
+        ctx_.sound.playSound(ctx_.assets.sound(gameSettings().phoneTypingSound));
+}
+
+// A message comes to the phone: its tips are learned, an image goes in the photos (and the gallery), its sound
+// plays, the history has it (setting phone_history), and the player hears of it as setting new_messages says (not
+// of a chat scene's: it's on the phone already, nor of the owner's own).
+void Game::arrive(MessageItem& m) {
+    m.time = toString(variable("phone_clock"));
+    m.date = toString(variable("phone_date"));
+    if (!isMessage(m.kind)) return;
+    learnTips(m.text);
+    if (m.kind == MessageItem::Kind::Image) {
+        have(RecordKind::Gallery, m.file);
+    }
+    const bool fast = skipping();
+    if (gameSettings().phoneHistory && !unlogged_) { // (as a line, the owner's own as a choice made)
+        const std::string words = m.text.empty() ? m.file : richText(m.text, lookup_, &script_.palette).text;
+        if (m.from.empty()) addHistory({.speaker = "", .colour = SDL_Color{150, 150, 165, 255}, .text = "> " + words, .choice = true});
+        else addHistory({.speaker = m.from, .colour = m.colour, .text = words});
+    }
+    if (m.from.empty()) {
+        if (!fast && !gameSettings().phoneSendSound.empty()) ctx_.sound.playSound(ctx_.assets.sound(gameSettings().phoneSendSound));
+        return;
+    }
+    ++arrivals_;
+    if (!hasPhone()) return; // (no phone to come to)
+    if (!fast && !gameSettings().phoneMessageSound.empty()) ctx_.sound.playSound(ctx_.assets.sound(gameSettings().phoneMessageSound));
+    if (m.with == chat_) return; // (a chat scene's: on the phone already)
+    if (!fast) requests_.push_back(cmd::Ui{.verb = "buzz"}); // (controllers buzz, as a phone does)
+    if (gameSettings().newMessages == NewMessages::Open) { // (the engine opens the phone on it, unless it's up already; not while skipping past)
+        if (!fast) requests_.push_back(cmd::Ui{.verb = "show phone", .arg = "message", .phone = m.with});
+        return;
+    }
+    if (gameSettings().newMessages != NewMessages::Notice) return; // (button: the Phone button counts it)
+    // A notice, as a phone shows one: who, and the start of what they wrote.
+    std::string text = m.text;
+    if (utf8::length(text) > 60) text = std::string(trim(std::string_view(text).substr(0, utf8::offset(text, 57)))) + "...";
+    requests_.push_back(cmd::Ui{.verb = "notice", .arg = text.empty() ? m.from : std::format("{}: {}", m.from, text), .phone = m.with});
+}
+
+namespace {
+// Someone's character's chat= or call= scene: where its lines start.
+std::optional<std::size_t> phoneSceneOf(const Script& script, std::string_view who, bool call) {
+    for (const auto& [key, def] : script.characters) {
+        if (def.name != who) continue;
+        const auto it = script.phoneScenes.find(call ? def.callScene : def.chatScene);
+        return it != script.phoneScenes.end() ? std::optional(it->second) : std::nullopt;
+    }
+    return std::nullopt;
+}
+} // namespace
 
 void Game::updatePhone(float dt) {
-    for (MessageItem& m : messages_)
-        if (m.typing > 0.0f && (m.typing -= dt) <= 0.0f) {
-            m.typing = 0.0f;
-            arrive(m);
-        }
-}
-
-void Game::arrive(const MessageItem& m) {
-    learnTips(m.text);
-    if (m.replies)
-        if (const auto* c = std::get_if<cmd::Message>(&script_.code[*m.replies].command))
-            for (const cmd::Choice& answer : c->replies) learnTips(answer.text);
-}
-
-bool Game::reply(std::size_t message, std::size_t option) {
-    const auto* m = message < messages_.size() && messages_[message].replies && messages_[message].typing <= 0.0f
-                        ? std::get_if<cmd::Message>(&script_.code[*messages_[message].replies].command) : nullptr;
-    if (!m || option >= m->replies.size()) return false;
-    const cmd::Choice& c = m->replies[option];
-    if (c.condition && !c.condition->test(lookup_)) return false;
-    ctx_.read.insert(c.id);
-    messages_[message].replies.reset();
-    messages_.push_back({.with = messages_[message].with, .color = messages_[message].color, .text = fillValues(c.text, lookup_), .read = true});
-    if (!c.label.empty()) { // its lines, then a label: the story goes there
-        choiceItems_.clear();
-        menuPrompt_ = false;
-        pc_ = c.target;
-        wait_ = Wait::None;
-        answering_ = true;
-        run();
-        answering_ = false;
-        return true;
+    for (std::size_t i = 0; i < phone_.messages.size(); ++i) {
+        MessageItem& m = phone_.messages[i];
+        if (m.typing <= 0.0f || (m.typing -= dt) > 0.0f) continue;
+        m.typing = 0.0f;
+        if (m.kind == MessageItem::Kind::Typing) phone_.messages.erase(phone_.messages.begin() + static_cast<std::ptrdiff_t>(i--)); // (they stopped)
+        else arrive(m);
     }
-    // Its lines run now, as if called from where the story is. Lines that show nothing (set, message,
-    // sound...) leave it there; ones that do play, and the story goes on after the line it was on.
+    if (!putAway_.empty()) { // (a chat= scene over: once its messages have come, and the last could be read)
+        if (std::ranges::any_of(phone().messages, [&](const MessageItem& m) { return m.with == putAway_ && m.typing > 0.0f; })) putAwayIn_ = 2.0f;
+        else if ((putAwayIn_ -= dt) <= 0.0f) {
+            putAway_.clear();
+            requests_.push_back(cmd::Ui{.verb = "hide phone", .arg = "chat"});
+        }
+    }
+    if (!call_) return;
+    call_->time += dt;
+    if (call_->talking) return;
+    // Ringing: one coming rings until its time is over (then it's missed); the player's rings a moment, and is
+    // declined. A declined one (either) says Busy a moment first.
+    if (call_->busy) { // (declined: Busy a moment, then it's over)
+        if (call_->time >= 1.5f) endCall(false);
+        return;
+    }
+    if (!call_->outgoing) {
+        if (call_->rings > 0.0f && call_->time >= call_->rings) {
+            stopRinging();
+            endCall(true);
+        }
+        return;
+    }
+    if (call_->time < 2.5f) return;
+    stopRinging();
+    call_->time = 0.0f;
+    if (!call_->talks) { // (no call scene: they decline it)
+        call_->busy = true;
+        return;
+    }
+    call_->talking = true; // (they answer: their call scene plays)
+    if (const auto at = phoneSceneOf(script_, call_->who, true)) talk(*at, {}, true);
+}
+
+// The options of the choice waiting on the phone, if it's this chat's or call's.
+std::vector<ChoiceItem> Game::phoneChoices(std::string_view who, bool call) const {
+    std::vector<ChoiceItem> out;
+    const auto* m = parked_ && parked_->who == who && parked_->call == call ? std::get_if<cmd::Menu>(&script_.code[parked_->menu].command) : nullptr;
+    for (std::size_t k = 0; m && k < m->choices.size(); ++k)
+        if (auto item = offer(m->choices[k], static_cast<int>(k))) out.push_back(std::move(*item));
+    return out;
+}
+
+// The player picks an option of the choice waiting on the phone: in a chat it's sent there as theirs (on a call, the
+// history has it, as a choice's), and the scene goes on with its lines.
+void Game::pickOnPhone(std::size_t option) {
+    const auto* m = parked_ && !asking() ? std::get_if<cmd::Menu>(&script_.code[parked_->menu].command) : nullptr;
+    if (!m || option >= m->choices.size() || !hasSignal()) return;
+    const cmd::Choice& picked = m->choices[option];
+    if (picked.condition && !picked.condition->test(lookup_)) return;
+    ctx_.read.insert(picked.id); // (picked before, from now on)
+    const Parked p = *std::exchange(parked_, std::nullopt);
+    if (p.call) {
+        RichText chosen = richText(picked.text, lookup_, &script_.palette);
+        for (TextSpan& span : chosen.spans) span.begin += 2, span.end += 2; // after "> "
+        addHistory({.speaker = "", .colour = SDL_Color{150, 150, 165, 255}, .text = "> " + chosen.text, .choice = true, .spans = std::move(chosen.spans)});
+    } else {
+        addMessage(ownPhone(), {.with = p.who, .colour = kOwnColour, .text = fillValues(picked.text, lookup_), .read = true});
+    }
+    talk(picked.target, p.call ? std::string{} : p.who, p.call);
+}
+
+// Lines of someone's chat= or call= scene, run aside: the story stays on its line, shown again after them if they
+// showed something (a call scene's end ends the call; a choice waits on the phone).
+void Game::talk(std::size_t target, const std::string& chat, bool call, bool passing) {
+    asked_ = Asked{.depth = callStack_.size() + 1, .page = page_.size(), .call = call, .passing = passing, .chat = chat}; // (runAside's own frame: while it's there, they run)
+    putAway_.clear();
+    replying_ = !chat.empty(); // (a chat's: messages typed one after another)
+    runAside(target);
+    replying_ = false;
+    if (asking()) asked_->shown = true; // (still under way: they show something)
+    else asked_.reset();
+}
+
+// The player hangs up: the rest of their call scene first (its choices passed), then the call's over.
+void Game::hangUp() {
+    if (!call_ || !call_->outgoing || !call_->talking || asking()) return;
+    const auto* m = parked_ && parked_->call ? std::get_if<cmd::Menu>(&script_.code[parked_->menu].command) : nullptr;
+    parked_.reset();
+    if (m) talk(m->after, {}, true, true);
+    else callOver();
+}
+
+void Game::callOver() {
+    logCall(*call_, false);
+    call_.reset();
+    if (parked_ && parked_->call) parked_.reset();
+    requests_.push_back(cmd::Ui{.verb = "hide phone", .arg = "call"});
+}
+
+// The player's chat open on the phone now (none: ""): its chat= scene plays as it's opened; left at a choice, the rest
+// of it (its choices passed). Not while a chat scene or a call is on (its choice waiting is dropped), nor without signal.
+void Game::chatOpen(const std::string& with) {
+    const std::string now = chat_.empty() && !call_ ? with : std::string{};
+    if (now == chatOpen_) return;
+    const bool can = hasPhone() && hasSignal() && chat_.empty() && !call_;
+    if (parked_ && !parked_->call && parked_->who == chatOpen_) {
+        const auto* m = std::get_if<cmd::Menu>(&script_.code[parked_->menu].command);
+        parked_.reset();
+        if (m && can && !asking()) talk(m->after, chatOpen_, false, true);
+    }
+    chatOpen_ = now;
+    if (const auto at = now.empty() || !can || asking() ? std::nullopt : phoneSceneOf(script_, now, false)) talk(*at, now, false);
+}
+
+// A call: the phone comes up on it, ringing, until it's answered or declined (or its time is over); the
+// player's is answered after a moment, if it has lines. No phone, or no signal: nobody gets through.
+void Game::startCall(const cmd::Call& c, std::size_t here) {
+    const Person who = person(c.character, c.sender);
+    const CallNow now{.who = who.name, .character = who.character, .colour = who.colour, .rings = c.seconds, .at = here};
+    if (!hasPhone() || !hasSignal()) {
+        logCall(now, true);
+        pc_ = c.missed;
+        return;
+    }
+    call_ = now;
+    requests_.push_back(cmd::Ui{.verb = "show phone", .arg = "call"});
+    if (skipping()) skip_ = false; // (one to answer stops skipping, as a choice does)
+    const CharacterDef* def = who.character.empty() ? nullptr : script_.character(who.character);
+    const std::string& tone = def && !def->ringtone.empty() ? def->ringtone : gameSettings().phoneRingtone;
+    if (!tone.empty()) ctx_.sound.playChannel(std::string(kRinging), ctx_.assets.sound(tone), true, 1.0f, 0.0f);
+    waitFor(Wait::Call, here); // (a save made meanwhile rings again)
+}
+
+void Game::answerCall(bool answer) {
+    if (!call_ || call_->talking || call_->busy || call_->outgoing) return;
+    stopRinging();
+    if (!answer) { // (declined: Busy a moment, then it's over)
+        call_->busy = true;
+        call_->time = 0.0f;
+        return;
+    }
+    const cmd::Call* c = call_->at ? std::get_if<cmd::Call>(&script_.code[*call_->at].command) : nullptr;
+    call_->talking = true;
+    call_->time = 0.0f;
+    if (c && wait_ == Wait::Call) {
+        wait_ = Wait::None;
+        pc_ = *call_->at + 1;
+        run();
+    }
+}
+
+// A call over without being answered: missed (it rang out) or busy (declined); a story's goes on to its missed: lines.
+void Game::endCall(bool missed) {
+    const cmd::Call* c = call_->at ? std::get_if<cmd::Call>(&script_.code[*call_->at].command) : nullptr;
+    const bool story = c && wait_ == Wait::Call;
+    logCall(*call_, missed);
+    call_.reset();
+    requests_.push_back(cmd::Ui{.verb = "hide phone", .arg = "call"});
+    if (story) {
+        wait_ = Wait::None;
+        pc_ = c->missed;
+        run();
+    }
+}
+
+void Game::logCall(const CallNow& c, bool missed) {
+    ownPhone().calls.push_back({.who = c.who, .colour = c.colour, .outgoing = c.outgoing, .missed = missed, .busy = c.busy, .seen = !missed || c.outgoing,
+                                .time = toString(variable("phone_clock")), .date = toString(variable("phone_date")), .seconds = missed || c.busy ? 0 : static_cast<int>(std::lround(c.time))});
+}
+
+void Game::stopRinging() { ctx_.sound.stopChannel(std::string(kRinging), 0.1f); }
+
+void Game::callPerson(std::string_view who) {
+    if (call_ || !chat_.empty() || !hasPhone() || !hasSignal()) return;
+    const Person p = personNamed(who); // (it rings a while, then it's answered if they have a call scene, else busy)
+    call_ = CallNow{.who = p.name, .character = p.character, .colour = p.colour, .outgoing = true, .talks = phoneSceneOf(script_, p.name, true).has_value()};
+    if (!gameSettings().phoneCallingSound.empty()) ctx_.sound.playChannel(std::string(kRinging), ctx_.assets.sound(gameSettings().phoneCallingSound), true, 1.0f, 0.0f);
+}
+
+bool Game::phoneAnswers() const {
+    const cmd::Menu* m = wait_ == Wait::Menu ? menu() : nullptr;
+    return m && !m->phone.empty();
+}
+
+// Lines from `target` (a chat= or call= scene's), run as if called from where the story is: lines that show nothing
+// (set, a message, a sound...) leave it there; ones that do play, and the story comes back to its line after them.
+void Game::runAside(std::size_t target) {
     const Wait was = wait_;
     const std::size_t pc = pc_, resume = resumePc_, current = current_;
-    callStack_.push_back(was == Wait::Say ? pc_ : resumePc_);
+    callStack_.push_back(resumePc_);
     const std::size_t depth = callStack_.size();
-    pc_ = c.target;
+    pc_ = target;
     wait_ = Wait::None;
-    answering_ = true;
     for (int budget = kInstructionBudget; wait_ == Wait::None && callStack_.size() >= depth;) {
         if (pc_ >= script_.code.size()) wait_ = Wait::Finished;
-        else if (--budget == 0) fail("An answer's lines ran a very long time without showing anything (does a jump go round in a circle?)");
+        else if (--budget == 0) fail("A phone scene's lines ran a very long time without showing anything (does a jump go round in a circle?)");
         else {
             const std::size_t here = current_ = pc_++;
             resumePc_ = pc_;
             execute(script_.code[here].command, here);
         }
     }
-    answering_ = false;
-    if (wait_ != Wait::None) return true;
+    if (wait_ != Wait::None) return;
     wait_ = was;
     pc_ = pc;
     resumePc_ = resume;
     current_ = current;
-    return false;
+}
+
+void Game::readMessages(std::string_view with) {
+    for (MessageItem& m : ownPhone().messages)
+        if (with.empty() || m.with == with) m.read = m.read || m.typing <= 0.0f;
+}
+
+std::vector<Game::Chat> Game::chats() const {
+    const PhoneData& phone = this->phone();
+    std::vector<Chat> out;
+    auto entry = [&](const std::string& name) -> Chat& {
+        if (const auto it = std::ranges::find(out, name, &Chat::name); it != out.end()) return *it;
+        const Person p = personNamed(name);
+        return out.emplace_back(Chat{.name = name, .colour = p.colour, .character = p.character});
+    };
+    for (std::size_t i = 0; i < phone.messages.size(); ++i) {
+        const MessageItem& m = phone.messages[i];
+        Chat& c = entry(m.with);
+        if (m.typing > 0.0f) c.typing = c.typing || !m.from.empty();
+        else if (m.kind != MessageItem::Kind::End) c.last = i; // (a chat scene's end isn't its newest message)
+        if (!m.read && m.typing <= 0.0f && !m.from.empty() && isMessage(m.kind)) ++c.unread;
+    }
+    std::ranges::stable_sort(out, std::greater{}, [](const Chat& c) { return c.last ? static_cast<long long>(*c.last) : -1LL; });
+    return out;
+}
+
+void Game::seeCalls() {
+    for (CallItem& c : ownPhone().calls) c.seen = true;
+}
+int Game::unseenMessages() const {
+    return static_cast<int>(std::ranges::count_if(phone().messages, [](const MessageItem& m) { return !m.read && m.typing <= 0.0f && !m.from.empty() && isMessage(m.kind); }));
+}
+int Game::unseenCalls() const { return static_cast<int>(std::ranges::count(phone().calls, false, &CallItem::seen)); }
+
+std::string Game::expressionOf(std::string_view character) const {
+    const auto it = expressions_.find(character);
+    return it != expressions_.end() ? it->second : std::string{};
 }
 
 void Game::letPass() {
@@ -1936,17 +2407,20 @@ void Game::choose(std::size_t index) {
     if (!m || index >= choiceItems_.size() || choiceItems_[index].locked) return;
     const cmd::Choice& picked = m->choices[static_cast<std::size_t>(choiceItems_[index].option)];
     ctx_.read.insert(picked.id); // picked before, from now on
-    chartOption_ = choiceItems_[index].option;
+    flowchartOption_ = choiceItems_[index].option;
     RichText chosen = richText(choiceItems_[index].text, lookup_, &script_.palette);
     for (TextSpan& span : chosen.spans) span.begin += 2, span.end += 2; // after "> "
-    addHistory({.speaker = "", .color = SDL_Color{150, 150, 165, 255}, .text = "> " + chosen.text, .choice = true, .spans = std::move(chosen.spans)});
+    addHistory({.speaker = "", .colour = SDL_Color{150, 150, 165, 255}, .text = "> " + chosen.text, .choice = true, .spans = std::move(chosen.spans)});
+    if (!m->phone.empty()) { // a chat's answer: sent there, as the player's (the history has it already, as a choice)
+        unlogged_ = true;
+        addMessage(ownPhone(), {.with = m->phone, .colour = kOwnColour, .text = fillValues(picked.text, lookup_), .read = true});
+        unlogged_ = false;
+    }
     if (wait_ != Wait::Menu) { // one up while the story goes on: its lines, then back where the story was (or past its lines)
-        if (picked.label.empty()) {
-            callStack_.push_back(wait_ == Wait::Say ? pc_ : resumePc_);
-            if (!m->returns) pass_ = Pass{.depth = callStack_.size(), .lines = trigger_->lines};
-        }
+        callStack_.push_back(wait_ == Wait::Say ? pc_ : resumePc_);
+        if (!m->returns) pass_ = Pass{.depth = callStack_.size(), .lines = trigger_->lines};
         trigger_.reset();
-        ctx_.audio.stopVoice();
+        ctx_.sound.stopVoice();
     }
     pc_ = picked.target;
     choiceItems_.clear();
@@ -1967,7 +2441,7 @@ bool Game::have(RecordKind kind, std::string_view name) {
 void Game::collect(RecordKind kind, std::string_view name) {
     const Script::Record* r = script_.record(kind, name);
     if (!r) return;
-    std::ignore = have(kind, name); // (the story says so itself, if it wants to: notify after it)
+    std::ignore = have(kind, name); // (the story says so itself, if it wants to: notice after it)
 }
 
 // The tips a text shows ({tip NAME}...{/tip}): learned when it's said.
@@ -1997,7 +2471,7 @@ void Game::update(float dt) {
     if (fast) stage_.finish();
     stage_.setStill(!ctx_.settings.animations); // (animations off: still)
     stage_.update(dt);
-    blipTimer_ -= dt;
+    typingSoundTimer_ -= dt;
     clock_ += dt;
     lineTime_ += dt;
     typing_ = false;
@@ -2031,7 +2505,7 @@ void Game::update(float dt) {
         }
         break;
     case Wait::Pause: // until a click, or auto-forward's delay
-        if (fast || (auto_ && (autoTimer_ += dt) >= static_cast<float>(ctx_.settings.autoDelay) / 1000.0f)) advance();
+        if (fast || (auto_ && (autoTimer_ += dt) >= static_cast<float>(ctx_.settings.autoDelay) / 1000.0f)) nextLine();
         break;
     case Wait::Movie:
         if (movie_) movie_->update(dt);
@@ -2040,13 +2514,28 @@ void Game::update(float dt) {
     case Wait::Menu:
         if (menu()->seconds > 0.0f && (menuTime_ -= dt) <= 0.0f) letPass(); // time's up
         break;
+    case Wait::Chat: // a chat scene: until the message comes (skipping: at once), or the change is made
+        if (change_) {
+            if ((changeIn_ -= dt) > 0.0f && !fast) break;
+            change(*std::exchange(change_, std::nullopt));
+        } else if (const auto& messages = phone().messages; !fast && std::ranges::any_of(messages, [&](const MessageItem& m) {
+                       return m.number == chatWait_ && m.typing > 0.0f;
+                   })) {
+            break;
+        } else if (fast) {
+            hurry();
+        }
+        wait_ = Wait::None;
+        run();
+        break;
+    case Wait::Call: // (updatePhone() rings it)
     case Wait::Screen:
     case Wait::Reached: // (stopBefore: it's saved from there, not played on)
     case Wait::Stopped: // (stopWhere: until goOn())
     case Wait::Finished:
         break;
     }
-    ctx_.audio.holdVoice(voiceAtPause());
+    ctx_.sound.holdVoice(voiceAtPause());
     updateSpeech();
 }
 
@@ -2054,18 +2543,18 @@ void Game::update(float dt) {
 // said the words before it: in the silence there (the one nearest to where the {pause} is in the
 // text), else right at that place. A click that shows the text early lets the voice catch up first.
 bool Game::voiceAtPause() const {
-    if (wait_ != Wait::Say || !syncVoice_) return false;
+    if (wait_ != Wait::Say || !textFollowsVoice_) return false;
     const Stop* stop = pendingStop();
     if (!stop || stop->seconds >= 0.0f) return false;
-    const auto said = ctx_.audio.voiceProgress();
+    const auto said = ctx_.sound.voiceProgress();
     if (!said) return false;
     const float at = static_cast<float>(stop->at) / static_cast<float>(std::max<std::size_t>(length_, 1));
-    if (const auto silence = ctx_.audio.voiceSilenceNear(at)) return *said >= *silence && ctx_.audio.voiceSilent();
+    if (const auto silence = ctx_.sound.voiceSilenceNear(at)) return *said >= *silence && ctx_.sound.voiceSilent();
     return *said >= at;
 }
 
 // The line on screen: types out (or follows its voice), holds at {pause}s, and goes on by itself
-// when skipping, on auto-forward or with {nowait}.
+// when skipping, on auto-forward or with {no_wait}.
 void Game::updateLine(float dt, bool fast) {
     const auto length = static_cast<float>(length_);
     const Settings& s = ctx_.settings;
@@ -2074,17 +2563,17 @@ void Game::updateLine(float dt, bool fast) {
     if (skipLine) {
         reveal_ = length;
         passedStops_ = stops_.size();
-        if ((skipTimer_ += dt) >= config().skipDelay) {
+        if ((skipTimer_ += dt) >= gameSettings().skipTime) {
             skipTimer_ = 0.0f;
-            advance();
+            nextLine();
         }
         return;
     }
     // A line that follows its voice shows as much as has been said; timed pauses don't apply.
     std::optional<float> said;
-    if (syncVoice_) {
-        said = ctx_.audio.voiceProgress();
-        if (!said) syncVoice_ = false; // the voice ended (or can't play): the rest types as usual
+    if (textFollowsVoice_) {
+        said = ctx_.sound.voiceProgress();
+        if (!said) textFollowsVoice_ = false; // the voice ended (or can't play): the rest types as usual
         else
             for (const Stop* p = pendingStop(); p && p->seconds >= 0.0f && static_cast<float>(p->at) <= *said * length; p = pendingStop())
                 ++passedStops_;
@@ -2098,7 +2587,7 @@ void Game::updateLine(float dt, bool fast) {
             }
         } else if (auto_ && (autoTimer_ += dt) >= static_cast<float>(s.autoDelay) / 1000.0f) {
             autoTimer_ = 0.0f;
-            advance();
+            nextLine();
         }
         return;
     }
@@ -2106,19 +2595,19 @@ void Game::updateLine(float dt, bool fast) {
     float next = limit;
     if (said) next = voiceAtPause() ? limit : std::min(limit, std::max(reveal_, *said * length)); // (the voice waits at a {pause}: all of it)
     else if (const int cps = currentSpeed(); cps > 0) next = std::min(limit, reveal_ + static_cast<float>(cps) * dt);
-    if (static_cast<std::size_t>(next) > static_cast<std::size_t>(reveal_)) revealTo(static_cast<std::size_t>(next)); // blip
+    if (static_cast<std::size_t>(next) > static_cast<std::size_t>(reveal_)) revealTo(static_cast<std::size_t>(next)); // (its typing sound)
     reveal_ = next;
     typing_ = reveal_ < limit;
     if (reveal_ < length || pendingStop() || othersTyping()) return; // (lines said together with it still typing too)
-    // {nowait} and auto-forward wait for the voice line to end; reading time per letter is only
+    // {no_wait} and auto-forward wait for the voice line to end; reading time per letter is only
     // added to lines without a voice (the voice gave the player that time).
-    const bool talking = voiced_ && ctx_.audio.voicePlaying();
+    const bool talking = voiced_ && ctx_.sound.voicePlaying();
     if (noWait_) {
-        if (!talking) advance();
+        if (!talking) nextLine();
         return;
     }
-    const float delay = static_cast<float>(s.autoDelay) / 1000.0f + (voiced_ ? 0.0f : length * config().autoPerChar);
-    if (auto_ && !talking && (autoTimer_ += dt) >= delay) advance();
+    const float delay = static_cast<float>(s.autoDelay) / 1000.0f + (voiced_ ? 0.0f : length * gameSettings().autoLetterDelay);
+    if (auto_ && !talking && (autoTimer_ += dt) >= delay) nextLine();
 }
 
 // How much the speaker is speaking right now: their voice's loudness, or a steady flapping while
@@ -2128,11 +2617,11 @@ void Game::updateSpeech() {
     speech_ = faceSpeech_ = 0.0f;
     if (wait_ != Wait::Say || speakerKey_.empty()) return;
     const CharacterDef* def = script_.character(speakerKey_);
-    const float flaps = def ? def->talkSpeed : config().talkSpeed;
+    const float flaps = def ? def->mouthSpeed : gameSettings().mouthSpeed;
     float loudness = 1.0f;
     if (voiced_) {
-        if (!ctx_.audio.voicePlaying()) return;
-        speech_ = loudness = ctx_.audio.voiceLevel();
+        if (!ctx_.sound.voicePlaying()) return;
+        speech_ = loudness = ctx_.sound.voiceLevel();
     } else if (typing_) {
         speech_ = 0.5f - 0.5f * std::cos(lineTime_ * flaps * 6.2831853f);
     } else {
@@ -2141,19 +2630,19 @@ void Game::updateSpeech() {
     faceSpeech_ = flapping(speakerKey_ + " face", lineTime_, flaps) * std::min(1.0f, loudness * 1.5f);
 }
 
-float Game::mouth(Talk talk, float speech, bool voiced) const {
-    talk = std::max(talk, static_cast<Talk>(std::clamp(ctx_.settings.mouths, 0, 2))); // (Talk goes Yes, Voice, No, as the setting does)
-    return talk == Talk::Yes || (talk == Talk::Voice && voiced) ? speech : 0.0f;
+float Game::mouth(MouthMoves moves, float speech, bool voiced) const {
+    moves = std::max(moves, static_cast<MouthMoves>(std::clamp(ctx_.settings.mouths, 0, 2))); // (MouthMoves goes Yes, Voice, No, as the setting does)
+    return moves == MouthMoves::Yes || (moves == MouthMoves::Voice && voiced) ? speech : 0.0f;
 }
 
-std::vector<Game::Upcoming> Game::upcomingPictures(int commands) const {
+std::vector<Game::Upcoming> Game::upcomingImages(int commands) const {
     std::vector<Upcoming> out;
-    unsigned looks = stage_.effect().looks & kColorLooks; // the colour effects on stage from there on
+    unsigned looks = stage_.effect().looks & kColourLooks; // the colour effects on stage from there on
     std::vector<std::string> stage;                       // what's on it
     std::vector<std::string> people;                      // the characters on it (a line can change their look)
-    auto pictureOf = [&](const std::string& key, const std::string& expression) {
+    auto imageOf = [&](const std::string& key, const std::string& expression) {
         const CharacterDef* def = script_.character(key);
-        return def ? def->pictureOf(expression) : std::string{};
+        return def ? def->imageOf(expression) : std::string{};
     };
     auto show = [&](std::string name) {
         if (name.empty()) return;
@@ -2163,29 +2652,29 @@ std::vector<Game::Upcoming> Game::upcomingPictures(int commands) const {
     };
     if (!stage_.background().starts_with('#')) stage.push_back(stage_.background());
     for (const Stage::ObjectState& o : stage_.objects()) {
-        stage.push_back(o.character.empty() ? o.image : pictureOf(o.character, o.expression));
+        stage.push_back(o.character.empty() ? o.image : imageOf(o.character, o.expression));
         if (!o.character.empty()) people.push_back(o.character);
     }
     const std::size_t end = std::min(script_.code.size(), resumePc_ + static_cast<std::size_t>(std::max(0, commands)));
     for (std::size_t pc = resumePc_; pc < end; ++pc)
         std::visit(Overloaded{
-                       [&](const cmd::Scene& c) {
+                       [&](const cmd::Background& c) {
                            stage.clear();
                            people.clear();
                            if (!c.image.starts_with('#')) show(c.image);
                        },
                        [&](const cmd::Show& c) {
-                           show(c.character.empty() ? c.image : pictureOf(c.character, c.expression));
+                           show(c.character.empty() ? c.image : imageOf(c.character, c.expression));
                            if (!c.character.empty()) people.push_back(c.character);
                        },
                        [&](const cmd::Say& c) {
                            if (c.character.empty()) return;
-                           if (!c.expression.empty() && std::ranges::contains(people, c.character)) show(pictureOf(c.character, c.expression));
+                           if (!c.expression.empty() && std::ranges::contains(people, c.character)) show(imageOf(c.character, c.expression));
                            if (const CharacterDef* def = script_.character(c.character); def && !def->face.empty()) // (in the textbox: no effects)
                                out.push_back({def->faceOf(c.expression)});
                        },
                        [&](const cmd::Effect& c) { // what's on stage then is drawn in its colours (for a moment, or from then on)
-                           const unsigned with = (c.seconds > 0.0f ? looks | c.looks : c.looks) & kColorLooks;
+                           const unsigned with = (c.seconds > 0.0f ? looks | c.looks : c.looks) & kColourLooks;
                            if (with != 0)
                                for (const std::string& name : stage) out.push_back({name, with});
                            if (c.seconds <= 0.0f) looks = with;
@@ -2199,10 +2688,10 @@ std::vector<Game::Upcoming> Game::upcomingPictures(int commands) const {
 Frame Game::frame(std::string_view who) const {
     const CharacterDef* def = script_.character(who);
     Frame f;
-    if (def ? def->blink : config().blink) f.eyes = blinking(who, clock_, def ? def->blinkEvery : config().blinkEvery);
-    if (def && who == speakerKey_) f.mouth = mouth(def->talk, speech_, voiced_);
+    if (def ? def->blink : gameSettings().blink) f.eyes = blinking(who, clock_, def ? def->secondsBetweenBlinks : gameSettings().secondsBetweenBlinks);
+    if (def && who == speakerKey_) f.mouth = mouth(def->mouthMoves, speech_, voiced_);
     else if (def && std::ranges::any_of(others_, [&](const BoxLine& l) { return l.speakerKey == who && l.reveal < static_cast<float>(l.length); }))
-        f.mouth = mouth(def->talk, flapping(who, clock_, def->talkSpeed), false); // a line said together: typing without a voice
+        f.mouth = mouth(def->mouthMoves, flapping(who, clock_, def->mouthSpeed), false); // a line said together: typing without a voice
     return f;
 }
 
@@ -2210,13 +2699,13 @@ Frame Game::faceFrame() const {
     const CharacterDef* def = script_.character(speakerKey_);
     if (!def) return {};
     // A face that copies the character blinks and talks with them; otherwise at its own moments.
-    Frame f{.mouth = mouth(def->faceTalk, def->faceSync.talk ? speech_ : faceSpeech_, voiced_)};
-    if (def->faceBlink) f.eyes = blinking(def->faceSync.blink ? speakerKey_ : speakerKey_ + " face", clock_, def->blinkEvery);
+    Frame f{.mouth = mouth(def->faceMouth, def->faceCopies.mouth ? speech_ : faceSpeech_, voiced_)};
+    if (def->faceBlink) f.eyes = blinking(def->faceCopies.blink ? speakerKey_ : speakerKey_ + " face", clock_, def->secondsBetweenBlinks);
     return f;
 }
 
 void Game::draw(const Font& labelFont) {
-    if (wait_ == Wait::Movie) { // a video covers everything, as big as fits
+    if (wait_ == Wait::Movie) { // a movie covers everything, as big as fits
         SDL_Renderer* r = ctx_.renderer;
         SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
         SDL_RenderFillRect(r, nullptr);
@@ -2225,14 +2714,14 @@ void Game::draw(const Font& labelFont) {
             const float w = movie_->width() * scale, h = movie_->height() * scale;
             const SDL_FRect dst{(ctx_.canvas.w - w) * 0.5f, (ctx_.canvas.h - h) * 0.5f, w, h};
             SDL_RenderTexture(r, frame, nullptr, &dst);
-        } else if (!movieStandIn_.empty()) { // (developer mode) the video that's missing
+        } else if (!movieStandIn_.empty()) { // (developer mode) the movie that's missing
             movieLabel_.set(labelFont, std::format("movies/{}.mpg", movieStandIn_));
             const SDL_FPoint size = movieLabel_.size();
             movieLabel_.draw(r, (ctx_.canvas.w - size.x) * 0.5f, (ctx_.canvas.h - size.y) * 0.5f, theme::dim);
         }
         return;
     }
-    stage_.draw(ctx_.renderer, ctx_.assets, labelFont, config().developer, config().spriteHeight,
+    stage_.draw(ctx_.renderer, ctx_.assets, labelFont, gameSettings().developer, gameSettings().characterHeight,
                 [this](const Stage::ObjectState& s) { return frame(s.character.empty() ? s.tag : s.character); });
 }
 
@@ -2247,42 +2736,48 @@ std::string Game::save() const {
     };
     std::string out = std::format("{}\nhash {}\nresume {}\nrandom {}\n", kSaveMagic, script_.hash, located(resumePc_), resumeRandom_);
     for (auto pc : callStack_) out += std::format("call {}\n", located(pc));
-    for (const auto& [name, value] : vars_) out += std::format("var {} {}\n", name, encodeValue(value));
-    for (const auto& o : stage_.objects())
-        out += std::format("object {} char={} image={} expr={} x={} y={} zoom={} alpha={} rotate={} flip={} layer={} "
-                           "tint=#{:02x}{:02x}{:02x}{}{}\n",
-                           escape(o.tag), escape(o.character), escape(o.image), escape(o.expression),
-                           std::lround(o.x * 10000.0f), std::lround(o.y * 10000.0f), std::lround(o.zoom * 10000.0f), std::lround(o.opacity * 10000.0f),
-                           std::lround(o.rotate * 100.0f), o.flip ? 1 : 0, o.layer, o.tint.r, o.tint.g, o.tint.b,
-                           o.animation.empty() ? "" : " animation=" + escape(o.animation), o.played.empty() ? "" : " played=" + escape(o.played));
+    for (const auto& [name, value] : vars_) out += std::format("variable {} {}\n", name, encodeValue(value));
+    for (const auto& o : stage_.objects()) out += objectLine(o);
     if (!stage_.background().empty())
-        out += std::format("scene {}{}{}\n", stage_.background(), stage_.backgroundAnimation(true).empty() ? "" : " animation=" + escape(stage_.backgroundAnimation(true)),
+        out += std::format("background {}{}{}\n", stage_.background(), stage_.backgroundAnimation(true).empty() ? "" : " animation=" + escape(stage_.backgroundAnimation(true)),
                            stage_.backgroundAnimation(false).empty() ? "" : " played=" + escape(stage_.backgroundAnimation(false)));
     if (!chapter_.empty()) out += std::format("chapter {}\n", escape(chapter_));
-    if (!chartNode_.empty()) out += std::format("chartplace {} {}\n", chartNode_, chartOption_);
+    if (!flowchartNode_.empty()) out += std::format("flowchartpoint {} {}\n", flowchartNode_, flowchartOption_);
     if (!music_.empty()) out += std::format("musicvol {}\nmusic {}\n", std::lround(musicVolume_ * 1000.0f), music_);
     for (const auto& [channel, loop] : loops_)
         out += std::format("loop {} {} {}\n", escape(channel), std::lround(loop.volume * 1000.0f), loop.file);
     for (const auto& screen : screens_) out += std::format("screen {}\n", screen);
-    for (const MessageItem& m : messages_) // (one still being typed: "typing MILLISECONDS message..."; the player's own: "sent ... TO TEXT")
-        out += std::format("{}{} {} {} {} {} {} {}{}\n", m.typing > 0.0f ? std::format("typing {} ", std::lround(m.typing * 1000.0f)) : "",
-                           m.from.empty() ? "sent" : "message", m.read ? 1 : 0, m.color.r, m.color.g, m.color.b, escape(m.with), escape(m.text),
-                           m.replies ? " " + located(*m.replies) : "");
-    if (!phoneOn_) out += "phone off\n";
+    // The phone: how many messages have come (pphone), its messages and calls, and a chat scene or a call under
+    // way. Texts are one word each (field()); a command, "-" or where it is.
+    auto message = [&](std::string_view key, const MessageItem& m) {
+        return std::format("{} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}\n", key, static_cast<int>(m.kind), m.read ? 1 : 0, m.seen ? 1 : 0,
+                           m.deleted ? 1 : 0, m.edited ? 1 : 0, std::lround(m.typing * 1000.0f), m.number, m.colour.r, m.colour.g, m.colour.b, field(m.from),
+                           field(m.with), field(m.character), field(m.expression), field(m.text), field(m.file), field(m.time), field(m.date),
+                           field(m.reaction));
+    };
+    out += std::format("pphone {} {}\n", messageCount_, arrivals_);
+    for (const MessageItem& m : phone_.messages) out += message("pmsg", m);
+    for (const CallItem& c : phone_.calls)
+        out += std::format("pcall {} {} {} {} {} {} {} {} {} {} {}\n", c.outgoing ? 1 : 0, c.missed ? 1 : 0, c.busy ? 1 : 0, c.seen ? 1 : 0, c.seconds, c.colour.r,
+                           c.colour.g, c.colour.b, field(c.who), field(c.time), field(c.date));
+    if (!chat_.empty()) out += "pscene " + field(chat_) + "\n";
+    if (call_ && call_->talking && call_->at) // (one ringing rings again: its command is done again)
+        out += std::format("pcallnow {} {} {} {} {} {} {} {}\n", call_->outgoing ? 1 : 0, std::lround(call_->time * 1000.0f), call_->colour.r, call_->colour.g,
+                           call_->colour.b, field(call_->who), field(call_->character), located(*call_->at));
     if (!textboxScreen_.empty()) out += std::format("textbox {}\n", textboxScreen_);
     for (std::size_t i = 0; i + (wait_ == Wait::Say ? 1 : 0) < page_.size(); ++i) { // (the line on screen is said again)
         const PageLine& p = page_[i];
-        out += std::format("page {} {} {} {} {}\n", p.color.r, p.color.g, p.color.b, escape(p.speaker.empty() ? "-" : p.speaker), escape(p.text));
+        out += std::format("page {} {} {} {} {}\n", p.colour.r, p.colour.g, p.colour.b, escape(p.speaker.empty() ? "-" : p.speaker), escape(p.text));
     }
     if (const cmd::Weather& w = stage_.weather(); !w.kind.empty())
         out += std::format("weather {} {} {} {} {} {} {}\n", w.kind, std::lround(w.amount * 1000.0f), std::lround(w.speed * 1000.0f),
                            std::lround(w.wind * 1000.0f), w.behind ? 1 : 0,
-                           w.color ? std::format("#{:02x}{:02x}{:02x}{:02x}", w.color->r, w.color->g, w.color->b, w.color->a) : "-",
+                           w.tint ? std::format("#{:02x}{:02x}{:02x}{:02x}", w.tint->r, w.tint->g, w.tint->b, w.tint->a) : "-",
                            w.image.empty() ? "-" : w.image);
     if (const cmd::Effect e = stage_.effect(); e.looks != 0) out += std::format("effect {} {}\n", e.looks, std::lround(e.amount * 1000.0f));
     if (trigger_) out += std::format("trigger {} {}\n", located(trigger_->at), trigger_->lines + (wait_ == Wait::Say ? 1 : 0)); // (the line is said again)
     for (const BoxLine& l : others_)
-        out += std::format("box {} {} {} {} {} {} {} {} {}\n", l.keep ? 1 : 0, l.speakerColor.r, l.speakerColor.g, l.speakerColor.b, escape(l.box),
+        out += std::format("box {} {} {} {} {} {} {} {} {}\n", l.keep ? 1 : 0, l.speakerColour.r, l.speakerColour.g, l.speakerColour.b, escape(l.box),
                            escape(l.speakerKey.empty() ? "-" : l.speakerKey), escape(l.speaker.empty() ? "-" : l.speaker), escape(l.face.empty() ? "-" : l.face),
                            escape(l.source));
     if (pass_) out += std::format("pass {} {}\n", pass_->depth, pass_->lines);
@@ -2293,12 +2788,12 @@ std::string Game::save() const {
         auto hex = [](SDL_Color c) { return std::format("#{:02x}{:02x}{:02x}{:02x}", c.r, c.g, c.b, c.a); };
         out += std::format("camera {} {} {} {} {} {} {} {} {} {} {} {}\n", own.empty() ? "-" : escape(own), played.empty() ? "-" : escape(played),
                            std::lround(s.x * 1000.0f), std::lround(s.y * 1000.0f), std::lround(s.opacity * 1000.0f), std::lround(s.zoom * 1000.0f),
-                           std::lround(s.rotate * 1000.0f), std::lround(s.fade * 1000.0f), std::lround(s.wipe * 1000.0f), hex(s.fadeColor),
-                           s.color ? hex(*s.color) : "-", s.wipeShape.empty() ? "-" : escape(s.wipeShape));
+                           std::lround(s.rotation * 1000.0f), std::lround(s.fade * 1000.0f), std::lround(s.wipe * 1000.0f), hex(s.fadeColour),
+                           s.colour ? hex(*s.colour) : "-", s.wipeShape.empty() ? "-" : escape(s.wipeShape));
     }
     for (const auto& [character, expression] : expressions_) out += std::format("expr {} {}\n", escape(character), escape(expression));
     if (wait_ == Wait::Say && !lineVoice_.file.empty()) // the line's voice plays again when it's loaded
-        out += std::format("voice {} {} {}\n", lineVoice_.sync ? (*lineVoice_.sync ? 1 : 0) : -1, std::lround(lineVoice_.volume * 1000.0f),
+        out += std::format("voice {} {} {}\n", lineVoice_.textFollows ? (*lineVoice_.textFollows ? 1 : 0) : -1, std::lround(lineVoice_.volume * 1000.0f),
                            lineVoice_.file);
     return out;
 }
@@ -2311,10 +2806,10 @@ std::expected<std::string, std::string> Game::load(std::string_view data) {
 }
 
 void Game::remember() {
-    if (config().rollback <= 0) return;
+    if (gameSettings().rollbackLines <= 0 || asking()) return; // (a chat= or call= scene's lines: the story's line is the place to go back to)
     const bool line = wait_ == Wait::Say;
     past_.push_back({save(), historyDropped_ + history_.size() - (line && !history_.empty() ? 1 : 0), !(line && noWait_), ctx_.persistent});
-    if (past_.size() > static_cast<std::size_t>(config().rollback) + 1) past_.erase(past_.begin());
+    if (past_.size() > static_cast<std::size_t>(gameSettings().rollbackLines) + 1) past_.erase(past_.begin());
 }
 
 bool Game::canRollback() const {
@@ -2324,7 +2819,7 @@ bool Game::canRollback() const {
 
 bool Game::rollback() {
     if (!canRollback()) return false;
-    std::size_t moment = past_.size() - 2; // before the line on screen now ({nowait} lines go by)
+    std::size_t moment = past_.size() - 2; // before the line on screen now ({no_wait} lines go by)
     while (!past_[moment].stop) --moment;
     return rewind(moment);
 }
@@ -2342,24 +2837,9 @@ bool Game::rollbackTo(std::size_t entry) {
     return moment && rewind(*moment);
 }
 
-void Game::addSamples() {
-    if (history_.empty()) {
-        addHistory({.speaker = "Aiko", .color = {255, 158, 207, 255}, .text = "Good morning! I brought cake."});
-        addHistory({.speaker = "", .color = {230, 230, 235, 255}, .text = "The rain didn't stop all day."});
-        addHistory({.speaker = "", .color = {150, 150, 165, 255}, .text = "> Tell the truth", .choice = true});
-        addHistory({.speaker = "Aiko", .color = {255, 158, 207, 255}, .text = "Thank you for being honest."});
-    }
-    if (messages_.empty()) {
-        messages_.push_back({.from = "Aiko", .with = "Aiko", .color = {255, 158, 207, 255}, .text = "Are you coming today?", .read = true});
-        messages_.push_back({.from = "", .with = "Aiko", .color = {230, 230, 235, 255}, .text = "On my way!", .read = true});
-        messages_.push_back({.from = "Mr. Tanaka", .with = "Mr. Tanaka", .color = {198, 242, 139, 255}, .text = "The meeting moved to four.", .read = true});
-        messages_.push_back({.from = "Aiko", .with = "Aiko", .color = {255, 158, 207, 255}, .text = "Hurry, it's starting to rain.", .read = false});
-    }
-}
-
 void Game::addHistory(HistoryEntry entry) {
     history_.push_back(std::move(entry));
-    const auto limit = static_cast<std::size_t>(std::max(1, config().historyLimit));
+    const auto limit = static_cast<std::size_t>(std::max(1, gameSettings().historyLength));
     if (history_.size() > limit) {
         const std::size_t drop = history_.size() - limit;
         history_.erase(history_.begin(), history_.begin() + static_cast<std::ptrdiff_t>(drop));
@@ -2373,7 +2853,7 @@ bool Game::rewind(std::size_t moment) {
     past_.pop_back(); // showing that line again remembers it again
     skip_ = false;
     // What the story did to persistent variables since then is undone too, so going forward again
-    // doesn't do it twice (a visit counter, say). Gallery pictures, endings, songs and achievements
+    // doesn't do it twice (a visit counter, say). Gallery images, endings, songs and achievements
     // stay: what was seen stays seen.
     std::erase_if(ctx_.persistent, [&](const auto& v) { return !Script::isRecordVariable(v.first) && !back.persistent.contains(v.first); });
     for (auto& [name, value] : back.persistent)
@@ -2400,13 +2880,16 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     std::vector<std::size_t> stack;
     Variables vars;
     std::vector<Stage::ObjectState> objects;
-    std::string scene, sceneAnimation, scenePlayed, music, chapter, chartNode;
-    int chartOption = -1;
+    std::string background, backgroundAnimation, backgroundPlayed, music, chapter, flowchartNode;
+    int flowchartOption = -1;
     float musicVolume = 1.0f;
     std::map<std::string, Loop, std::less<>> loops;
     std::vector<std::string> screens;
-    std::vector<MessageItem> messages;
-    bool phoneOn = true;
+    PhoneData phone;
+    PhoneData* ph = nullptr; // (once its line is read: its things come after it)
+    std::string chatScene;
+    std::uint32_t messageCount = 0, arrivals = 0;
+    std::optional<CallNow> callNow;
     std::map<std::string, std::string, std::less<>> expressions;
     std::optional<LineVoice> voice;
     std::string textbox;
@@ -2416,13 +2899,13 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     std::string cameraOwn, cameraPlayed;
     Animation::Look cameraStart;
 
-    // The exact command when the script is unchanged; otherwise label + offset.
+    // The exact command when the script is unchanged; otherwise scene + offset.
     auto resolve = [&](std::istream& s) -> std::optional<std::size_t> {
         std::string label;
         std::size_t offset = 0, pc = 0;
         if (!(s >> label >> offset >> pc)) return std::nullopt;
         if (hash == script_.hash && pc <= script_.code.size()) return pc; // (the end: a scene played on its own returns there)
-        if (auto at = script_.findLabel(label)) {
+        if (auto at = script_.findScene(label)) {
             note = std::format("The script changed since this save, so it goes on near '{}'.", label);
             return std::min(*at + offset, script_.code.size());
         }
@@ -2458,45 +2941,22 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
         }
         else if (key == "call") {
             if (auto pc = resolve(ls)) stack.push_back(*pc);
-        } else if (key == "var") {
+        } else if (key == "variable") {
             std::string name, value;
             ls >> name;
             std::getline(ls >> std::ws, value);
             vars.insert_or_assign(name, decodeValue(value));
         } else if (key == "object") {
-            Stage::ObjectState o;
-            std::string tag, field;
-            ls >> tag;
-            o.tag = unescape(tag);
-            while (ls >> field) {
-                const auto eq = field.find('=');
-                if (eq == std::string::npos) continue;
-                const std::string k = field.substr(0, eq), v = unescape(field.substr(eq + 1));
-                const float n = static_cast<float>(toInt(v));
-                if (k == "char") o.character = v;
-                else if (k == "image") o.image = v;
-                else if (k == "expr") o.expression = v;
-                else if (k == "x") o.x = n / 10000.0f;
-                else if (k == "y") o.y = n / 10000.0f;
-                else if (k == "zoom") o.zoom = n / 10000.0f;
-                else if (k == "alpha") o.opacity = n / 10000.0f;
-                else if (k == "rotate") o.rotate = n / 100.0f;
-                else if (k == "flip") o.flip = n != 0.0f;
-                else if (k == "layer") o.layer = static_cast<int>(n);
-                else if (k == "tint") o.tint = parseColor(v).value_or(o.tint);
-                else if (k == "animation") o.animation = v;
-                else if (k == "played") o.played = v;
-            }
-            objects.push_back(std::move(o));
-        } else if (key == "scene") { // (its name, then its animations: key=value)
-            ls >> scene;
+            objects.push_back(readObject(ls));
+        } else if (key == "background") { // (its name, then its animations: key=value)
+            ls >> background;
             std::string field;
             while (ls >> field)
-                if (field.starts_with("animation=")) sceneAnimation = unescape(field.substr(10));
-                else if (field.starts_with("played=")) scenePlayed = unescape(field.substr(7));
+                if (field.starts_with("animation=")) backgroundAnimation = unescape(field.substr(10));
+                else if (field.starts_with("played=")) backgroundPlayed = unescape(field.substr(7));
         }
         else if (key == "chapter") chapter = unescape(rest);
-        else if (key == "chartplace") ls >> chartNode >> chartOption;
+        else if (key == "flowchartpoint") ls >> flowchartNode >> flowchartOption;
         else if (key == "music") music = rest;
         else if (key == "musicvol") musicVolume = static_cast<float>(toInt(rest)) / 1000.0f;
         else if (key == "loop") {
@@ -2507,19 +2967,59 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
             loops.insert_or_assign(unescape(channel), Loop{file, static_cast<float>(volume) / 1000.0f});
         } else if (key == "screen") {
             screens.push_back(rest);
-        } else if (key == "message" || key == "sent" || key == "typing") {
+        } else if (key == "pphone") { // (its things come next)
+            ls >> messageCount >> arrivals;
+            ph = &phone;
+        } else if (key == "pmsg") {
+            int kind = 0, read = 0, seen = 0, deleted = 0, edited = 0, r = 0, g = 0, b = 0;
             long typing = 0;
-            if (key == "typing") ls >> typing >> key; // "message"
-            int read = 0, r = 0, g = 0, b = 0;
-            std::string with, text;
-            ls >> read >> r >> g >> b >> with >> text;
-            with = unescape(with);
-            const bool mine = key == "sent";
-            messages.push_back({.from = mine ? std::string{} : with, .with = with, .color = {static_cast<Uint8>(r), static_cast<Uint8>(g), static_cast<Uint8>(b), 255},
-                                .text = unescape(text), .read = read != 0, .replies = mine ? std::nullopt : resolve(ls),
-                                .typing = static_cast<float>(typing) / 1000.0f});
-        } else if (key == "phone") {
-            phoneOn = rest != "off";
+            MessageItem m;
+            std::string from, with, character, expression, text, file, time, date, reaction;
+            ls >> kind >> read >> seen >> deleted >> edited >> typing >> m.number >> r >> g >> b >> from >> with >> character >> expression >> text >> file >> time >>
+                date >> reaction;
+            m.kind = static_cast<MessageItem::Kind>(kind);
+            m.read = read != 0;
+            m.seen = seen != 0;
+            m.deleted = deleted != 0;
+            m.edited = edited != 0;
+            m.typing = static_cast<float>(typing) / 1000.0f;
+            m.colour = {static_cast<Uint8>(r), static_cast<Uint8>(g), static_cast<Uint8>(b), 255};
+            m.from = unfield(from);
+            m.with = unfield(with);
+            m.character = unfield(character);
+            m.expression = unfield(expression);
+            m.text = unfield(text);
+            m.file = unfield(file);
+            m.time = unfield(time);
+            m.date = unfield(date);
+            m.reaction = unfield(reaction);
+            if (ph) ph->messages.push_back(std::move(m));
+        } else if (key == "pcall" && ph) {
+            int outgoing = 0, missed = 0, busy = 0, seen = 0, r = 0, g = 0, b = 0;
+            CallItem c;
+            std::string who, time, date;
+            ls >> outgoing >> missed >> busy >> seen >> c.seconds >> r >> g >> b >> who >> time >> date;
+            c.outgoing = outgoing != 0;
+            c.missed = missed != 0;
+            c.busy = busy != 0;
+            c.seen = seen != 0;
+            c.colour = {static_cast<Uint8>(r), static_cast<Uint8>(g), static_cast<Uint8>(b), 255};
+            c.who = unfield(who);
+            c.time = unfield(time);
+            c.date = unfield(date);
+            ph->calls.push_back(std::move(c));
+        } else if (key == "pscene") {
+            std::string with;
+            ls >> with;
+            chatScene = unfield(with);
+        } else if (key == "pcallnow") {
+            int outgoing = 0, r = 0, g = 0, b = 0;
+            long time = 0;
+            std::string who, character;
+            ls >> outgoing >> time >> r >> g >> b >> who >> character;
+            if (const auto pc = resolve(ls))
+                callNow = CallNow{.who = unfield(who), .character = unfield(character), .colour = {static_cast<Uint8>(r), static_cast<Uint8>(g), static_cast<Uint8>(b), 255},
+                                  .outgoing = outgoing != 0, .talking = true, .time = static_cast<float>(time) / 1000.0f, .at = *pc};
         } else if (key == "expr") {
             std::string character, expression;
             ls >> character >> expression;
@@ -2536,41 +3036,41 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
         } else if (key == "weather") {
             long amount = 1000, speed = 1000, wind = 0;
             int behind = 0;
-            std::string colorText, image;
-            ls >> weather.kind >> amount >> speed >> wind >> behind >> colorText >> image;
+            std::string colourText, image;
+            ls >> weather.kind >> amount >> speed >> wind >> behind >> colourText >> image;
             weather.amount = static_cast<float>(amount) / 1000.0f;
             weather.speed = static_cast<float>(speed) / 1000.0f;
             weather.wind = static_cast<float>(wind) / 1000.0f;
             weather.behind = behind != 0;
-            if (colorText != "-") weather.color = parseColor(colorText);
+            if (colourText != "-") weather.tint = parseColour(colourText);
             if (image != "-") weather.image = image;
         } else if (key == "effect") {
             long amount = 1000;
             ls >> effect.looks >> amount;
             effect.amount = static_cast<float>(amount) / 1000.0f;
         } else if (key == "camera") {
-            std::string own, played, fadeColor, color, shape;
-            long x = 0, y = 0, opacity = 1000, zoom = 1000, rotate = 0, fade = 0, wipe = 1000;
-            ls >> own >> played >> x >> y >> opacity >> zoom >> rotate >> fade >> wipe >> fadeColor >> color >> shape;
+            std::string own, played, fadeColour, colour, shape;
+            long x = 0, y = 0, opacity = 1000, zoom = 1000, rotation = 0, fade = 0, wipe = 1000;
+            ls >> own >> played >> x >> y >> opacity >> zoom >> rotation >> fade >> wipe >> fadeColour >> colour >> shape;
             auto named = [](const std::string& s) { return s == "-" ? std::string{} : unescape(s); };
             auto thousandths = [](long n) { return static_cast<float>(n) / 1000.0f; };
             cameraOwn = named(own);
             cameraPlayed = named(played);
-            cameraStart = {.x = thousandths(x), .y = thousandths(y), .opacity = thousandths(opacity), .zoom = thousandths(zoom), .rotate = thousandths(rotate),
-                           .color = color == "-" ? std::nullopt : parseColor(color), .fade = thousandths(fade),
-                           .fadeColor = parseColor(fadeColor).value_or(SDL_Color{0, 0, 0, 255}), .wipe = thousandths(wipe), .wipeShape = named(shape)};
+            cameraStart = {.x = thousandths(x), .y = thousandths(y), .opacity = thousandths(opacity), .zoom = thousandths(zoom), .rotation = thousandths(rotation),
+                           .colour = colour == "-" ? std::nullopt : parseColour(colour), .fade = thousandths(fade),
+                           .fadeColour = parseColour(fadeColour).value_or(SDL_Color{0, 0, 0, 255}), .wipe = thousandths(wipe), .wipeShape = named(shape)};
         } else if (key == "voice") {
-            int sync = -1;
+            int follows = -1;
             long volume = 1000;
             LineVoice v;
-            ls >> sync >> volume;
+            ls >> follows >> volume;
             std::getline(ls >> std::ws, v.file);
             v.volume = static_cast<float>(volume) / 1000.0f;
-            if (sync >= 0) v.sync = sync == 1;
+            if (follows >= 0) v.textFollows = follows == 1;
             voice = std::move(v);
         }
     }
-    if (!resume) return std::unexpected("this save points to a label that no longer exists");
+    if (!resume) return std::unexpected("this save points to a scene that no longer exists");
 
     stage_.reset();
     for (const auto& o : objects) {
@@ -2582,14 +3082,14 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
         stage_.animate(o.tag, animation(o.animation), true, true);
         stage_.animate(o.tag, animation(o.played), false, true);
     }
-    if (!scene.empty()) {
-        stage_.setBackground(scene, nullptr, true);
-        stage_.animateBackground(animation(sceneAnimation), true, true);
-        stage_.animateBackground(animation(scenePlayed), false, true);
+    if (!background.empty()) {
+        stage_.setBackground(background, nullptr, true);
+        stage_.animateBackground(animation(backgroundAnimation), true, true);
+        stage_.animateBackground(animation(backgroundPlayed), false, true);
     }
     chapter_ = chapter;
-    chartNode_ = chartNode;
-    chartOption_ = chartOption;
+    flowchartNode_ = flowchartNode;
+    flowchartOption_ = flowchartOption;
     stage_.setWeather(weather, 0.0f);
     stage_.setEffect(effect, true);
     stage_.restoreCamera(animation(cameraOwn), animation(cameraPlayed), cameraStart);
@@ -2598,22 +3098,29 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     vars_ = std::move(vars);
     callStack_ = std::move(stack);
     screens_ = std::move(screens);
-    messages_ = std::move(messages);
-    phoneOn_ = phoneOn;
+    phone_ = std::move(phone);
+    messageCount_ = messageCount;
+    arrivals_ = arrivals;
+    chat_ = chatScene;
+    call_ = callNow;
+    change_.reset();
+    stopRinging();
+    if (!chat_.empty()) requests_.push_back(cmd::Ui{.verb = "show phone", .arg = "chat", .phone = chat_}); // (on with it)
+    if (call_) requests_.push_back(cmd::Ui{.verb = "show phone", .arg = "call"});
     expressions_ = std::move(expressions);
     music_ = music;
     musicVolume_ = musicVolume;
-    ctx_.audio.stopVoice();
-    if (music.empty()) ctx_.audio.stopMusic(0.5f);
-    else ctx_.audio.playMusic(ctx_.assets.audio(music), true, 0.5f, musicVolume); // the same song keeps playing
+    ctx_.sound.stopVoice();
+    if (music.empty()) ctx_.sound.stopMusic(0.5f);
+    else ctx_.sound.playMusic(ctx_.assets.sound(music), true, 0.5f, musicVolume); // the same song keeps playing
     // Looping sounds: a load starts them over; rollback keeps those that are already right.
     const bool rollingBack = keepHistory.has_value();
-    if (!rollingBack) ctx_.audio.stopChannel("", 0.3f);
+    if (!rollingBack) ctx_.sound.stopChannel("", 0.3f);
     for (const auto& [channel, loop] : loops_)
-        if (rollingBack && (!loops.contains(channel) || loops.at(channel).file != loop.file)) ctx_.audio.stopChannel(channel, 0.3f);
+        if (rollingBack && (!loops.contains(channel) || loops.at(channel).file != loop.file)) ctx_.sound.stopChannel(channel, 0.3f);
     for (const auto& [channel, loop] : loops)
         if (!rollingBack || !loops_.contains(channel) || loops_.at(channel).file != loop.file)
-            ctx_.audio.playChannel(channel, ctx_.assets.audio(loop.file), true, loop.volume, 0.5f);
+            ctx_.sound.playChannel(channel, ctx_.assets.sound(loop.file), true, loop.volume, 0.5f);
     loops_ = std::move(loops);
 
     // Rollback keeps the entries before its line (counting those let go); a load starts afresh.
@@ -2625,13 +3132,17 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
         listChoices(*m);
     else trigger_.reset();
     pass_ = pass;
+    asked_.reset();
+    parked_.reset();
+    chatOpen_.clear();
+    putAway_.clear();
     hiddenLines_ = hidden;
     others_ = std::move(others);
     together_ = std::ranges::any_of(others_, [](const BoxLine& l) { return !l.keep; }); // (the last line of a together block is said again)
     error_.clear();
     skip_ = uiHidden_ = menuPrompt_ = false;
     pendingVoice_ = voice; // the line's own voice line plays again
-    if (voice && !skipping()) ctx_.audio.playVoice(ctx_.assets.audio(voice->file), voice->volume);
+    if (voice && !skipping()) ctx_.sound.playVoice(ctx_.assets.sound(voice->file), voice->volume);
     pc_ = resumePc_ = *resume;
     if (random) random_ = *random;
     wait_ = Wait::None;

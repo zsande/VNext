@@ -101,6 +101,7 @@ public:
     [[nodiscard]] Value eval(const Lookup& lookup) const;
     [[nodiscard]] bool test(const Lookup& lookup) const { return truthy(eval(lookup)); }
     [[nodiscard]] std::optional<Value> constant() const; // its value, when it's just one (3, yes, "Mia")
+    [[nodiscard]] std::vector<std::string> names() const; // the names it reads (variables and values), each once
 
 private:
     friend class ExprParser;
@@ -124,8 +125,8 @@ private:
     int root_ = -1;
 };
 
-// Text tags handled by the textbox: {pause}, {pause 0.5}, {nowait}, {speed 10}...{/speed},
-// {color gold}...{/color}, {reveal line}. `at` is the tag's position in the expanded text, in codepoints.
+// Text tags handled by the textbox: {pause}, {pause 0.5}, {no_wait}, {speed 10}...{/speed},
+// {colour gold}...{/colour}, {appears line}. `at` is the tag's position in the expanded text, in codepoints.
 using TagHandler = std::function<void(std::string_view name, std::string_view arg, std::size_t at)>;
 [[nodiscard]] bool isTextTag(std::string_view inner);
 
@@ -135,14 +136,18 @@ using TagHandler = std::function<void(std::string_view name, std::string_view ar
 // Fills in {expressions} now, but leaves text tags (and {{ }}) for a later expand(); braces in the
 // values are doubled, so they stay text. (Messages and choices, shown later as rich text.)
 [[nodiscard]] std::string fillValues(std::string_view text, const Lookup& lookup);
+// `text` with each {NAME} that `values` has filled in (braces in them doubled), and the rest as it is.
+[[nodiscard]] std::string withValues(std::string_view text, const Variables& values);
 // Checks the {...} parts of a text; returns the first problem.
 [[nodiscard]] std::string checkText(std::string_view text);
+// The names a text's {...} parts read (not its tags'), each once.
+[[nodiscard]] std::vector<std::string> namesIn(std::string_view text);
 
 // ---------------------------------------------------------------------------
 // Scripts
 // ---------------------------------------------------------------------------
 // Everything a game's .vnscript files define: the story (as a list of commands), the characters,
-// and the presentation (config, colours, fonts, styles, screens, controls).
+// and the presentation (settings, colours, fonts, styles, screens, controls).
 
 struct Translation;
 
@@ -150,10 +155,10 @@ struct Translation;
 // Story commands
 // ---------------------------------------------------------------------------
 
-// Optional changes to a picture on stage (characters and images).
+// Optional changes to an image on stage (characters and images).
 struct StageProps {
-    std::optional<float> x, y;             // 0..1 across / down the canvas (the picture lines up with that much of it)
-    std::optional<float> zoom, opacity, rotate;
+    std::optional<float> x, y;             // 0..1 across / down the canvas (the image lines up with that much of it)
+    std::optional<float> zoom, opacity, rotation;
     std::optional<bool> flip;
     std::optional<int> layer;              // higher layers draw on top
     std::optional<SDL_Color> tint;         // multiplies its colours (black: a silhouette)
@@ -176,13 +181,13 @@ struct Say {
     std::string speaker;    // a one-off speaker name, or empty for narration
     std::string expression; // optional new expression for the character
     std::string text;       // may contain {expressions} and text tags
-    std::string voiceId;    // "<label>_<n>": the character's n-th line in the label (for voices=)
+    std::string voiceId;    // "<scene>_<n>": the character's n-th line in the scene (for voice_files=)
     std::uint64_t id = 0;   // the line as written, who says it included (the same in every language)
     bool together = false;  // in a "together" block, before its last line: it shows with the next one, without waiting
 };
 // A line's animations are the scripts' (by name): "" for none. "with NAME" plays one now: as a new
 // background, character or image comes (over what was there), on one already there, or as one goes.
-struct Scene {
+struct Background {
     std::string image; // image name or "#rrggbbaa"
     std::optional<std::string> animation; // animation=NAME: what the background plays while it's shown
     std::optional<std::string> with;      // with NAME: as it comes in, over the one before (which goes when it ends); on the one already there
@@ -193,17 +198,16 @@ struct Show {
     std::string expression;
     StageProps props;
     std::optional<std::string> animation; // animation=NAME: what it plays while it's shown (animation=none: nothing)
-    std::optional<std::string> with;      // with NAME: as it comes, or on the one already there (none said: config show_animation, as one comes)
+    std::optional<std::string> with;      // with NAME: as it comes, or on the one already there (none said: setting animation_on_show, as one comes)
     bool wait = false;                    // and wait: the story waits for it to end (and for it to reach a new place)
 };
 struct Hide {
     std::string tag;
-    std::optional<std::string> with; // with NAME: plays, then it's gone (none said: config hide_animation)
+    std::optional<std::string> with; // with NAME: plays, then it's gone (none said: setting animation_on_hide)
     bool wait = false;               // and wait: the story waits until it's gone
 };
 struct Choice {
     std::string text;
-    std::string label; // "-> label": where it goes, after its own lines if it has any
     std::size_t target = 0;
     std::optional<Expr> condition;
     bool shownLocked = false; // (needs ...): while the condition is false it shows, but can't be picked
@@ -211,19 +215,23 @@ struct Choice {
     std::uint64_t id = 0;     // the option as written (the same in every language): "picked before"
 };
 struct Menu {
-    std::string prompt;
     std::vector<Choice> choices;
     float seconds = 0.0f;  // for N seconds: then none is picked (0: no time limit)
     int lines = 0;         // for N lines: the story goes on meanwhile, the options up for its next N lines
     bool returns = true;   // (for N lines) after a picked option's lines, back to the line after the one showing; no: past the N lines
     bool optional = false; // optional=yes: clicking on picks none (the line before it stays on screen)
-    std::string screen;    // screen=NAME: the screen that shows it (else "choice")
+    bool repeats = false;  // repeat=yes: after a picked option's lines, it's up again
     std::size_t after = 0; // where the story goes on when none is picked
+    // A chat's (in a chat scene, or someone's chat= scene) or a call's (someone's call= scene): its options show on the
+    // phone, in this person's chat (the one picked is sent there) or on the call with them.
+    std::string phone;
+    bool call = false;
 };
 struct Jump {
-    std::string label;
+    std::string scene;
     std::size_t target = 0;
     bool call = false;            // come back here on "return"
+    bool again = false;           // back to its repeating choice, after an option's lines (shown without the line before it)
     std::optional<Expr> unless;   // only jump when this is false (if / else)
 };
 struct Return {};
@@ -241,28 +249,28 @@ struct Play {
     bool loop = false;
     float volume = 1.0f;
     float fade = 0.0f;
-    std::optional<bool> sync; // voice: the next line types out with it (else config voice_sync)
+    std::optional<bool> textFollows; // voice: the next line types out with it (else setting text_follows_voices)
 };
 struct Wait { float seconds = -1.0f; }; // < 0: until a click
 struct Screen { std::string name; bool show = true; }; // "show screen" / "hide screen": up while playing
-struct Ask { std::string variable, prompt, fallback; int max = 24; };
+struct Ask { std::string variable, prompt, fallback; int mostLetters = 24; };
 // Rain, snow, petals, leaves or embers over the stage. kind empty: stop.
 struct Weather {
     std::string kind;
     float amount = 1.0f, speed = 1.0f, wind = 0.0f;
-    std::optional<SDL_Color> color;
-    std::string image; // a picture for each flake / drop instead of the drawn one
+    std::optional<SDL_Color> tint;
+    std::string image; // an image for each flake / drop instead of the drawn one
     bool behind = false; // behind the characters (else in front of them)
     float fade = 1.0f;
 };
-// The view of the stage, played as a picture's animations are: one it keeps playing (animation=NAME),
+// The view of the stage, played as an image's animations are: one it keeps playing (animation=NAME),
 // and one it plays now (with NAME), from where the one before left it ("": none; with none: back to
 // normal); `wait`: the story waits for that one.
 struct Camera {
     std::optional<std::string> animation, with;
     bool wait = false;
 };
-// A video (movies/NAME.mpg) over everything; the story goes on when it ends, or when the player
+// A movie (movies/NAME.mpg) over everything; the story goes on when it ends, or when the player
 // clicks past it.
 struct Movie {
     std::string file;
@@ -270,17 +278,18 @@ struct Movie {
     bool skippable = true;  // clicks, keys and skipping go past it
     float volume = 1.0f;    // its sound, on top of the music volume
 };
-// "textbox NAME": the screen every line uses from now on (else "say"); "new page" empties the page;
+// "textbox NAME": the screen every line uses from now on (else "textbox"); "new page" empties the page;
 // "hide textbox [NAME]": a textbox's kept line goes (all of them without NAME).
 struct Textbox { std::string screen; bool newPage = false, hide = false; };
 // Menu commands: open (from the story it waits for the screen to close), close, answer, quick
-// save, notify...
+// save, notice...
 struct Ui {
     std::string verb, arg;
-    std::optional<std::string> opening, closing; // open SCREEN with NAME and close with NAME: what it plays this time (none said: its own show_ and hide_animation=)
+    std::optional<std::string> opening, closing; // open SCREEN with NAME and close with NAME: what it plays this time (none said: its own show_ and animation_on_close=)
+    std::string phone; // what the game asks of the phone: the chat to show (a notice of a message: clicking it opens it there)
 };
-// "unlock PICTURE", "ending NAME", "achievement NAME", "tip NAME": the player has it now (a picture,
-// an ending reached, an achievement earned, a tip learned). Pictures and songs are also had by
+// "gallery IMAGE", "ending NAME", "achievement NAME", "tip NAME": the player has it now (an image,
+// an ending reached, an achievement earned, a tip learned). Images and songs are also had by
 // showing / playing them, tips by a line that shows {tip NAME}.
 struct Record { RecordKind kind; std::string name; };
 // "chapter TITLE": the story's part from here on (saves show it; a "chapter" screen shows it big).
@@ -293,108 +302,143 @@ struct Effect {
     float fade = 0.0f;   // coming in (or going) over this many seconds
     float seconds = 0.0f;
 };
-// "chart TITLE": a place on the flowchart (chapters, choices and endings are on it by themselves).
+// "flowchart TITLE": a point on the flowchart (chapters, choices and endings are on it by themselves).
 struct Mark { std::string title; };
-// "message NAME: text": a message on the phone (the phone part), with the answers the player
-// can send back indented under it (options like a choice's). "message to NAME: text" is the
-// player's own, to them. Each person's messages are a conversation of their own (the contacts part).
+// A line of a chat scene: a message on the phone in its chat, "Mika: words" someone's and
+// "me: words" the player's. Its other forms send an image, a sticker or a voice message, or change the
+// chat: someone deletes or edits their last message, reacts to the last one someone else sent, reads the
+// player's, or types for a while. End: the scene is over (a line saying so, after its last).
 struct Message {
-    std::string character; // who it's from (or to, if it's the player's): a defined character (lower-case name)...
-    std::string sender;    // ...or anyone else's name
-    bool mine = false;     // sent by the player
-    std::string text;
-    std::vector<Choice> replies;
+    enum class Kind : std::uint8_t { Text, Image, Sticker, Voice, Typing, Delete, Edit, React, Read, End };
+    Kind kind = Kind::Text;
+    std::string character;  // who sent it (the player's own: who it goes to): a defined character (lower-case name)...
+    std::string sender;     // ...or anyone else's name
+    std::string expression; // their face's, beside it
+    bool mine = false;      // the player's (whoever owns the phone)
+    std::string text;       // its words: a message's, an image's or voice message's caption, Edit's new ones, React's reaction
+    std::string file;       // Image and Sticker: an image; Voice: a sound
+    float seconds = 0.0f;   // Typing: for how long (0: two seconds)
 };
-// "phone off" takes the phone away for a while (screens showing it close, no notices); "phone on" gives it back.
-struct Phone { bool on = true; };
+// The phone has no lines of its own besides chats and calls: whether there is one, and its apps, go by
+// variables (setting has_phone, each app's when=), and so do its owner, wallpapers, passcode, clock, date,
+// signal and battery (phone_owner, phone_wallpaper, phone_lock_wallpaper, phone_passcode, phone_clock,
+// phone_date, phone_signal, phone_battery: as Settings starts them). It locks whenever it's put away.
+// "chat WHO": a chat scene. The phone comes up on their chat, its lines play there (the story waits for
+// each), and `end` (after them) waits for a click and puts the phone back.
+struct Chat {
+    std::string with; // whose: their name, as shown
+    bool end = false;
+};
+// "phone call WHO": they call, and the phone rings until it's answered or declined (or `for N seconds`
+// pass). Its lines are the call; its `missed:` lines run instead when nobody answers. `end`: the call is
+// over (after its lines).
+struct Call {
+    std::string character, sender; // who: a defined character (lower-case name), or anyone else's name
+    float seconds = 0.0f;   // rings at most this long (0: until it's answered or declined)
+    std::size_t missed = 0; // its missed: lines (or past it)
+    std::size_t after = 0;  // past it
+    bool end = false;
+};
 } // namespace cmd
 
-using Command = std::variant<cmd::Say, cmd::Scene, cmd::Show, cmd::Hide, cmd::Menu, cmd::Jump,
+using Command = std::variant<cmd::Say, cmd::Background, cmd::Show, cmd::Hide, cmd::Menu, cmd::Jump,
                              cmd::Return, cmd::End, cmd::Set, cmd::Play, cmd::Wait, cmd::Screen, cmd::Ask, cmd::Ui,
                              cmd::Weather, cmd::Camera, cmd::Textbox, cmd::Movie, cmd::Record, cmd::Chapter, cmd::Mark,
-                             cmd::Message, cmd::Effect, cmd::Phone>;
+                             cmd::Message, cmd::Effect, cmd::Chat, cmd::Call>;
 using Commands = std::vector<Command>;
 
-// When a character's mouth moves (their pictures need mouth frames: see Atlas).
-enum class Talk : std::uint8_t {
+// When a character's mouth moves (their images need mouth frames: see Atlas).
+enum class MouthMoves : std::uint8_t {
     Yes,   // with their voice line, or while their text types if the line has none
     Voice, // only with a voice line
     No,
 };
 
-// What a face in the textbox copies from the character's picture on stage (face_sync=). What it
+// What a face in the textbox copies from the character's image on stage (face_copies=). What it
 // doesn't copy, it does on its own: its own expression, blinks and mouth movements.
-struct FaceSync {
+struct FaceCopies {
     bool expression = true; // Aiko happy: ... changes both (else only the face; show Aiko happy only the stage)
     bool blink = true;      // blinks at the same moments
-    bool talk = true;       // the mouth opens and closes with the one on stage
+    bool mouth = true;      // the mouth opens and closes with the one on stage
 };
 
 struct CharacterDef {
     std::string key;   // lower-case name
     std::string name;  // as shown
     std::string image; // images/<image>.png, images/<image>_<expression>.png
-    [[nodiscard]] std::string pictureOf(std::string_view expression) const { return expression.empty() ? image : std::format("{}_{}", image, expression); }
+    [[nodiscard]] std::string imageOf(std::string_view expression) const { return expression.empty() ? image : std::format("{}_{}", image, expression); }
     [[nodiscard]] std::string faceOf(std::string_view expression) const { return expression.empty() ? face : std::format("{}_{}", face, expression); }
-    SDL_Color color{255, 255, 255, 255}; // name colour
-    std::optional<SDL_Color> textColor;  // dialogue colour (else the dialogue style's)
-    std::optional<Reveal> reveal;        // how their lines appear (else config reveal)
-    std::string textbox;                 // screen used as their textbox (else "say")
-    std::string blip;                    // sound played while their text types out (lines without a voice)
-    std::string voices;                  // their lines' voice files: audio/<voices>/<label>_<n> (empty: none)
-    float babble = 0.0f;                 // made-up voice for every line, this high (Hz); 0: none
-    float babbleSpeed = 1.0f;            // how fast it talks (1 = normal)
+    SDL_Color nameColour{255, 255, 255, 255};
+    std::optional<SDL_Color> textColour;  // dialogue colour (else the dialogue style's)
+    std::optional<TextAppears> textAppears;   // how their lines appear (else setting text_appears)
+    std::string textbox;                 // screen used as their textbox (else "textbox")
+    std::string typingSound;             // sound played while their text types out (lines without a voice)
+    std::string voiceFiles;              // their lines' voice files: sounds/<voiceFiles>/<scene>_<n> (empty: none)
+    float madeUpVoice = 0.0f;            // made-up voice for every line, this high (Hz); 0: none
+    float madeUpVoiceSpeed = 1.0f;       // how fast it talks (1 = normal)
 
     // On stage (atlases with eyes and mouth frames).
     bool blink = true;
-    float blinkEvery = 4.0f;  // seconds between blinks, on average
-    Talk talk = Talk::Yes;
-    float talkSpeed = 4.0f;   // mouth movements a second while text types without a voice
+    float secondsBetweenBlinks = 4.0f;  // seconds between blinks, on average
+    MouthMoves mouthMoves = MouthMoves::Yes;
+    float mouthSpeed = 4.0f;   // mouth movements a second while text types without a voice
 
     // The face in the textbox: images/<face>.png, <face>_<expression>.png, shown by a "face" part.
     std::string face;
     std::string faceSide = "left"; // which end of the textbox ({face_side} in screens)
-    FaceSync faceSync;             // what it copies from the picture on stage
+    FaceCopies faceCopies;             // what it copies from the image on stage
     bool faceFlip = false;         // mirrored
     bool faceBlink = true;         // (default: like on stage)
-    Talk faceTalk = Talk::Yes;     // (default: like on stage)
+    MouthMoves faceMouth = MouthMoves::Yes;     // (default: like on stage)
+
+    // On the phone: their image beside their messages and in the phone's people (images/<avatar>.png,
+    // <avatar>_<expression>.png; else their face's), a line about them, and what plays when they call
+    // (else setting phone_ringtone); they're in its people while `contact` is true (none: never); and the
+    // scenes with the questions the player can ask them from the phone, in their chat and on a call (chat=, call=).
+    std::string avatar, about, ringtone;
+    std::optional<Expr> contact;
+    std::string chatScene, callScene;
+    [[nodiscard]] std::string avatarOf(std::string_view expression) const {
+        const std::string& base = avatar.empty() ? face : avatar;
+        return base.empty() || expression.empty() ? base : std::format("{}_{}", base, expression);
+    }
 };
 
 // ---------------------------------------------------------------------------
 // Presentation
 // ---------------------------------------------------------------------------
 
-enum class Align : std::uint8_t { Start, Center, End };
+enum class Align : std::uint8_t { Start, Centre, End };
 
 struct Style {
     struct State {
-        std::optional<SDL_Color> color, bg, border;
-        std::optional<SDL_Color> bgBottom; // (bg= fading down to it: navy-black)
+        std::optional<SDL_Color> colour, background, border;
+        std::optional<SDL_Color> backgroundBottom; // (background= fading down to it: navy-black)
         std::string image;
     };
 
     std::string font = "default";
     float size = 24.0f;
-    SDL_Color color{240, 240, 245, 255};
-    SDL_Color bg{0, 0, 0, 0};
-    std::optional<SDL_Color> bgBottom; // (bg= fading down to it: navy-black)
+    SDL_Color colour{240, 240, 245, 255};
+    SDL_Color background{0, 0, 0, 0};
+    std::optional<SDL_Color> backgroundBottom; // (background= fading down to it: navy-black)
     SDL_Color border{0, 0, 0, 0};
-    std::string image;          // drawn stretched instead of bg/border
-    State hover, selected, disabled;
+    std::string image;          // drawn stretched instead of background/border
+    State pointed, chosen, unclickable;
     Align align = Align::Start; // text alignment inside the element's box
-    Align valign = Align::Start;
+    Align alignVertically = Align::Start;
     float padding = 0.0f;
     float opacity = 1.0f;
     TextShadow shadow;
     float lineSpacing = 1.0f;   // 1 = the font's own
-    bool textboxOpacity = false; // also fades with the player's "textbox opacity" setting
-    bool textSize = false;       // its size follows the player's "text size" setting
-    bool speakerColor = false;  // text uses the speaking character's colour
-    std::string hoverSound, clickSound;
+    bool opacityFollows = false;  // also fades with the player's "textbox opacity" setting
+    bool textSizeFollows = false; // its size follows the player's "text size" setting
+    bool speakerColour = false;  // text uses the speaking character's colour
+    std::string pointedSound, clickSound;
 };
 
 // "animation NAME [loop [N times]]", with what it changes on the lines under it: how a screen, a
-// part of one (animation=, hover_animation=, click_animation=) or a character or image on the stage
+// part of one (animation=, pointed_animation=, click_animation=) or a character or image on the stage
 // (show ... animation=, show/hide ... with) moves, fades, grows, turns, changes colour and wipes. Each line changes some
 // of those to its values: "over 1 second" from where the line before it ended, or at moments of its
 // own ("from 0.5 to 1 second", "at 2 seconds"); without either, at once where the line before ended.
@@ -402,29 +446,29 @@ struct Style {
 // starts while another of the same value goes on takes over from there. Played again and again (loop),
 // a few times (loop 3 times) or once, it stays as its end left it.
 struct Animation {
-    enum class Value : std::uint8_t { X, Y, Opacity, Zoom, Rotate, Color, Fade, Wipe };
+    enum class Value : std::uint8_t { X, Y, Opacity, Zoom, Rotation, Colour, Fade, Wipe };
     struct Change {
         Value what = Value::Opacity;
         // x, y: a place on the screen, -1 to 1 like the stage's (NaN: home, its own place), or with `by`
         // a share of the screen to move by from its own place (left=5%: -0.05 across; up=5%: 0.05 down
-        // the other way, as places go up); opacity 0..1; zoom 1 = its size; rotate in degrees.
+        // the other way, as places go up); opacity 0..1; zoom 1 = its size; rotation in degrees.
         float to = 0.0f;
         bool by = false;
-        SDL_Color color{};       // color=: a picture's tint, words' colour, a rect's fill; fade=: what it's covered with (alpha 0: none, uncovered again)
-        std::string shape;       // wipe= ... shape=PICTURE: where the wipe shows it first (the picture's darkest parts); none: from the left
+        SDL_Color colour{};       // colour=: an image's tint, words' colour, a rect's fill; fade=: what it's covered with (alpha 0: none, uncovered again)
+        std::string shape;       // wipe= ... shape=IMAGE: where the wipe shows it first (the image's darkest parts); none: from the left
         float start = 0.0f;      // when it begins (seconds into the animation)
         float seconds = 0.0f;    // how long it takes (0: at once)
         Ease ease = Ease::InOut; // (a fade's: linear, as a screen's fade is, unless said)
         [[nodiscard]] float end() const { return start + seconds; }
     };
     struct Look {
-        float x = 0.0f, y = 0.0f, opacity = 1.0f, zoom = 1.0f, rotate = 0.0f;
-        std::optional<SDL_Color> color; // (none: its own)
+        float x = 0.0f, y = 0.0f, opacity = 1.0f, zoom = 1.0f, rotation = 0.0f;
+        std::optional<SDL_Color> colour; // (none: its own)
         float fade = 0.0f;              // how far it's covered (0 to 1), and with what
-        SDL_Color fadeColor{0, 0, 0, 255};
+        SDL_Color fadeColour{0, 0, 0, 255};
         float wipe = 1.0f;              // how much of it shows (1: all of it): from the left, or as `wipeShape` has it (Wiper)
         std::string wipeShape;
-        // Two at once (a part's own and its hover one, a character's own and one played on it): moves
+        // Two at once (a part's own and its pointed one, a character's own and one played on it): moves
         // and turns added up, opacity and zoom multiplied, the other's colour, cover and wipe where it has them.
         [[nodiscard]] Look with(const Look& other) const;
     };
@@ -447,14 +491,39 @@ struct Animation {
 
 enum class ElementKind : std::uint8_t {
     Image, Text, Button, Key,                                                         // general
-    Namebox, Dialogue, Indicator, Choices, History, Pages, Slots, Message, Face, Control, Gallery, Page, // engine widgets
+    Namebox, Dialogue, Indicator, Choices, History, Pages, Slots, Notice, Face, Control, Gallery, Page, // engine widgets
     Input, Bar, Slider,                                                             // variable widgets
-    Movie,                                                                          // a video playing (loops)
+    Movie,                                                                          // a movie playing (loops)
     Endings, Songs, Achievements, Tips,                                             // lists of what was reached
-    Chart,                                                                          // the flowchart
-    Phone, Contacts,                                                                // the phone's messages, and who sent them
-    Container,                                                                      // parts in it (any part can hold parts)
+    Flowchart,                                                                          // the flowchart
+    Container, // parts in it (any part can hold parts; list=: once for each item of a list, the phone's...)
 };
+// What a container can repeat its parts for (list=NAME), and what one of them is called in its parts' values
+// ({chat.name}): the phone's apps, its chats, the messages in the one open (answers: a choice's on the phone),
+// its calls, the people in it, and what's new on its lock screen.
+inline constexpr std::array<std::pair<std::string_view, std::string_view>, 7> kLists{{
+    {"apps", "app"}, {"chats", "chat"}, {"messages", "message"}, {"answers", "answer"}, {"calls", "call"}, {"people", "person"}, {"notices", "notice"}}};
+// Each list's items' values, after its word ({chat.name}): ScreenView::listItems() gives these. Someone's (a
+// chat's, a message's, a call's or a person's) have their character, avatar, initial and colour too.
+inline constexpr std::array<std::pair<std::string_view, std::string_view>, 7> kItemValues{{
+    {"app", "name title icon initial count open"},
+    {"chat", "name text time unread typing open character avatar initial colour"},
+    {"message", "number from mine text typing image sticker sound time day edited deleted seen reaction ended character avatar initial colour"},
+    {"answer", "text locked note on kind of option"},
+    {"call", "who missed busy outgoing incoming time length character avatar initial colour"},
+    {"person", "name about character avatar initial colour"},
+    {"notice", "who text chat call time"}}};
+// What screens' conditions and texts (and the story's) know besides the variables: every value
+// Engine::builtin gives, in its order (the player's settings, by their names, too: Settings::has).
+inline constexpr std::string_view kBuiltinValues[]{
+    "in_game", "has_save", "can_save", "can_rollback", "skip", "auto", "speaking", "choosing", "prompt", "text_complete", "time_left",
+    "gallery_image", "gallery_title", "gallery_movie", "tip", "tip_title", "tip_text", "flowchart_points", "gallery_total", "gallery_unlocked",
+    "endings_total", "endings_reached", "songs_total", "songs_heard", "achievements_total", "achievements_earned", "tips_total", "tips_found",
+    "chapter", "messages_total", "chats_total", "open_chat_messages", "calls_total", "people_total", "open_chat", "phone_app", "has_phone", "phone_button", "messages_unread", "calls_missed", "phone_unread",
+    "phone_locked", "in_call", "in_chat", "caller",
+    "call_incoming", "call_outgoing", "call_busy", "call_choice", "call_time", "caller_avatar", "caller_colour", "caller_initial", "open_image", "open_image_text", "phone_needs_code",
+    "phone_code", "phone_wrong", "dragging", "has_face", "face_side", "fullscreen", "developer", "thumbnail", "save_mode", "title", "language", "languages",
+    "version", "engine_version", "sdl_version", "speaker", "notice", "question", "page", "window_size"};
 
 // A key (with modifiers), mouse button, wheel direction, controller button or touch gesture:
 // "escape", "alt+return", "mouse_right", "wheel_up", "pad_a", "swipe_left", "long_press".
@@ -483,34 +552,36 @@ struct Element {
     std::uint16_t file = 0; // where it's written (Script::files), for the editor
     int line = 0;
     int parent = -1;        // the part it's in (its lines are indented under that one's): its index, or -1
-    std::string text;  // a text's or button's words, an image's or a video's name, a key's or a control's name...
+    std::string text;  // a text's or button's words, an image's or a movie's name, a key's or a control's name...
     // Where it is and how big, as written: x and y places from -1 to 1 in the box it's in (the screen, or
     // the part it's in: -1 lines its left edge or bottom up with that one's; none: the top left corner),
     // w and h shares of that box (none: automatic; a container fills it). A part without a width (or a
     // height) is placed by its corner.
-    std::optional<float> placeX, placeY, shareW, shareH;
+    std::optional<float> placeX, placeY, shareWidth, shareHeight;
     Style style;
     Commands actions;
     Commands drop;       // drop=: what dropping something dragged on it does ({dropped} is what it was)
     std::string confirm; // ask this question before running the actions
     std::optional<KeyChord> key;
-    std::optional<Expr> visible, enabled, selected;
+    std::optional<Expr> visible, clickable, chosen; // when=, clickable= and chosen=
     std::map<std::string, Style, std::less<>> substyles;    // options ending in "_style"
-    std::map<std::string, SDL_Color, std::less<>> colors;   // colour options (top, bottom, track...)
+    std::map<std::string, SDL_Color, std::less<>> colours;   // colour options (top, bottom, track...)
     std::map<std::string, std::string, std::less<>> props;  // other widget options
-    std::map<std::string, Expr, std::less<>> exprs;         // formula options (bar value=, max=...)
+    std::map<std::string, Expr, std::less<>> exprs;         // formula options (bar value=, full_at=...)
     std::shared_ptr<const Animation> animation;             // animation=
-    std::shared_ptr<const Animation> hoverAnimation;        // hover_animation=: while it's pointed at (and back to its start after)
+    std::shared_ptr<const Animation> pointedAnimation;        // pointed_animation=: while it's pointed at (and back to its start after)
     std::shared_ptr<const Animation> clickAnimation;        // click_animation=: a button's, played when it's clicked (then it does what it does)
+    std::shared_ptr<const Animation> messageAnimation;      // message_animation=: played when a message comes
+    std::shared_ptr<const Animation> itemAnimation;         // item_animation=: a list's (list=), played by each new item as it comes
 
     [[nodiscard]] float number(std::string_view name, float fallback) const;
     [[nodiscard]] std::string option(std::string_view name, std::string_view fallback = {}) const;
-    [[nodiscard]] SDL_Color color(std::string_view name, SDL_Color fallback) const;
+    [[nodiscard]] SDL_Color colour(std::string_view name, SDL_Color fallback) const;
     [[nodiscard]] const Style& substyle(std::string_view name) const;
     // A container's: scroll=yes (what's in it scrolls), fit=parts (as big as its biggest part, not its box)
     // and edges= (what's past its edges: show, cut or fade; scrolling: cut, unless it says). Any part that
     // scrolls: whether a drag glides on (glide=; none: `usually`, the game's setting), and which way dragging
-    // scrolls it (-1: a container or a grid, further down as it grows; +1: a history or a phone, further
+    // scrolls it (-1: a container or a grid, further down as it grows; +1: a history or a chat, further
     // up from the latest; 0: it isn't dragged).
     [[nodiscard]] bool scrolls() const;
     [[nodiscard]] bool fitsParts() const;
@@ -522,8 +593,8 @@ struct Element {
 struct ScreenDef {
     std::string name;
     std::vector<Element> elements;
-    bool modal = true;    // blocks input to everything underneath
-    bool keyboard = true; // arrow keys / Enter move between and press its controls
+    bool storyWaits = true; // story=waits: the story waits while it's open (and nothing underneath takes clicks)
+    bool arrowKeys = true;  // arrow keys / Enter move between and press its controls
     float closeAfter = 0.0f; // close_after=: it closes by itself after this many seconds (0: it doesn't)
     bool keep = false;       // keep=yes, a textbox: its last line stays while other textboxes show theirs
     float textSpeed = 1.0f;  // text_speed=, a textbox: how fast its lines type, as a part of the player's speed
@@ -532,10 +603,10 @@ struct ScreenDef {
         bool music = false, voice = false;
     };
     Stops stopOnOpen, stopOnClose;
-    Commands onShow, onHide;
-    // show_animation= / hide_animation=: the whole screen moves and fades as these say when it opens
+    Commands actionOnOpen, actionOnClose;
+    // animation_on_open= / animation_on_close=: the whole screen moves and fades as these say when it opens
     // and when it closes (it stays on screen, without taking clicks, until that's over).
-    std::shared_ptr<const Animation> showAnimation, hideAnimation;
+    std::shared_ptr<const Animation> animationOnOpen, animationOnClose;
 };
 
 // Something a key does ("control" lines). Players can change the keys on the Controls screen.
@@ -543,11 +614,11 @@ struct Control {
     std::string name;
     std::vector<KeyChord> keys; // the defaults
     Commands actions;
-    bool everywhere = false;    // also on the title screen and in menus (else only while playing)
-    std::optional<Expr> condition; // if=: works only while it's true
+    bool inMenus = false;       // also on the title screen and in menus (else only while playing)
+    std::optional<Expr> condition; // when=: works only while it's true
 };
 
-// The messages the player shows, in English: the ones "config text.ID" lines don't change.
+// The messages the player shows, in English: the ones "setting text.ID" lines don't change.
 // What a Controls screen calls the mouse buttons, the wheel, controller buttons and touch gestures
 // (keys are named by the system): the only words the player shows that aren't the game's own, so a
 // translation file lists them.
@@ -560,49 +631,63 @@ inline constexpr std::array<std::pair<std::string_view, std::string_view>, 29> k
     {"long_press", "Long press"}, {"two_finger_tap", "Two-finger tap"}, {"unknown_key", "?"}}};
 [[nodiscard]] std::string_view keyWord(std::string_view id); // (the id itself when it isn't listed)
 
-struct GameConfig {
+// What tells players a message has come to their phone (setting new_messages): a Phone button on the textbox
+// and a notice, the phone opening, or a notice.
+enum class NewMessages : std::uint8_t { Button, Open, Notice };
+// How a chat scene's messages come (setting chat_messages): as they're typed (dots first; a click hurries one),
+// or each after a click.
+enum class ChatMessages : std::uint8_t { Typed, Click };
+
+struct GameSettings {
     std::string title = "VNext";
     std::string version = "1.0";
     std::string language = "English"; // the scripts' own language, as players see it (Settings > Language)
-    std::string saveId = "VNext";
+    std::string saveFolder = "VNext";
     std::string icon;
-    std::string cursor;               // a picture for the mouse pointer (else the system's)
-    SDL_Point cursorHotspot{0, 0};    // the point of it that clicks
-    SDL_Color letterboxColor{0, 0, 0, 255}; // around the picture when the window isn't the same shape
+    std::string mousePointer;         // an image for the mouse pointer (else the system's)
+    SDL_Point pointerTip{0, 0};    // the point of it that clicks
+    SDL_Color letterboxColour{0, 0, 0, 255}; // around the image when the window isn't the same shape
     bool resizable = true;            // the window's edges can be dragged to resize it (the game's, and the developer tools': one setting)
     int width = 1280;
     int height = 720;
     int savePages = 9;
-    int saveSlots = 6;
+    int pageSlots = 6;
     bool autosave = true;
-    int historyLimit = 25;
-    int rollback = 100;       // lines and choices the player can go back (0: none)
-    float skipDelay = 0.05f;
-    float autoPerChar = 0.01f;
-    SDL_Keymod skipHold = SDL_KMOD_CTRL;
-    std::string showAnimation, hideAnimation; // config show_animation / hide_animation: what show and hide lines play when they name none ("": nothing)
-    float spriteHeight = 0.95f;
+    int historyLength = 25;
+    int rollbackLines = 100;  // lines and choices the player can go back (0: none)
+    float skipTime = 0.05f;
+    float autoLetterDelay = 0.01f;
+    SDL_Keymod holdToSkip = SDL_KMOD_CTRL;
+    std::string animationOnShow, animationOnHide; // setting animation_on_show / animation_on_hide: what show and hide lines play when they name none ("": nothing)
+    float characterHeight = 0.95f;
     float moveTime = 0.4f;   // "show X at Y" on someone already there slides this long
-    bool pixelArt = false;   // pictures scale with sharp pixels (else smoothly)
-    int preload = 30;        // story commands to look ahead for pictures to load early (0: none)
-    int imageMemory = 512;   // MB of pictures kept loaded before old ones are let go (0: no limit)
-    Reveal reveal = Reveal::Letter;
-    SDL_Color narratorColor{150, 170, 255, 255};
-    float notifyTime = 2.5f;  // seconds a notify message stays
+    bool pixelArt = false;   // images scale with sharp pixels (else smoothly)
+    int loadAhead = 30;      // story commands to look ahead for images to load early (0: none)
+    int imageMemory = 512;   // MB of images kept loaded before old ones are let go (0: no limit)
+    TextAppears textAppears = TextAppears::Letter;
+    SDL_Color narrationColour{150, 170, 255, 255};
+    float noticeTime = 2.5f;  // seconds a notice stays
     float musicCrossfade = 0.5f;
     bool glide = true;        // lists and containers that scroll glide on after a drag (unless a part says), ...
     float glideSpeed = 1.0f, glideDistance = 1.0f; // ...this fast (of the speed they were let go at) and this far
-    float scrollbarSize = 6.0f; // pixels thick a container's scrollbar is (a part can say otherwise)
-    float fadeSize = 0.0f;      // pixels a fading edge (edges=fade) spans (0: a fifth of the box, at most 64)
-    bool voiceSync = false;   // the text of a voiced line types out in time with the voice
-    float musicWhileSpeaking = 0.7f; // how loud music plays while a voice does (1: unchanged)
-    float blipEvery = 0.06f, blipVolume = 0.6f;
+    float scrollbarThickness = 6.0f; // pixels thick a container's scrollbar is (a part can say otherwise)
+    float fadingEdges = 0.0f;      // pixels a fading edge (edges=fade) spans (0: a fifth of the box, at most 64)
+    bool textFollowsVoices = false;   // the text of a voiced line types out in time with the voice
+    float musicUnderVoices = 0.7f; // how loud music plays while a voice does (1: unchanged)
+    float typingSoundGap = 0.06f, typingSoundVolume = 0.6f;
     float phoneTyping = 6.0f; // letters a second people type an answer on the phone (0: it arrives at once)
-    float babbleSpeed = 1.0f, blinkEvery = 4.0f, talkSpeed = 4.0f; // defaults for characters
+    std::optional<Expr> hasPhone; // has_phone CONDITION: the player has their phone while it's true (none: always)
+    NewMessages newMessages = NewMessages::Button; // what tells players a message has come
+    ChatMessages chatMessages = ChatMessages::Typed; // how a chat scene's messages come
+    bool phoneHistory = false; // the phone's messages go in the history too
+    // What the phone plays: a message coming, one the player sends, someone typing, a call coming (unless the
+    // caller has a ringtone=) and the player calling. Empty: nothing.
+    std::string phoneMessageSound, phoneSendSound, phoneTypingSound, phoneRingtone, phoneCallingSound;
+    float madeUpVoiceSpeed = 1.0f, secondsBetweenBlinks = 4.0f, mouthSpeed = 4.0f; // defaults for characters
     bool blink = true;        // (blink no: nothing blinks, unless a character says blink=yes)
-    Talk talk = Talk::Yes;    // (talk no: no mouth moves, unless a character says talk=)
+    MouthMoves mouthsMove = MouthMoves::Yes; // (mouths_move no: no mouth moves, unless a character says mouth_moves=)
     bool developer = false;   // developer mode: developer tools (F10), F6 reload, labelled stand-ins for missing files
-    std::map<std::string, int, std::less<>> settingDefaults; // "config default.<setting>"
+    std::map<std::string, int, std::less<>> settingDefaults; // "setting default.<setting>"
 };
 
 // ---------------------------------------------------------------------------
@@ -635,24 +720,27 @@ public:
     static Script load(const std::string& entry, const FileReader& read, std::string_view builtin = {});
 
     [[nodiscard]] bool ok() const { return errors.empty(); }
-    [[nodiscard]] std::optional<std::size_t> findLabel(std::string_view name) const;
+    [[nodiscard]] std::optional<std::size_t> findScene(std::string_view name) const;
     [[nodiscard]] const CharacterDef* character(std::string_view key) const;
     [[nodiscard]] const ScreenDef* screen(std::string_view name) const;
-    // The label containing `pc` and the offset from it (lets saves survive script edits).
+    // The scene containing `pc` and the offset from it (lets saves survive script edits).
     [[nodiscard]] std::pair<std::string, std::size_t> locate(std::size_t pc) const;
     [[nodiscard]] std::string where(const Instruction& ins) const;
 
     std::vector<Instruction> code;
-    std::unordered_map<std::string, std::size_t, StringHash, std::equal_to<>> labels;
+    std::unordered_map<std::string, std::size_t, StringHash, std::equal_to<>> scenes;
+    // A character's chat= or call= scene (by name): where its lines start (played when the player opens their chat or
+    // calls them; they end at a return).
+    std::unordered_map<std::string, std::size_t, StringHash, std::equal_to<>> phoneScenes;
     std::unordered_map<std::string, CharacterDef, StringHash, std::equal_to<>> characters;
     std::vector<Atlas> atlases;
-    std::vector<SubPicture> subPictures;
+    std::vector<SubImage> subImages;
     std::unordered_map<std::string, Animation, StringHash, std::equal_to<>> animations;
     std::vector<std::string> files;
     std::vector<ScriptError> errors;
     std::uint64_t hash = fnv1a("");
 
-    GameConfig config;
+    GameSettings gameSettings;
     Palette palette;
     struct FontFile {
         std::string file;
@@ -665,14 +753,14 @@ public:
     // "variable NAME VALUE ["what it's for"]": what a variable is before the story sets it (else 0).
     Variables startValues;
 
-    // The gallery's pictures, the endings, the music room's songs, the achievements and the tips,
-    // in the order they're listed: "gallery PICTURE "Title"", "ending NAME "Title" hint=...", "song
-    // NAME "Title"", "achievement NAME "Title" "Description" [hidden]", "tip NAME "Title" "Description"".
+    // The gallery's images, the endings, the music room's songs, the achievements and the tips,
+    // in the order they're listed: "gallery IMAGE "Title"", "ending NAME "Title" hint=...", "song
+    // NAME "Title"", "achievement NAME "Title" "Description" [secret]", "tip NAME "Title" "Description"".
     struct Record {
-        std::string name;    // as written (a picture's or a song's file name)
+        std::string name;    // as written (an image's or a song's file name)
         std::string title;
         std::string text;    // an ending's hint (shown while it's locked), an achievement's description, a tip's text
-        bool hidden = false; // an achievement that shows as ??? until it's earned
+        bool secret = false; // an achievement that shows as its list's secret= (???) until it's earned
     };
     std::array<std::vector<Record>, kRecordKinds.size()> lists;
     [[nodiscard]] const std::vector<Record>& records(RecordKind kind) const { return lists[static_cast<std::size_t>(kind)]; }
@@ -704,6 +792,16 @@ private:
 
 // The story command a line starts with ("scene", "quick save"...), or empty (a line of text).
 [[nodiscard]] std::string storyCommandOf(std::string_view line);
+// "Name: words" or "Name expression: words" (at most three words before the colon, then a space or
+// nothing): someone saying it, with `speaker` and `words` set to its two parts.
+[[nodiscard]] bool spoken(std::string_view line, std::string_view* speaker = nullptr, std::string_view* words = nullptr);
+// A line that starts as commands do, with a word in lower case, without being a story command, a
+// definition, someone speaking or text in quotes ("notify ...", "next line"): that word, else empty.
+// It's a mistake, not text: text that starts with a lower-case letter goes in quotes.
+[[nodiscard]] std::string unknownCommand(std::string_view line);
+// An answer in a chat or under a post: "Words": (its lines under it), "Words" -> scene, with (if ...) or
+// (needs ...); or words not in quotes ending with their only colon.
+[[nodiscard]] bool answerLine(std::string_view text, bool hasLines);
 
 // The player's built-in screens, as script (at the end of Script.cpp): every game starts with them.
 [[nodiscard]] std::string_view defaultUi();
@@ -723,7 +821,7 @@ private:
 //
 // Players choose it in Settings (the "language" setting). Texts it doesn't have show as written.
 struct Translation {
-    std::string id;   // the file's name ("spanish"); also images/<id>/ and audio/<id>/
+    std::string id;   // the file's name ("spanish"); also images/<id>/ and sounds/<id>/
     std::string name; // as players see it ("Español")
     std::string code; // the language's code ("es", "pt-BR"): players whose computer uses it start with it
     std::unordered_map<std::string, std::string, StringHash, std::equal_to<>> texts; // as written -> translated

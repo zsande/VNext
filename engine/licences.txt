@@ -2,18 +2,18 @@ Third-party software in the VNext player
 ========================================
 
 The player (VNext.app, VNext.exe or VNext-Linux.AppImage) has the software below built into it.
-Its licenses let anyone use it in games, free or sold, and some of them ask for their notices to
+Its licences let anyone use it in games, free or sold, and some of them ask for their notices to
 come with the program: here they all are. This file comes with the player (in its zip on GitHub,
 and inside the AppImage), Pack the game in the developer tools writes it next to game.vnext, and
 About there shows it too.
 
-If a game uses fonts, pictures or sounds made by others, check their licenses as well.
+If a game uses fonts, images or sounds made by others, check their licences as well.
 
 
 SDL 3.4.18, SDL_image 3.4.8, SDL_ttf 3.2.2 and SDL_mixer 3.2.4
 --------------------------------------------------------------
-Windows, graphics, input and sound, and reading pictures, fonts and sound files.
-https://libsdl.org  -  zlib license:
+Windows, graphics, input and sound, and reading images, fonts and sound files.
+https://libsdl.org  -  zlib licence:
 
 Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
 
@@ -33,9 +33,9 @@ freely, subject to the following restrictions:
    misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.
 
-(SDL_ttf: Copyright (C) 1997-2025 Sam Lantinga. Parts by others use the same license:
-sorting, Copyright (c) 1998-2021 Gareth McCaughan; turning pictures, Copyright (C) 2001-2011
-Andreas Schiffler; game controllers, Copyright (C) Valve Corporation; reading pictures on
+(SDL_ttf: Copyright (C) 1997-2025 Sam Lantinga. Parts by others use the same licence:
+sorting, Copyright (c) 1998-2021 Gareth McCaughan; turning images, Copyright (C) 2001-2011
+Andreas Schiffler; game controllers, Copyright (C) Valve Corporation; reading images on
 macOS, Copyright (C) 2009-2026 Eric Wing.)
 
 
@@ -48,7 +48,7 @@ All rights reserved.
 
 Used under the FreeType License (FTL): https://freetype.org/license.html
 
-Its gzip module uses the zlib license: Copyright (C) 1995-2023 Jean-loup Gailly and Mark Adler.
+Its gzip module uses the zlib licence: Copyright (C) 1995-2023 Jean-loup Gailly and Mark Adler.
 
 Its BDF font driver (and the hash tables it uses):
 
@@ -73,7 +73,7 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT
 OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
 THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-Its PCF font driver (Copyright (C) 2000 Francesco Zappa Nardelli, under the same license as
+Its PCF font driver (Copyright (C) 2000 Francesco Zappa Nardelli, under the same licence as
 the BDF driver, after code by Keith Packard):
 
 Copyright 1990, 1994, 1998  The Open Group
@@ -99,7 +99,7 @@ used in advertising or otherwise to promote the sale, use or other dealings
 in this Software without prior written authorization from The Open Group.
 
 Its HarfBuzz glue (Copyright © 2009, 2023 Red Hat, Inc.; Copyright © 2015 Google, Inc.) uses
-HarfBuzz's license, below.
+HarfBuzz's licence, below.
 
 
 HarfBuzz 8.5.0
@@ -166,7 +166,7 @@ WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-Its hashing (fasthash), MIT license:
+Its hashing (fasthash), MIT licence:
 
 Copyright (C) 2012 Zilong Tan (eric.zltan@gmail.com)
 
@@ -236,7 +236,7 @@ authorization of the copyright holder.
 
 pl_mpeg
 -------
-Plays videos (.mpg). https://github.com/phoboslab/pl_mpeg  -  MIT license (its sound decoder
+Plays movies (.mpg). https://github.com/phoboslab/pl_mpeg  -  MIT licence (its sound decoder
 is based on kjmp2 by Martin J. Fiedler):
 
 Copyright (c) Dominic Szablewski
@@ -261,7 +261,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 QOI (in SDL_image)
 ------------------
-Reading .qoi pictures. MIT license:
+Reading .qoi images. MIT licence:
 
 Copyright(c) 2021 Dominic Szablewski
 
@@ -284,7 +284,7 @@ SOFTWARE.
 
 NanoSVG (in SDL_image)
 ----------------------
-Reading .svg pictures. zlib license:
+Reading .svg images. zlib licence:
 
 Copyright (c) 2013-14 Mikko Mononen memon@inside.org
 
@@ -312,8 +312,8 @@ Arc calculation code based on canvg (https://code.google.com/p/canvg/)
 Bounding box calculation based on http://blog.hackers-cafe.net/2009/06/how-to-calculate-bezier-curves-bounding.html
 
 
-Reading .gif pictures (in SDL_image)
-------------------------------------
+Reading .gif images (in SDL_image)
+----------------------------------
 Some parts of the code have been adapted from XPaint:
 
 Copyright 1990, 1991, 1993 David Koblas.
@@ -328,7 +328,7 @@ Copyright 1996 Torsten Martinsen.
 
 HIDAPI (in SDL)
 ---------------
-Talking to game controllers. Used under its BSD-style license:
+Talking to game controllers. Used under its BSD-style licence:
 
 Copyright (c) 2010, Alan Ott, Signal 11 Software
 All rights reserved.
@@ -360,7 +360,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 yuv2rgb (in SDL)
 ----------------
-Converting video colour formats. BSD-style license:
+Converting movie colour formats. BSD-style licence:
 
 Copyright (c) 2016, Adrien Descamps
 All rights reserved.
@@ -393,10 +393,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Public domain
 -------------
-These are in the public domain (each also offers the MIT license or the Unlicense):
+These are in the public domain (each also offers the MIT licence or the Unlicense):
 stb_image and stb_vorbis (Sean Barrett), reading .png, .jpg and .ogg files; dr_mp3 and
 dr_flac (David Reid), reading .mp3 and .flac files; miniz (Rich Geldreich), writing .png
-pictures (screenshots, save thumbnails); tiny_jpeg (Sergio Gonzalez), writing .jpg pictures.
+images (screenshots, save thumbnails); tiny_jpeg (Sergio Gonzalez), writing .jpg images.
 https://github.com/nothings/stb  https://github.com/mackron/dr_libs
 
 

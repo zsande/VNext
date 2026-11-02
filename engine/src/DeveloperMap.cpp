@@ -122,8 +122,8 @@ void Developer::drawMap(DeveloperUi& ui, const SDL_FRect& area) {
     if (mapLetGo(f)) return;
     // What the arrows mean, the column of scenes nothing jumps to, and what can be done.
     float lx = area.x + 12 * k;
-    for (const auto& [label, color] : {std::pair{"Jump"_tr, kEdge}, {"Call (dashed)"_tr, kWarn}, {"Option"_tr, kOptionArrow}}) {
-        draw::rect(r, {lx, area.y + 14 * k, 18 * k, 3 * k}, color);
+    for (const auto& [label, colour] : {std::pair{"Jump"_tr, kEdge}, {"Call (dashed)"_tr, kWarn}}) {
+        draw::rect(r, {lx, area.y + 14 * k, 18 * k, 3 * k}, colour);
         lx += 24 * k + ui.text(label, lx + 24 * k, area.y + 6 * k, layout::smallText, theme::dim).x + 14 * k;
     }
     ui.text("Drag a scene to move it, or its dot to another to jump there. Click an arrow to take it away; double-click a scene to open it."_tr, lx + 10 * k,
@@ -205,9 +205,7 @@ bool Developer::removeMapArrow(const MapFrame& f) {
     editor.removeLink(link);
     d.mapArrow.reset();
     d.failed = false;
-    d.status = link.option ? "An option in '{}' goes on after its choice now, instead of to '{}'."_tr(from, link.to)
-             : link.call   ? "'{}' no longer calls '{}'."_tr(from, link.to)
-                           : "'{}' no longer jumps to '{}'."_tr(from, link.to);
+    d.status = link.call ? "'{}' no longer calls '{}'."_tr(from, link.to) : "'{}' no longer jumps to '{}'."_tr(from, link.to);
     return true;
 }
 
@@ -290,7 +288,7 @@ void Developer::drawMapArrows(const MapFrame& f) {
         const StoryEditor::Link& link = links[a.link];
         const bool chosen = d.mapArrow == std::pair{link.from, link.line};
         const bool lit = chosen || hoveredArrow == a.link || hovered == link.from || (hovered && f.byName.at(link.to) == *hovered);
-        SDL_Color c = chosen ? kAccent : link.option ? kOptionArrow : link.call ? kWarn : kEdge;
+        SDL_Color c = chosen ? kAccent : link.call ? kWarn : kEdge;
         if (!lit && (hovered || hoveredArrow || d.mapArrow)) c.a = 90;
         drawCurve(r, a.curve, c, link.call, chosen || hoveredArrow == a.link, k);
     }

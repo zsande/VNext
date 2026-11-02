@@ -13,7 +13,7 @@
 namespace vn {
 
 // ---------------------------------------------------------------------------
-// Pictures
+// Images
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -27,19 +27,19 @@ void drawCell(SDL_Renderer* r, SDL_Texture* texture, SDL_FRect src, bool cell, c
     SDL_RenderTextureRotated(r, texture, &src, &dst, angle, pivot, flip ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
 }
 
-// A picture's file: its name with one of these endings, or as written (with its own).
+// An image's file: its name with one of these endings, or as written (with its own).
 constexpr auto kImageExtensions = [] {
     std::array<std::string_view, kImageTypes.size() + 1> out{};
     std::ranges::copy(kImageTypes, out.begin());
     return out;
 }();
 
-// The name a picture is kept under: with colour effects, a copy of its own.
+// The name an image is kept under: with colour effects, a copy of its own.
 std::string cacheKey(std::string_view name, unsigned looks) {
     return looks ? std::format("{}#{}", name, looks) : std::string(name);
 }
 
-// A picture file as RGBA pixels (to read or change them).
+// An image file as RGBA pixels (to read or change them).
 SurfacePtr loadPixels(const GameFiles& files, const std::string& file) {
     const SurfacePtr loaded{IMG_Load_IO(files.open(file).release(), true)};
     return loaded ? SurfacePtr{SDL_ConvertSurface(loaded.get(), SDL_PIXELFORMAT_RGBA32)} : nullptr;
@@ -51,23 +51,23 @@ SDL_Color looked(SDL_Color c, unsigned looks) {
     const float r = c.r, g = c.g, b = c.b;
     auto u8 = [](float v) { return static_cast<Uint8>(std::clamp(v, 0.0f, 255.0f)); };
     if (looks & kLookSepia) c = {u8(0.393f * r + 0.769f * g + 0.189f * b), u8(0.349f * r + 0.686f * g + 0.168f * b), u8(0.272f * r + 0.534f * g + 0.131f * b), c.a};
-    else if (looks & kLookGrayscale) c.r = c.g = c.b = u8(0.299f * r + 0.587f * g + 0.114f * b);
+    else if (looks & kLookGreyscale) c.r = c.g = c.b = u8(0.299f * r + 0.587f * g + 0.114f * b);
     if (looks & kLookInvert) c = {static_cast<Uint8>(255 - c.r), static_cast<Uint8>(255 - c.g), static_cast<Uint8>(255 - c.b), c.a};
     return c;
 }
 
-Picture Picture::crop(const SDL_FRect& part) const {
-    Picture p = *this;
+Image Image::crop(const SDL_FRect& part) const {
+    Image p = *this;
     p.src = {src.x + part.x, src.y + part.y, part.w, part.h};
     p.overlayCount = 0;
     return p;
 }
 
-void Picture::drawLayers(SDL_Renderer* r, const SDL_FRect& dst, float alpha, double angle, const SDL_FPoint* pivot, bool flip, SDL_Color tint) const {
+void Image::drawLayers(SDL_Renderer* r, const SDL_FRect& dst, float alpha, double angle, const SDL_FPoint* pivot, bool flip, SDL_Color tint) const {
     const SDL_FPoint p = pivot ? *pivot : SDL_FPoint{dst.w * 0.5f, dst.h * 0.5f};
     drawCell(r, texture, src, frame, dst, alpha, angle, &p, flip, tint);
     const float sx = dst.w / src.w, sy = dst.h / src.h;
-    for (std::size_t i = 0; i < overlayCount; ++i) { // turned and mirrored with the picture
+    for (std::size_t i = 0; i < overlayCount; ++i) { // turned and mirrored with the image
         const Overlay& o = overlays[i];
         const float x = flip ? src.w - o.at.x - o.src.w : o.at.x;
         const SDL_FRect od{dst.x + x * sx, dst.y + o.at.y * sy, o.src.w * sx, o.src.h * sy};
@@ -76,7 +76,7 @@ void Picture::drawLayers(SDL_Renderer* r, const SDL_FRect& dst, float alpha, dou
     }
 }
 
-void Picture::draw(SDL_Renderer* r, const SDL_FRect& dst, float alpha, double angle, const SDL_FPoint* pivot, bool flip, SDL_Color tint) const {
+void Image::draw(SDL_Renderer* r, const SDL_FRect& dst, float alpha, double angle, const SDL_FPoint* pivot, bool flip, SDL_Color tint) const {
     if (!texture) return;
     SDL_Texture* together = overlayCount > 0 && alpha < 0.999f && assets
                                 ? assets->scratch(static_cast<int>(std::ceil(src.w)), static_cast<int>(std::ceil(src.h)))
@@ -155,12 +155,12 @@ std::string Assets::ownName(const std::string& folder, std::string_view name, st
     return found != names->second.end() ? found->second : std::string(name);
 }
 
-std::optional<std::string> Assets::findAudio(std::string_view name) const {
-    return find("audio/", name, kAudioTypes);
+std::optional<std::string> Assets::findSound(std::string_view name) const {
+    return find("sounds/", name, kSoundTypes);
 }
 
 std::optional<std::string> Assets::findMovie(std::string_view name) const {
-    return find("movies/", name, kVideoTypes);
+    return find("movies/", name, kMovieTypes);
 }
 
 void Assets::setLanguage(std::string id) {
@@ -170,9 +170,9 @@ void Assets::setLanguage(std::string id) {
     clear();
 }
 
-std::string Assets::audio(std::string_view name) const {
-    if (auto file = findAudio(name)) return *file;
-    return name.find('.') == std::string_view::npos ? path(std::format("audio/{}.ogg", name)) : path(name);
+std::string Assets::sound(std::string_view name) const {
+    if (auto file = findSound(name)) return *file;
+    return name.find('.') == std::string_view::npos ? path(std::format("sounds/{}.ogg", name)) : path(name);
 }
 
 SDL_Texture* Assets::scratch(int w, int h) {
@@ -189,7 +189,7 @@ SDL_Texture* Assets::scratch(int w, int h) {
 }
 
 std::string Assets::imageFolder(std::string_view key) const {
-    const bool own = !language_.empty() && std::ranges::any_of(kImageTypes, [&](std::string_view ext) { // the language's own picture
+    const bool own = !language_.empty() && std::ranges::any_of(kImageTypes, [&](std::string_view ext) { // the language's own image
         return exists(path(std::format("images/{}{}{}", language_, key, ext)));
     });
     return own ? "images/" + language_ : "images/";
@@ -202,8 +202,8 @@ bool Assets::hasImageFile(std::string_view name) const {
 }
 
 SurfacePtr Assets::pixels(std::string_view name) const {
-    const auto sub = subPictures_.find(lower(name));
-    if (sub == subPictures_.end()) return filePixels(name);
+    const auto sub = subImages_.find(lower(name));
+    if (sub == subImages_.end()) return filePixels(name);
     SurfacePtr all = filePixels(sub->second.image);
     if (!all) return nullptr;
     const SDL_Rect part{static_cast<int>(sub->second.rect.x), static_cast<int>(sub->second.rect.y), static_cast<int>(sub->second.rect.w),
@@ -223,7 +223,7 @@ SurfacePtr Assets::filePixels(std::string_view name) const {
     return nullptr;
 }
 
-SDL_Texture* Assets::image(std::string_view name, unsigned looks) {
+SDL_Texture* Assets::loadTexture(std::string_view name, unsigned looks) {
     const std::string key = cacheKey(name, looks);
     if (auto it = images_.find(key); it != images_.end()) {
         it->second.lastFrame = frame_;
@@ -256,7 +256,7 @@ SDL_Texture* Assets::image(std::string_view name, unsigned looks) {
         break;
     }
     if (!texture && !found && looks == 0) logWarn("There's no image called '{}', so a stand-in is drawn.", name);
-    Image entry{.texture = std::move(texture), .lastFrame = frame_};
+    LoadedImage entry{.texture = std::move(texture), .lastFrame = frame_};
     if (entry.texture) {
         float w = 0, h = 0;
         SDL_GetTextureSize(entry.texture.get(), &w, &h);
@@ -269,7 +269,7 @@ SDL_Texture* Assets::image(std::string_view name, unsigned looks) {
     return out;
 }
 
-// Over the memory limit: lets go of the pictures not drawn for the longest (never those of the
+// Over the memory limit: lets go of the images not drawn for the longest (never those of the
 // last two frames). They load again when they're needed.
 void Assets::trim() {
     while (limit_ > 0 && used_ > limit_) {
@@ -284,7 +284,7 @@ void Assets::trim() {
 }
 
 bool Assets::preload(std::string_view name, unsigned looks) {
-    if (const auto sub = subPictures_.find(lower(name)); sub != subPictures_.end()) name = sub->second.image;
+    if (const auto sub = subImages_.find(lower(name)); sub != subImages_.end()) name = sub->second.image;
     const auto atlas = frames_.find(lower(name));
     std::vector<std::string> files{atlas == frames_.end() ? std::string(name) : atlases_[atlas->second.first].image};
     if (atlas != frames_.end()) {
@@ -295,7 +295,7 @@ bool Assets::preload(std::string_view name, unsigned looks) {
     bool loaded = false;
     for (const auto& file : files)
         if (!images_.contains(cacheKey(file, looks))) {
-            image(file, looks);
+            loadTexture(file, looks);
             loaded = true;
         }
     return loaded;
@@ -318,35 +318,35 @@ void Assets::setAtlases(std::vector<Atlas> atlases) {
     }
 }
 
-void Assets::setSubPictures(const std::vector<SubPicture>& parts) {
-    subPictures_.clear();
-    for (const SubPicture& p : parts) subPictures_.insert_or_assign(p.name, p);
+void Assets::setSubImages(const std::vector<SubImage>& parts) {
+    subImages_.clear();
+    for (const SubImage& p : parts) subImages_.insert_or_assign(p.name, p);
 }
 
-Picture Assets::picture(std::string_view name, Frame frame, unsigned looks) {
-    const auto sub = subPictures_.find(lower(name));
-    if (sub == subPictures_.end()) return whole(name, frame, looks);
-    const Picture all = whole(sub->second.image, frame, looks);
+Image Assets::image(std::string_view name, Frame frame, unsigned looks) {
+    const auto sub = subImages_.find(lower(name));
+    if (sub == subImages_.end()) return whole(name, frame, looks);
+    const Image all = whole(sub->second.image, frame, looks);
     if (!all) return {};
     SDL_FRect part{};
     const SDL_FRect bounds{0.0f, 0.0f, all.w(), all.h()};
     if (!SDL_GetRectIntersectionFloat(&sub->second.rect, &bounds, &part)) return {};
-    Picture out = all.crop(part);
+    Image out = all.crop(part);
     out.frame = true; // (its neighbours on the sheet don't bleed in)
     return out;
 }
 
-Picture Assets::whole(std::string_view name, Frame frame, unsigned looks) {
+Image Assets::whole(std::string_view name, Frame frame, unsigned looks) {
     const auto it = frames_.find(lower(name));
     if (it == frames_.end()) {
-        SDL_Texture* tex = image(name, looks);
+        SDL_Texture* tex = loadTexture(name, looks);
         if (!tex) return {};
         float w = 0, h = 0;
         SDL_GetTextureSize(tex, &w, &h);
         return {.texture = tex, .src = {0, 0, w, h}};
     }
     const Atlas& a = atlases_[it->second.first];
-    SDL_Texture* tex = image(a.image, looks);
+    SDL_Texture* tex = loadTexture(a.image, looks);
     if (!tex) return {};
     // The nearest frame: 0 is the first eyes / mouth, 1 the last.
     auto pick = [](float amount, std::size_t count) {
@@ -364,12 +364,12 @@ Picture Assets::whole(std::string_view name, Frame frame, unsigned looks) {
     float w = 0, h = 0;
     SDL_GetTextureSize(tex, &w, &h);
     const float fw = w / static_cast<float>(columns), fh = h / static_cast<float>(rows);
-    Picture pic{.texture = tex, .src = {fw * static_cast<float>(index % columns), fh * static_cast<float>(index / columns), fw, fh},
+    Image pic{.texture = tex, .src = {fw * static_cast<float>(index % columns), fh * static_cast<float>(index / columns), fw, fh},
                 .frame = true, .assets = this};
     // Parts: a row per expression, a column per state.
     auto part = [&](const std::optional<Atlas::Part>& p, int state, std::size_t states) {
         if (!p || states == 0) return;
-        SDL_Texture* t = image(p->image, looks);
+        SDL_Texture* t = loadTexture(p->image, looks);
         if (!t) return;
         float pw = 0, ph = 0;
         SDL_GetTextureSize(t, &pw, &ph);
@@ -444,7 +444,7 @@ std::vector<float> placeholderMusic(std::uint64_t seed) {
     return out;
 }
 
-// A short "blip" whose pitch and direction come from the file name.
+// A short beep whose pitch and direction come from the file name.
 std::vector<float> placeholderSound(std::uint64_t seed) {
     const float base = 440.0f + static_cast<float>(seed % 600);
     const bool rising = ((seed >> 12) & 1) != 0;
@@ -463,22 +463,22 @@ std::vector<float> placeholderSound(std::uint64_t seed) {
 
 } // namespace
 
-Audio::~Audio() {
+Sound::~Sound() {
     while (!streams_.empty()) closeStream(streams_.back().stream.get());
     cache_.clear();  // MIX_Audio is ref-counted, so tracks still using it stay valid
     mixer_.reset();  // also destroys every track created on it
     if (ready_) MIX_Quit();
 }
 
-bool Audio::init() {
+bool Sound::init() {
     if (!MIX_Init()) {
-        logWarn("Can't start SDL_mixer (it plays the audio): {}.", SDL_GetError());
+        logWarn("Can't start SDL_mixer (it plays the sound): {}.", SDL_GetError());
         return false;
     }
     ready_ = true;
     mixer_.reset(MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, nullptr));
     if (!mixer_) {
-        logWarn("Can't open the audio device: {}, so the game plays without sound.", SDL_GetError());
+        logWarn("Can't open the sound device: {}, so the game plays silently.", SDL_GetError());
         return false;
     }
     for (auto& t : music_) t = MIX_CreateTrack(mixer_.get());
@@ -491,7 +491,7 @@ bool Audio::init() {
 }
 
 // Track gains combine the player's volume setting with each sound's own volume.
-void Audio::setVolume(float master, float music, float sound, float voice) {
+void Sound::setVolume(float master, float music, float sound, float voice) {
     masterVolume_ = master;
     musicVolume_ = music;
     soundVolume_ = sound;
@@ -505,43 +505,43 @@ void Audio::setVolume(float master, float music, float sound, float voice) {
     for (const Stream& s : streams_) MIX_SetTrackGain(s.track.get(), musicVolume_ * s.gain);
 }
 
-MIX_Audio* Audio::load(const std::string& path, Kind kind) {
+MIX_Audio* Sound::load(const std::string& path, Kind kind) {
     if (auto it = cache_.find(path); it != cache_.end()) return it->second.get();
 
     // Music is decoded while it plays (only the compressed file stays in memory);
     // sound effects are short, so they are decoded once up front.
     IOStreamPtr file = files_.open(path);
-    MixAudioPtr audio{file ? MIX_LoadAudio_IO(mixer_.get(), file.release(), kind == Kind::Sound, true) : nullptr};
-    if (!audio) {
+    MixSoundPtr clip{file ? MIX_LoadAudio_IO(mixer_.get(), file.release(), kind == Kind::Sound, true) : nullptr};
+    if (!clip) {
         logWarn("Can't load '{}': {}, so a stand-in plays.", path, SDL_GetError());
         const auto slash = path.find_last_of("/\\");
         return placeholder(path, kind, fnv1a(slash == std::string::npos ? path : path.substr(slash + 1)));
     }
-    return cache_.emplace(path, std::move(audio)).first->second.get();
+    return cache_.emplace(path, std::move(clip)).first->second.get();
 }
 
-MIX_Audio* Audio::placeholder(const std::string& key, Kind kind, std::uint64_t seed) {
+MIX_Audio* Sound::placeholder(const std::string& key, Kind kind, std::uint64_t seed) {
     const auto pcm = kind == Kind::Music ? placeholderMusic(seed) : placeholderSound(seed);
     const SDL_AudioSpec spec{SDL_AUDIO_F32, 1, kPlaceholderRate};
-    MixAudioPtr audio{MIX_LoadRawAudio(mixer_.get(), pcm.data(), pcm.size() * sizeof(float), &spec)};
-    return cache_.insert_or_assign(key, std::move(audio)).first->second.get();
+    MixSoundPtr clip{MIX_LoadRawAudio(mixer_.get(), pcm.data(), pcm.size() * sizeof(float), &spec)};
+    return cache_.insert_or_assign(key, std::move(clip)).first->second.get();
 }
 
-Sint64 Audio::frames(MIX_Track* track, float seconds) const {
+Sint64 Sound::frames(MIX_Track* track, float seconds) const {
     return seconds > 0.0f ? MIX_TrackMSToFrames(track, static_cast<Sint64>(seconds * 1000.0f)) : 0;
 }
 
-bool Audio::start(MIX_Track* track, MIX_Audio* audio, bool loop, float fadeIn) {
-    MIX_SetTrackAudio(track, audio);
+bool Sound::start(MIX_Track* track, MIX_Audio* clip, bool loop, float fadeIn) {
+    MIX_SetTrackAudio(track, clip);
     const SdlProperties options;
     SDL_SetNumberProperty(options.id(), MIX_PROP_PLAY_LOOPS_NUMBER, loop ? -1 : 0);
     SDL_SetNumberProperty(options.id(), MIX_PROP_PLAY_FADE_IN_MILLISECONDS_NUMBER, static_cast<Sint64>(fadeIn * 1000.0f));
     const bool ok = MIX_PlayTrack(track, options.id());
-    if (!ok) logWarn("Can't play audio: {}.", SDL_GetError());
+    if (!ok) logWarn("Can't play the sound: {}.", SDL_GetError());
     return ok;
 }
 
-void Audio::playMusic(const std::string& path, bool loop, float fadeIn, float volume) {
+void Sound::playMusic(const std::string& path, bool loop, float fadeIn, float volume) {
     if (!mixer_) {
         musicPath_ = path;
         return;
@@ -551,38 +551,38 @@ void Audio::playMusic(const std::string& path, bool loop, float fadeIn, float vo
     musicPath_ = path;
     musicLoops_ = loop;
 
-    MIX_Audio* audio = load(path, Kind::Music);
-    if (!audio) return;
+    MIX_Audio* clip = load(path, Kind::Music);
+    if (!clip) return;
     current_ = 1 - current_;
     musicGain_[current_] = volume;
     applyMusicGain();
-    start(music_[current_], audio, loop, fadeIn);
+    start(music_[current_], clip, loop, fadeIn);
 }
 
-void Audio::stopMusic(float fadeOut) {
+void Sound::stopMusic(float fadeOut) {
     musicPath_.clear();
     if (!mixer_) return;
     MIX_Track* track = music_[current_];
     MIX_StopTrack(track, frames(track, fadeOut));
 }
 
-void Audio::playSound(const std::string& path, float volume) {
+void Sound::playSound(const std::string& path, float volume) {
     if (mixer_) play(load(path, Kind::Sound), volume);
 }
 
-void Audio::playChannel(const std::string& channel, const std::string& path, bool loop, float volume, float fadeIn) {
+void Sound::playChannel(const std::string& channel, const std::string& path, bool loop, float volume, float fadeIn) {
     if (!mixer_) return;
-    MIX_Audio* audio = load(path, loop ? Kind::Music : Kind::Sound);
-    if (!audio) return;
+    MIX_Audio* clip = load(path, loop ? Kind::Music : Kind::Sound);
+    if (!clip) return;
     Channel& c = channels_[channel];
     if (!c.track) c.track = MIX_CreateTrack(mixer_.get());
     c.path = path;
     c.volume = volume;
     MIX_SetTrackGain(c.track, soundVolume_ * volume);
-    start(c.track, audio, loop, fadeIn);
+    start(c.track, clip, loop, fadeIn);
 }
 
-void Audio::stopChannel(const std::string& channel, float fadeOut) {
+void Sound::stopChannel(const std::string& channel, float fadeOut) {
     if (!mixer_) return;
     if (channel.empty()) {
         for (auto& entry : channels_) MIX_StopTrack(entry.second.track, frames(entry.second.track, fadeOut));
@@ -592,64 +592,64 @@ void Audio::stopChannel(const std::string& channel, float fadeOut) {
         MIX_StopTrack(it->second.track, frames(it->second.track, fadeOut));
 }
 
-void Audio::say(Voice& v, MIX_Audio* audio, float volume, const Envelope* envelope) {
+void Sound::say(Voice& v, MIX_Audio* clip, float volume, const Envelope* envelope) {
     MIX_StopTrack(v.track, 0);
     v.gain = volume;
     v.envelope = envelope;
     MIX_SetTrackGain(v.track, voiceVolume_ * volume);
-    if (audio) start(v.track, audio, false, 0.0f);
+    if (clip) start(v.track, clip, false, 0.0f);
 }
 
-bool Audio::sayBabble(Voice& v, std::string_view text, float pitch, float speed) {
-    const std::vector<float> pcm = babble(text, pitch, kPlaceholderRate, speed);
+bool Sound::sayMadeUpVoice(Voice& v, std::string_view text, float pitch, float speed) {
+    const std::vector<float> pcm = madeUpVoice(text, pitch, kPlaceholderRate, speed);
     if (pcm.empty()) return false;
     const SDL_AudioSpec spec{SDL_AUDIO_F32, 1, kPlaceholderRate};
-    MixAudioPtr audio{MIX_LoadRawAudio(mixer_.get(), pcm.data(), pcm.size() * sizeof(float), &spec)};
-    if (!audio) return false;
-    v.babble = std::move(audio); // (the track keeps the one it was playing while it needs it)
-    v.babbleEnvelope = envelope(pcm, kPlaceholderRate);
-    say(v, v.babble.get(), 1.0f, &v.babbleEnvelope);
+    MixSoundPtr clip{MIX_LoadRawAudio(mixer_.get(), pcm.data(), pcm.size() * sizeof(float), &spec)};
+    if (!clip) return false;
+    v.madeUpVoice = std::move(clip); // (the track keeps the one it was playing while it needs it)
+    v.madeUpVoiceEnvelope = envelope(pcm, kPlaceholderRate);
+    say(v, v.madeUpVoice.get(), 1.0f, &v.madeUpVoiceEnvelope);
     return true;
 }
 
-void Audio::playVoice(const std::string& path, float volume) {
+void Sound::playVoice(const std::string& path, float volume) {
     if (!mixer_) return;
     voicePaused_ = voiceHeld_ = false;
-    MIX_Audio* audio = load(path, Kind::Sound);
-    say(voice_, audio, volume, audio ? &measure(path) : nullptr);
+    MIX_Audio* clip = load(path, Kind::Sound);
+    say(voice_, clip, volume, clip ? &measure(path) : nullptr);
 }
 
-bool Audio::playBabble(std::string_view text, float pitch, float speed) {
+bool Sound::playMadeUpVoice(std::string_view text, float pitch, float speed) {
     if (!mixer_) return false;
     voicePaused_ = voiceHeld_ = false;
-    return sayBabble(voice_, text, pitch, speed);
+    return sayMadeUpVoice(voice_, text, pitch, speed);
 }
 
-void Audio::stopVoice() {
+void Sound::stopVoice() {
     if (mixer_) MIX_StopTrack(voice_.track, frames(voice_.track, 0.1f));
     voicePaused_ = voiceHeld_ = false;
 }
 
-void Audio::replayVoice(const std::string& path, float volume) {
+void Sound::replayVoice(const std::string& path, float volume) {
     if (mixer_) say(replay_, load(path, Kind::Sound), volume, nullptr);
 }
 
-bool Audio::replayBabble(std::string_view text, float pitch, float speed) {
-    return mixer_ && sayBabble(replay_, text, pitch, speed);
+bool Sound::replayMadeUpVoice(std::string_view text, float pitch, float speed) {
+    return mixer_ && sayMadeUpVoice(replay_, text, pitch, speed);
 }
 
-void Audio::stopReplay() {
+void Sound::stopReplay() {
     if (mixer_) MIX_StopTrack(replay_.track, frames(replay_.track, 0.1f));
 }
 
-bool Audio::replaying() const {
+bool Sound::replaying() const {
     return mixer_ && MIX_TrackPlaying(replay_.track);
 }
 
-void Audio::pauseVoice(bool paused) { waitVoice(voicePaused_, paused); }
-void Audio::holdVoice(bool held) { waitVoice(voiceHeld_, held); }
+void Sound::pauseVoice(bool paused) { waitVoice(voicePaused_, paused); }
+void Sound::holdVoice(bool held) { waitVoice(voiceHeld_, held); }
 
-void Audio::waitVoice(bool& reason, bool wait) {
+void Sound::waitVoice(bool& reason, bool wait) {
     if (!mixer_ || reason == wait) return;
     if (wait && !MIX_TrackPlaying(voice_.track) && !MIX_TrackPaused(voice_.track)) return; // nothing to wait
     reason = wait;
@@ -658,10 +658,10 @@ void Audio::waitVoice(bool& reason, bool wait) {
     else if (!waiting && MIX_TrackPaused(voice_.track)) resume(voice_.track);
 }
 
-SDL_AudioStream* Audio::openStream(int rate, float volume) {
+SDL_AudioStream* Sound::openStream(int rate, float volume) {
     if (!mixer_) return nullptr;
     const SDL_AudioSpec spec{SDL_AUDIO_F32, 2, rate};
-    Stream s{.stream = AudioStreamPtr(SDL_CreateAudioStream(&spec, &spec)), .track = nullptr, .gain = volume};
+    Stream s{.stream = SoundStreamPtr(SDL_CreateAudioStream(&spec, &spec)), .track = nullptr, .gain = volume};
     if (s.stream) s.track.reset(MIX_CreateTrack(mixer_.get()));
     if (!s.track || !MIX_SetTrackAudioStream(s.track.get(), s.stream.get())) { // (it plays once there's sound in it: see update())
         logWarn("Can't play the movie's sound: {}.", SDL_GetError());
@@ -671,7 +671,7 @@ SDL_AudioStream* Audio::openStream(int rate, float volume) {
     return streams_.emplace_back(std::move(s)).stream.get();
 }
 
-void Audio::pauseStream(SDL_AudioStream* stream, bool paused) {
+void Sound::pauseStream(SDL_AudioStream* stream, bool paused) {
     for (Stream& s : streams_)
         if (s.stream.get() == stream) {
             s.paused = paused;
@@ -680,17 +680,17 @@ void Audio::pauseStream(SDL_AudioStream* stream, bool paused) {
         }
 }
 
-void Audio::closeStream(SDL_AudioStream* stream) {
+void Sound::closeStream(SDL_AudioStream* stream) {
     const auto it = std::ranges::find(streams_, stream, [](const Stream& s) { return s.stream.get(); });
     if (it == streams_.end()) return;
     MIX_Track* track = it->track.get();
     std::erase(held_, track);
-    if (track == videoTrack_) videoTrack_ = nullptr;
+    if (track == movieTrack_) movieTrack_ = nullptr;
     MIX_StopTrack(track, 0);
     streams_.erase(it); // (its track, then its stream)
 }
 
-Audio::Envelope Audio::envelope(const std::vector<float>& mono, int rate) {
+Sound::Envelope Sound::envelope(const std::vector<float>& mono, int rate) {
     Envelope e;
     const auto window = std::max<std::size_t>(1, static_cast<std::size_t>(kWindow * static_cast<float>(rate)));
     for (std::size_t i = 0; i < mono.size(); i += window) {
@@ -723,7 +723,7 @@ Audio::Envelope Audio::envelope(const std::vector<float>& mono, int rate) {
     return e;
 }
 
-const Audio::Envelope& Audio::measure(const std::string& path) {
+const Sound::Envelope& Sound::measure(const std::string& path) {
     if (auto it = envelopes_.find(path); it != envelopes_.end()) return it->second;
     constexpr int kRate = 16000;
     std::vector<float> mono;
@@ -736,36 +736,36 @@ const Audio::Envelope& Audio::measure(const std::string& path) {
     return envelopes_.emplace(path, envelope(mono, kRate)).first->second;
 }
 
-bool Audio::voicePlaying() const {
+bool Sound::voicePlaying() const {
     return mixer_ && MIX_TrackPlaying(voice_.track);
 }
 
-std::optional<std::size_t> Audio::voiceWindow() const {
+std::optional<std::size_t> Sound::voiceWindow() const {
     if (!mixer_ || (!MIX_TrackPlaying(voice_.track) && !MIX_TrackPaused(voice_.track))) return std::nullopt; // (a waiting one counts)
     const Sint64 position = MIX_GetTrackPlaybackPosition(voice_.track);
     if (position < 0) return std::nullopt;
     return static_cast<std::size_t>(static_cast<float>(MIX_TrackFramesToMS(voice_.track, position)) / (kWindow * 1000.0f));
 }
 
-float Audio::voiceLevel() const {
+float Sound::voiceLevel() const {
     const auto window = voicePlaying() ? voiceWindow() : std::nullopt;
     if (!window || !voice_.envelope || voice_.envelope->level.empty()) return 0.0f;
     return voice_.envelope->level[std::min(*window, voice_.envelope->level.size() - 1)];
 }
 
-std::optional<float> Audio::voiceProgress() const {
+std::optional<float> Sound::voiceProgress() const {
     const auto window = voiceWindow();
     if (!window) return std::nullopt;
     if (voice_.envelope && !voice_.envelope->spoken.empty())
         return voice_.envelope->spoken[std::min(*window, voice_.envelope->spoken.size() - 1)];
-    MIX_Audio* audio = MIX_GetTrackAudio(voice_.track); // loudness unknown: by time
-    const Sint64 length = audio ? MIX_GetAudioDuration(audio) : -1;
+    MIX_Audio* clip = MIX_GetTrackAudio(voice_.track); // loudness unknown: by time
+    const Sint64 length = clip ? MIX_GetAudioDuration(clip) : -1;
     if (length <= 0) return std::nullopt;
-    const auto ms = static_cast<float>(MIX_AudioFramesToMS(audio, length));
+    const auto ms = static_cast<float>(MIX_AudioFramesToMS(clip, length));
     return std::clamp(static_cast<float>(*window) * kWindow * 1000.0f / ms, 0.0f, 1.0f);
 }
 
-std::optional<float> Audio::voiceSilenceNear(float share) const {
+std::optional<float> Sound::voiceSilenceNear(float share) const {
     if (!voice_.envelope) return std::nullopt;
     const std::vector<float>& spoken = voice_.envelope->spoken;
     std::optional<float> best;
@@ -777,7 +777,7 @@ std::optional<float> Audio::voiceSilenceNear(float share) const {
     return best;
 }
 
-bool Audio::voiceSilent() const {
+bool Sound::voiceSilent() const {
     const auto window = voiceWindow();
     if (!window || !voice_.envelope || voice_.envelope->spoken.size() < 2) return true;
     const std::vector<float>& spoken = voice_.envelope->spoken;
@@ -785,15 +785,15 @@ bool Audio::voiceSilent() const {
     return spoken[i] == spoken[i - 1];
 }
 
-void Audio::playTestSound() {
+void Sound::playTestSound() {
     if (!mixer_) return;
     static const std::string key = "<volume test>";
     auto it = cache_.find(key);
     play(it != cache_.end() ? it->second.get() : placeholder(key, Kind::Sound, 7), 1.0f);
 }
 
-void Audio::play(MIX_Audio* audio, float volume) {
-    if (!audio) return;
+void Sound::play(MIX_Audio* clip, float volume) {
+    if (!clip) return;
     // Prefer an idle track; if all are busy, reuse them round-robin (the oldest sound is cut).
     std::size_t pick = nextSound_;
     for (std::size_t i = 0; i < kSoundTracks; ++i) {
@@ -806,49 +806,49 @@ void Audio::play(MIX_Audio* audio, float volume) {
     nextSound_ = (pick + 1) % kSoundTracks;
     soundGain_[pick] = volume;
     MIX_SetTrackGain(sounds_[pick], soundVolume_ * volume);
-    MIX_SetTrackAudio(sounds_[pick], audio);
+    MIX_SetTrackAudio(sounds_[pick], clip);
     MIX_PlayTrack(sounds_[pick], 0);
 }
 
-void Audio::listen(const std::string& path) {
+void Sound::listen(const std::string& path) {
     if (!mixer_) return;
-    listenedVideo_ = false;
-    videoTrack_ = nullptr;
+    listenedMovie_ = false;
+    movieTrack_ = nullptr;
     holdOthers();
     listened_ = path;
     MIX_SetTrackGain(listen_, 1.0f);
     start(listen_, load(path, Kind::Music), false, 0.0f);
 }
 
-void Audio::listen(const std::string& name, SDL_AudioStream* video) {
+void Sound::listen(const std::string& name, SDL_AudioStream* movie) {
     listened_ = name;
-    listenedVideo_ = true;
+    listenedMovie_ = true;
     if (!mixer_) return;
     MIX_StopTrack(listen_, 0);
-    const auto it = std::ranges::find(streams_, video, [](const Stream& s) { return s.stream.get(); });
-    videoTrack_ = it != streams_.end() ? it->track.get() : nullptr;
-    if (videoTrack_ && std::erase(held_, videoTrack_) > 0) MIX_ResumeTrack(videoTrack_);
+    const auto it = std::ranges::find(streams_, movie, [](const Stream& s) { return s.stream.get(); });
+    movieTrack_ = it != streams_.end() ? it->track.get() : nullptr;
+    if (movieTrack_ && std::erase(held_, movieTrack_) > 0) MIX_ResumeTrack(movieTrack_);
     holdOthers();
 }
 
-void Audio::stopListening() {
+void Sound::stopListening() {
     if (listened_.empty()) return;
     listened_.clear();
-    listenedVideo_ = false;
-    videoTrack_ = nullptr;
+    listenedMovie_ = false;
+    movieTrack_ = nullptr;
     if (!mixer_) return;
     MIX_StopTrack(listen_, 0);
     if (!gameHeld_) releaseHeld();
 }
 
-void Audio::holdGame(bool held) {
+void Sound::holdGame(bool held) {
     gameHeld_ = held;
     if (!mixer_) return;
     if (held) holdOthers();
     else if (listened_.empty()) releaseHeld();
 }
 
-void Audio::releaseHeld() {
+void Sound::releaseHeld() {
     for (MIX_Track* track : std::exchange(held_, {})) {
         const bool waits = (track == voice_.track && (voicePaused_ || voiceHeld_)) ||
                            std::ranges::any_of(streams_, [&](const Stream& s) { return s.track.get() == track && s.paused; });
@@ -856,9 +856,9 @@ void Audio::releaseHeld() {
     }
 }
 
-void Audio::holdOthers() {
+void Sound::holdOthers() {
     auto hold = [&](MIX_Track* track) {
-        if (track == videoTrack_ || !MIX_TrackPlaying(track)) return;
+        if (track == movieTrack_ || !MIX_TrackPlaying(track)) return;
         MIX_PauseTrack(track);
         if (std::ranges::find(held_, track) == held_.end()) held_.push_back(track);
     };
@@ -870,12 +870,12 @@ void Audio::holdOthers() {
 }
 
 // A track that waited for something goes on, or (while the developer tools play a file) waits for that.
-void Audio::resume(MIX_Track* track) {
+void Sound::resume(MIX_Track* track) {
     if (listened_.empty() && !gameHeld_) MIX_ResumeTrack(track);
     else if (std::ranges::find(held_, track) == held_.end()) held_.push_back(track);
 }
 
-void Audio::stopAll(float fadeOut) {
+void Sound::stopAll(float fadeOut) {
     stopListening();
     stopMusic(fadeOut);
     stopChannel("", fadeOut);
@@ -883,19 +883,19 @@ void Audio::stopAll(float fadeOut) {
     stopReplay();
 }
 
-void Audio::applyMusicGain() {
+void Sound::applyMusicGain() {
     if (!mixer_) return;
     for (std::size_t i = 0; i < music_.size(); ++i) MIX_SetTrackGain(music_[i], musicVolume_ * musicGain_[i] * duck_);
 }
 
-void Audio::update(float dt) {
+void Sound::update(float dt) {
     if (!mixer_) return;
-    // A video's track stops when it finds its stream empty (before the first sound, or if it runs
+    // A movie's track stops when it finds its stream empty (before the first sound, or if it runs
     // dry): it plays again when there's sound in it.
     for (const Stream& s : streams_)
         if (!s.paused && !MIX_TrackPlaying(s.track.get()) && !MIX_TrackPaused(s.track.get()) && SDL_GetAudioStreamAvailable(s.stream.get()) > 0)
             MIX_PlayTrack(s.track.get(), 0);
-    if (!listened_.empty() && !listenedVideo_ && !MIX_TrackPlaying(listen_)) stopListening();
+    if (!listened_.empty() && !listenedMovie_ && !MIX_TrackPlaying(listen_)) stopListening();
     if (!listened_.empty() || gameHeld_) holdOthers(); // (what started meanwhile waits too)
     // A non-looping song that finished is no longer "the current music" (matters for saves).
     if (!musicLoops_ && !musicPath_.empty() && !MIX_TrackPlaying(music_[current_])) musicPath_.clear();
@@ -908,7 +908,7 @@ void Audio::update(float dt) {
     }
 }
 
-void Audio::clearCache() {
+void Sound::clearCache() {
     cache_.clear();
     voice_.envelope = replay_.envelope = nullptr;
     envelopes_.clear();
@@ -963,7 +963,7 @@ struct Syllable {
 
 } // namespace
 
-std::vector<float> babble(std::string_view text, float pitch, int rate, float speed) {
+std::vector<float> madeUpVoice(std::string_view text, float pitch, int rate, float speed) {
     const float slow = 1.0f / std::clamp(speed, 0.25f, 4.0f); // stretches every syllable and pause
     std::mt19937 rng(static_cast<std::uint32_t>(fnv1a(text)));
     auto jitter = [&](int range) { return static_cast<float>(static_cast<int>(rng() % static_cast<unsigned>(range))); };
@@ -1180,11 +1180,11 @@ std::vector<float> babble(std::string_view text, float pitch, int rate, float sp
 }
 
 // ---------------------------------------------------------------------------
-// Videos
+// Movies
 // ---------------------------------------------------------------------------
 
 struct Movie::Callbacks {
-    static void video(plm_t*, plm_frame_t* frame, void* user) {
+    static void movie(plm_t*, plm_frame_t* frame, void* user) {
         auto* self = static_cast<Movie*>(user);
         if (!self->texture_) return;
         const SDL_Rect area{0, 0, static_cast<int>(frame->width), static_cast<int>(frame->height)};
@@ -1192,48 +1192,48 @@ struct Movie::Callbacks {
                              static_cast<int>(frame->cb.width), frame->cr.data, static_cast<int>(frame->cr.width));
         ++self->frames_;
     }
-    static void audio(plm_t*, plm_samples_t* samples, void* user) {
+    static void sound(plm_t*, plm_samples_t* samples, void* user) {
         withoutThrowing([&] { static_cast<Movie*>(user)->pushSound(samples->interleaved, static_cast<int>(samples->count)); }); // (pl_mpeg is C)
     }
 };
 
 void Movie::PlmDeleter::operator()(plm_t* p) const noexcept { plm_destroy(p); }
 
-Movie::Movie(SDL_Renderer* renderer, Audio& audio, const std::string& path, bool loop, float volume)
-    : renderer_(renderer), audio_(audio), sound_(nullptr, StreamCloser{&audio}) {
-    if (const auto dot = path.rfind('.'); dot != std::string::npos && std::ranges::contains(kSystemVideoTypes, lower(path.substr(dot)))) {
+Movie::Movie(SDL_Renderer* renderer, Sound& sound, const std::string& path, bool loop, float volume)
+    : renderer_(renderer), sound_(sound), stream_(nullptr, StreamCloser{&sound}) {
+    if (const auto dot = path.rfind('.'); dot != std::string::npos && std::ranges::contains(kSystemMovieTypes, lower(path.substr(dot)))) {
         SDL_PathInfo info{};
         const bool onDisk = SDL_GetPathInfo(path.c_str(), &info) && info.type == SDL_PATHTYPE_FILE;
-        const auto bytes = onDisk ? std::nullopt : audio.files().read(path); // (in a pack)
-        if (onDisk || bytes) system_ = SystemVideo::open(path, bytes ? &*bytes : nullptr);
+        const auto bytes = onDisk ? std::nullopt : sound.files().read(path); // (in a pack)
+        if (onDisk || bytes) system_ = SystemMovie::open(path, bytes ? &*bytes : nullptr);
         if (!system_) {
 #if defined(__linux__)
-            logWarn("Can't play '{}': on Linux, MP4, MOV and M4V videos play with GStreamer and its plugins installed (an MPEG-1 video, .mpg, plays everywhere).", path);
+            logWarn("Can't play '{}': on Linux, MP4, MOV and M4V movies play with GStreamer and its plugins installed (an MPEG-1 movie, .mpg, plays everywhere).", path);
 #elif defined(__APPLE__) || defined(_WIN32)
             logWarn("Can't play '{}'.", path);
 #else
-            logWarn("Can't play '{}': MP4, MOV and M4V videos play on Macs, Windows and Linux (an MPEG-1 video, .mpg, plays everywhere).", path);
+            logWarn("Can't play '{}': MP4, MOV and M4V movies play on Macs, Windows and Linux (an MPEG-1 movie, .mpg, plays everywhere).", path);
 #endif
             return;
         }
-        const SystemVideo::Info& video = system_->info();
-        width_ = static_cast<float>(video.width);
-        height_ = static_cast<float>(video.height);
-        texture_.reset(SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, video.width, video.height));
+        const SystemMovie::Info& movie = system_->info();
+        width_ = static_cast<float>(movie.width);
+        height_ = static_cast<float>(movie.height);
+        texture_.reset(SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, movie.width, movie.height));
         if (!texture_) logWarn("Can't show '{}': {}.", path, SDL_GetError());
         else SDL_SetTextureScaleMode(texture_.get(), SDL_SCALEMODE_LINEAR);
         loop_ = loop;
-        if (video.sound) sound_.reset(audio_.openStream(SystemVideo::kSoundRate, volume));
-        if (!system_->nextPicture(picture_, pitch_, pictureTime_)) pictureTime_ = -1.0;
+        if (movie.sound) stream_.reset(sound_.openStream(SystemMovie::kSoundRate, volume));
+        if (!system_->nextImage(image_, pitch_, imageTime_)) imageTime_ = -1.0;
         return;
     }
-    auto data = audio.files().read(path);
+    auto data = sound.files().read(path);
     if (!data) return;
     data_ = std::move(*data);
     plm_.reset(plm_create_with_memory(reinterpret_cast<uint8_t*>(data_.data()), data_.size(), 0));
     if (plm_ && plm_get_num_video_streams(plm_.get()) == 0) plm_probe(plm_.get(), 1024 * 1024); // headers that don't say
     if (!plm_ || plm_get_num_video_streams(plm_.get()) == 0) {
-        logWarn("Can't play '{}': it isn't an MPEG-1 video (.mpg).", path);
+        logWarn("Can't play '{}': it isn't an MPEG-1 movie (.mpg).", path);
         plm_.reset();
         return;
     }
@@ -1252,10 +1252,10 @@ Movie::Movie(SDL_Renderer* renderer, Audio& audio, const std::string& path, bool
     else SDL_SetTextureScaleMode(texture_.get(), SDL_SCALEMODE_LINEAR);
 
     plm_set_loop(plm_.get(), loop);
-    plm_set_video_decode_callback(plm_.get(), &Callbacks::video, this);
-    if (plm_get_num_audio_streams(plm_.get()) > 0) sound_.reset(audio_.openStream(plm_get_samplerate(plm_.get()), volume));
-    if (sound_) {
-        plm_set_audio_decode_callback(plm_.get(), &Callbacks::audio, this);
+    plm_set_video_decode_callback(plm_.get(), &Callbacks::movie, this);
+    if (plm_get_num_audio_streams(plm_.get()) > 0) stream_.reset(sound_.openStream(plm_get_samplerate(plm_.get()), volume));
+    if (stream_) {
+        plm_set_audio_decode_callback(plm_.get(), &Callbacks::sound, this);
         plm_set_audio_lead_time(plm_.get(), 0.15); // decoded a little ahead, so the sound never runs dry
     } else {
         plm_set_audio_enabled(plm_.get(), 0);
@@ -1263,7 +1263,7 @@ Movie::Movie(SDL_Renderer* renderer, Audio& audio, const std::string& path, bool
 }
 
 void Movie::showFirst() {
-    for (int i = 0; i < 20 && !texture() && !ended(); ++i) update(0.02f); // (its first picture may come a little after the start)
+    for (int i = 0; i < 20 && !texture() && !ended(); ++i) update(0.02f); // (its first image may come a little after the start)
 }
 
 void Movie::setLoop(bool loop) {
@@ -1277,40 +1277,40 @@ void Movie::update(float dt) {
     plm_decode(plm_.get(), static_cast<double>(dt));
 }
 
-// The pictures whose time has come (the last shown), and its sound kept half a second ahead.
+// The images whose time has come (the last shown), and its sound kept half a second ahead.
 void Movie::updateSystem(float dt) {
     if (paused_ || ended()) return;
     time_ += dt;
     bool shown = false;
-    while (pictureTime_ >= 0.0 && pictureTime_ <= time_) {
+    while (imageTime_ >= 0.0 && imageTime_ <= time_) {
         shown = true;
-        std::swap(picture_, shownPicture_);
+        std::swap(image_, shownImage_);
         const int pitch = pitch_;
-        if (!system_->nextPicture(picture_, pitch_, pictureTime_)) pictureTime_ = -1.0;
-        if (texture_ && !shownPicture_.empty()) SDL_UpdateTexture(texture_.get(), nullptr, shownPicture_.data(), pitch);
+        if (!system_->nextImage(image_, pitch_, imageTime_)) imageTime_ = -1.0;
+        if (texture_ && !shownImage_.empty()) SDL_UpdateTexture(texture_.get(), nullptr, shownImage_.data(), pitch);
     }
     if (shown) ++frames_;
-    constexpr int kAhead = SystemVideo::kSoundRate * 2 * static_cast<int>(sizeof(float)) / 2;
-    while (sound_ && !soundEnded_ && SDL_GetAudioStreamQueued(sound_.get()) < kAhead) {
+    constexpr int kAhead = SystemMovie::kSoundRate * 2 * static_cast<int>(sizeof(float)) / 2;
+    while (stream_ && !soundEnded_ && SDL_GetAudioStreamQueued(stream_.get()) < kAhead) {
         if (!system_->nextSound(samples_)) soundEnded_ = true;
         else pushSound(samples_.data(), static_cast<int>(samples_.size() / 2));
     }
-    if (pictureTime_ < 0.0 && loop_) { // (round again)
+    if (imageTime_ < 0.0 && loop_) { // (round again)
         system_->restart();
         time_ = 0.0;
         soundEnded_ = false;
-        if (!system_->nextPicture(picture_, pitch_, pictureTime_)) pictureTime_ = -1.0;
+        if (!system_->nextImage(image_, pitch_, imageTime_)) imageTime_ = -1.0;
     }
 }
 
 void Movie::setPaused(bool paused) {
     if (paused == paused_) return;
     paused_ = paused;
-    if (sound_) audio_.pauseStream(sound_.get(), paused);
+    if (stream_) sound_.pauseStream(stream_.get(), paused);
 }
 
 bool Movie::ended() const {
-    if (system_) return pictureTime_ < 0.0 && !loop_;
+    if (system_) return imageTime_ < 0.0 && !loop_;
     return !plm_ || plm_has_ended(plm_.get());
 }
 
@@ -1325,7 +1325,7 @@ double Movie::duration() const {
 }
 
 void Movie::pushSound(const float* interleaved, int count) {
-    if (sound_ && count > 0) SDL_PutAudioStreamData(sound_.get(), interleaved, count * 2 * static_cast<int>(sizeof(float)));
+    if (stream_ && count > 0) SDL_PutAudioStreamData(stream_.get(), interleaved, count * 2 * static_cast<int>(sizeof(float)));
 }
 
 } // namespace vn

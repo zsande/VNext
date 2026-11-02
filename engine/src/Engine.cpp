@@ -103,12 +103,12 @@ bool isPress(const SDL_Event& e) {
     return e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat);
 }
 
-// The player settings a game starts with ("config default.*" lines).
-Settings defaultSettings(const GameConfig& cfg) {
+// The player settings a game starts with ("setting default.*" lines).
+Settings defaultSettings(const GameSettings& game) {
     Settings s;
-    s.windowWidth = cfg.width;
-    s.windowHeight = cfg.height;
-    for (const auto& [key, value] : cfg.settingDefaults) s.set(key, value);
+    s.windowWidth = game.width;
+    s.windowHeight = game.height;
+    for (const auto& [key, value] : game.settingDefaults) s.set(key, value);
     return s;
 }
 
@@ -194,13 +194,13 @@ SDL_AppResult Engine::init(int argc, char** argv) {
         const bool hasValue = i + 1 < argc;
         if (arg == "--game" && hasValue) gameArg = argv[++i];
         else if (arg == "--data" && hasValue) dataArg = argv[++i];
-        else if (arg == "--label" && hasValue) startLabel_ = argv[++i];
+        else if (arg == "--scene" && hasValue) startScene_ = argv[++i];
         else if (arg == "--screenshot" && hasValue) screenshotPath_ = argv[++i];
         else if (arg == "--voices") listVoices = true;
         else if (arg == "--translate" && hasValue) translateId = lower(argv[++i]);
         else if (arg == "--pack") packArg = hasValue && !std::string_view(argv[i + 1]).starts_with('-') ? argv[++i] : packArg.value_or("");
         else if (arg == "--help" || arg == "-h") {
-            SDL_Log("usage: VNext [--game FOLDER or PACK] [--data FOLDER] [--label NAME] [--screenshot FILE.png] [--voices] "
+            SDL_Log("usage: VNext [--game FOLDER or PACK] [--data FOLDER] [--scene NAME] [--screenshot FILE.png] [--voices] "
                     "[--translate LANGUAGE] [--pack [FILE]]");
             return SDL_APP_SUCCESS;
         }
@@ -213,10 +213,10 @@ SDL_AppResult Engine::init(int argc, char** argv) {
     }
     developer_.startToolsLanguage(); // (before the scripts are read: what's said about their mistakes is in it)
 
-    // The script comes first: it decides the save folder, resolution and default settings.
+    // The script comes first: it decides the save folder, the game size and default settings.
     gameRoot_ = findGame(gameArg);
     const std::string problem = openGame(); // with the game itself
-    const GameConfig& cfg = script_.config;
+    const GameSettings& game = script_.gameSettings;
     // Tools for making the game, which do their work and quit.
     if (listVoices || !translateId.empty() || packArg) {
         if (noGame_ || !problem.empty() || packed_) {
@@ -242,11 +242,11 @@ SDL_AppResult Engine::init(int argc, char** argv) {
     loadPlayerData();
     logFile_ = prefPath_ + "log.txt";
     log_.open(logFile_);
-    if (!noGame_) logInfo("Playing the game in '{}'{}.", gameRoot_, cfg.developer ? " (developer mode)" : "");
+    if (!noGame_) logInfo("Playing the game in '{}'{}.", gameRoot_, game.developer ? " (developer mode)" : "");
     logInfo("The player's data is in '{}'.", prefPath_);
 
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO)) audio_.init();
-    else logWarn("Can't start the audio: {}, so the game plays without sound.", SDL_GetError());
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO)) sound_.init();
+    else logWarn("Can't start the sound: {}, so the game plays silently.", SDL_GetError());
     session_.ttf = TTF_Init();
     if (!session_.ttf) logWarn("Can't start SDL_ttf (it draws the text): {}.", SDL_GetError());
 
@@ -302,35 +302,35 @@ std::string Engine::openGame() {
     return problem;
 }
 
-// The player's own folder for the game (VNext/<save_id>, or --data): settings, the log, and saves and
+// The player's own folder for the game (VNext/<save_folder>, or --data): settings, the log, and saves and
 // progress, unless the game is a pack that keeps those itself: game.vnext does, unless --data was given
 // or it can't (its file can't be written to, or it's inside an app). Without a game: VNext/Developer.
 void Engine::loadPlayerData() {
     if (!dataFolder_)
-        if (const SdlOwned<char> pref{SDL_GetPrefPath("VNext", noGame_ ? "Developer" : config().saveId.c_str())}) prefPath_ = pref.get();
+        if (const SdlOwned<char> pref{SDL_GetPrefPath("VNext", noGame_ ? "Developer" : gameSettings().saveFolder.c_str())}) prefPath_ = pref.get();
     inPack_ = packed_ && !dataFolder_ && gameRoot_.find(".app/Contents/Resources/") == std::string::npos && files_.writable();
-    settings_ = Settings::load(prefPath_ + "settings.txt", defaultSettings(config()));
+    settings_ = Settings::load(prefPath_ + "settings.txt", defaultSettings(gameSettings()));
     readLog_ = readLogOf(readProgress("read.txt").value_or(""));
     loadPersistent();
-    chart_.read(readProgress("chart.txt").value_or(""));
+    flowchart_.read(readProgress("flowchart.txt").value_or(""));
     developer_.loadReached();
     developer_.loadStops();
 }
 
-// What the player shows first: the splash screen, then label start (or --label's label). In developer
+// What the player shows first: the splash screen, then scene start (or --scene's scene). In developer
 // mode, the developer tools, until Play; without a game, they're all there is.
 void Engine::begin() {
     if (noGame_) developer_.openDeveloper();
-    else if (config().developer && startLabel_.empty()) developer_.backToEditor();
+    else if (gameSettings().developer && startScene_.empty()) developer_.backToEditor();
     else if (mode_ == Mode::Error) return;
-    else if (!startLabel_.empty()) newGame(startLabel_);
+    else if (!startScene_.empty()) newGame(startScene_);
     else play();
 }
 
 void Engine::play() {
     waiting_ = false;
     beforeTitle_.clear();
-    if (script_.findLabel("splashscreen")) {
+    if (script_.findScene("splashscreen")) {
         newGame("splashscreen", true); // runs first; its "return" begins the story
         splash_ = true;
     } else {
@@ -338,7 +338,7 @@ void Engine::play() {
     }
 }
 
-// The game begins at label start. Its lines before the one that opens the title screen (an opening
+// The game begins at scene start. Its lines before the one that opens the title screen (an opening
 // movie...) aren't saved, and New Game goes on from the line after it.
 void Engine::beginStory() {
     beforeTitle_.clear(); // (its lines before the title screen run again)
@@ -354,10 +354,10 @@ void Engine::newStory() {
 }
 
 std::optional<std::size_t> Engine::titleLine() const {
-    const auto start = script_.findLabel("start");
+    const auto start = script_.findScene("start");
     if (!start) return std::nullopt;
     std::size_t end = script_.code.size();
-    for (const auto& [name, pc] : script_.labels)
+    for (const auto& [name, pc] : script_.scenes)
         if (pc > *start && pc < end) end = pc;
     for (std::size_t pc = *start; pc < end; ++pc)
         if (const auto* open = std::get_if<cmd::Ui>(&script_.code[pc].command); open && open->verb == "open" && open->arg == "title") return pc;
@@ -373,10 +373,10 @@ bool Engine::lookForGame() {
     openGame();
     loadPlayerData();
     logInfo("Found the game in '{}'; the player's data is in '{}'.", gameRoot_, prefPath_);
-    developer_.dropPreviews(); // (its game uses the old pictures)
+    developer_.dropPreviews(); // (its game uses the old images)
     assets_ = std::make_unique<Assets>(renderer_.get(), gameRoot_, files_);
-    audio_.clearCache();
-    game_ = makeGame(); // (the old one points at the old pictures)
+    sound_.clearCache();
+    game_ = makeGame(); // (the old one points at the old images)
     configure();
     developer_.leave(); // (the game begins without them)
     begin();
@@ -384,7 +384,7 @@ bool Engine::lookForGame() {
 }
 
 Engine::~Engine() {
-    developer_.dropPreviews(); // (its game uses the pictures and the renderer)
+    developer_.dropPreviews(); // (its game uses the images and the renderer)
     developer_.dropCanvas();
     developer_.stopMovie();
     if (prefPath_.empty()) return;
@@ -398,18 +398,18 @@ Engine::~Engine() {
     }
 }
 
-// --voices: game/voices.txt lists every line of the characters with voices=, with the file it
+// --voices: game/voices.txt lists every line of the characters with voice_files=, with the file it
 // plays, as a script for recording them.
 bool Engine::writeVoiceList() const {
-    std::string out = "# The voice file each line plays (in game/audio, ending .ogg, .mp3, .flac or .wav), and its text.\n";
+    std::string out = "# The voice file each line plays (in game/sounds, ending .ogg, .mp3, .flac or .wav), and its text.\n";
     std::size_t lines = 0;
     for (const Instruction& ins : script_.code)
         if (const auto* say = std::get_if<cmd::Say>(&ins.command))
-            if (const CharacterDef* def = script_.character(say->character); def && !def->voices.empty()) {
-                out += std::format("{}/{}\t{}: {}\n", def->voices, say->voiceId, def->name, say->text);
+            if (const CharacterDef* def = script_.character(say->character); def && !def->voiceFiles.empty()) {
+                out += std::format("{}/{}\t{}: {}\n", def->voiceFiles, say->voiceId, def->name, say->text);
                 ++lines;
             }
-    if (lines == 0) out += "# No character has voices= yet, like  character Aiko voices=yes\n";
+    if (lines == 0) out += "# No character has voice_files= yet, like  character Aiko voice_files=yes\n";
     const std::string file = gameRoot_ + "voices.txt";
     const bool ok = SDL_SaveFile(file.c_str(), out.data(), out.size());
     SDL_Log("%s", (ok ? std::format("Wrote '{}' ({} lines).", file, lines) : std::format("Can't write '{}': {}.", file, SDL_GetError())).c_str());
@@ -492,7 +492,7 @@ void Engine::useLanguage() {
 }
 
 std::vector<std::string> Engine::languageNames() const {
-    std::vector<std::string> names{config().language};
+    std::vector<std::string> names{gameSettings().language};
     for (const Translation& t : translations_) names.push_back(t.name);
     return names;
 }
@@ -509,7 +509,7 @@ std::string Engine::languageId(int index) const {
 std::optional<std::string> Engine::languageIdNamed(std::string_view word) const {
     const std::string want = lower(trim(word));
     if (want.empty()) return std::nullopt;
-    if (want == "original" || want == lower(config().language)) return "original";
+    if (want == "original" || want == lower(gameSettings().language)) return "original";
     for (const Translation& t : translations_)
         if (want == t.id || want == lower(t.name) || (!t.code.empty() && want == lower(t.code))) return t.id;
     return std::nullopt;
@@ -574,10 +574,10 @@ std::string Engine::findGame(const std::string& requested) const {
 // them. A pack is a finished game, so it never runs in developer mode.
 Script Engine::readScript() const {
     Script script = Script::load("scripts/main.vnscript", [this](const std::string& p) { return files_.readText(gameRoot_ + p); }, defaultUi());
-    if (packed_) script.config.developer = false;
+    if (packed_) script.gameSettings.developer = false;
     auto count = [](std::size_t n, std::string_view what) { return std::format("{} {}{}", n, what, n == 1 ? "" : "s"); };
     const auto files = static_cast<std::size_t>(std::ranges::count_if(script.files, [](const std::string& f) { return !f.starts_with('<'); }));
-    logInfo("Read {}: {}, {} and {}.", count(files, "script file"), count(script.labels.size(), "label"), count(script.characters.size(), "character"),
+    logInfo("Read {}: {}, {} and {}.", count(files, "script file"), count(script.scenes.size(), "scene"), count(script.characters.size(), "character"),
             count(script.screens.size(), "screen"));
     return script;
 }
@@ -596,23 +596,23 @@ std::string packedAlready() { return "Can't pack the game: it's a pack already."
 std::string scriptsWrong() { return "Can't pack the game: its scripts have mistakes."_tr() + "\n" + "The Story tab and the log say where."_tr(); }
 } // namespace
 
-// Packs the game into `file`, and writes the licenses of what's built into the player next to it
-// (licenses.txt), to go out with them.
+// Packs the game into `file`, and writes the licences of what's built into the player next to it
+// (licences.txt), to go out with them.
 std::expected<std::string, std::string> Engine::pack(const std::string& file) const {
     if (packed_) return std::unexpected(packedAlready());
     if (!script_.ok()) return std::unexpected(scriptsWrong());
     const auto holds = packInto(file);
     if (!holds) return holds;
-    return "Packed the game into '{}', with 'licenses.txt' next to it."_tr(file) + "\n" + *holds;
+    return "Packed the game into '{}', with 'licences.txt' next to it."_tr(file) + "\n" + *holds;
 }
 
-// The pack written as `file`, with licenses.txt next to it: what it holds and how long it took to make.
+// The pack written as `file`, with licences.txt next to it: what it holds and how long it took to make.
 std::expected<std::string, std::string> Engine::packInto(const std::string& file) const {
     const Uint64 start = SDL_GetTicksNS();
     const auto report = writePack(gameRoot_, file);
     if (!report) return std::unexpected(report.error());
-    const std::string notices = file.substr(0, file.find_last_of("/\\") + 1) + "licenses.txt";
-    if (!SDL_SaveFile(notices.c_str(), licenses().data(), licenses().size()))
+    const std::string notices = file.substr(0, file.find_last_of("/\\") + 1) + "licences.txt";
+    if (!SDL_SaveFile(notices.c_str(), licences().data(), licences().size()))
         return std::unexpected("Packed the game, but can't write '{}': {}."_tr(notices, SDL_GetError()));
     const double size = megabytes(report->bytes), packed = megabytes(report->packed), took = static_cast<double>(SDL_GetTicksNS() - start) / 1e9;
     return report->files == 1 ? "The pack holds 1 file ({:.1f} MB) in {:.1f} MB, made in {:.1f} seconds."_tr(size, packed, took)
@@ -620,7 +620,7 @@ std::expected<std::string, std::string> Engine::packInto(const std::string& file
 }
 
 // Pack the game: next to the game folder, a folder named after the game with game.vnext (the game in
-// one file, which keeps its players' saves and progress in it too) and licenses.txt. To play it, the player goes
+// one file, which keeps its players' saves and progress in it too) and licences.txt. To play it, the player goes
 // next to game.vnext: VNext.app, VNext.exe or VNext-Linux.AppImage, from VNext's releases on GitHub. One made before
 // goes to the Trash first.
 std::expected<std::string, std::string> Engine::finishGame() const {
@@ -631,13 +631,13 @@ std::expected<std::string, std::string> Engine::finishGame() const {
     if (!SDL_CreateDirectory(folder.c_str())) return std::unexpected("Can't make '{}': {}."_tr(folder, SDL_GetError()));
     const auto holds = packInto(folder + "/" + std::string(kPackName));
     if (!holds) return holds;
-    return "Packed the game: 'game.vnext' and 'licenses.txt' are in '{}'."_tr(folder) + "\n" + *holds + "\n" +
+    return "Packed the game: 'game.vnext' and 'licences.txt' are in '{}'."_tr(folder) + "\n" + *holds + "\n" +
            "To play it, put VNext next to 'game.vnext': VNext.app, VNext.exe or VNext-Linux.AppImage, from VNext's releases on GitHub."_tr();
 }
 
 std::string Engine::finishedFolder() const {
     std::string name; // (the game's title, as a file's name)
-    for (const char c : script_.config.title)
+    for (const char c : script_.gameSettings.title)
         if (!std::string_view("/\\:*?\"<>|").contains(c) && static_cast<unsigned char>(c) >= 32) name += c;
     name = std::string(trim(name));
     while (name.starts_with('.')) name.erase(0, 1);
@@ -653,15 +653,15 @@ namespace {
 // Applies what the script sets up: canvas, window title, save pages, fonts, screens. Script
 // errors switch to the error screen.
 void Engine::configure() {
-    const GameConfig& cfg = script_.config;
-    canvas_ = {static_cast<float>(cfg.width), static_cast<float>(cfg.height)};
-    defaults_ = defaultSettings(cfg);
+    const GameSettings& game = script_.gameSettings;
+    canvas_ = {static_cast<float>(game.width), static_cast<float>(game.height)};
+    defaults_ = defaultSettings(game);
     useLanguage(); // texts, window title, fonts
-    // The window's icon: the game's (config icon), else the player's own (icon.png, built into it).
-    SurfacePtr icon{noGame_ || cfg.icon.empty() ? nullptr : IMG_Load_IO(files_.open(gameRoot_ + cfg.icon).release(), true)}; // (a missing file is fine)
+    // The window's icon: the game's (setting icon), else the player's own (icon.png, built into it).
+    SurfacePtr icon{noGame_ || game.icon.empty() ? nullptr : IMG_Load_IO(files_.open(gameRoot_ + game.icon).release(), true)}; // (a missing file is fine)
     if (!icon) icon.reset(IMG_Load_IO(SDL_IOFromConstMem(kIconPng, sizeof kIconPng), true));
     if (icon) SDL_SetWindowIcon(window_.get(), icon.get());
-    SDL_SetWindowResizable(window_.get(), cfg.resizable); // (the developer tools too: one setting for both)
+    SDL_SetWindowResizable(window_.get(), game.resizable); // (the developer tools too: one setting for both)
     // Saves go into game.vnext for a pack that keeps them (inPack_), in game/saves for a game folder
     // (unless --data was given, or it's inside an app, or the folder can't take them), else in the
     // player's own folder.
@@ -670,23 +670,23 @@ void Engine::configure() {
                     SDL_CreateDirectory((gameRoot_ + "saves").c_str())))
         saves = gameRoot_ + "saves/";
     saves_.setFolder(saves, inPack_ ? &files_ : nullptr);
-    assets_->setPixelArt(cfg.pixelArt);
-    // The mouse pointer: a picture from images/ (config cursor), or the system's.
+    assets_->setPixelArt(game.pixelArt);
+    // The mouse pointer: an image from images/ (setting mouse_pointer), or the system's.
     cursor_.reset();
-    if (!cfg.cursor.empty()) {
-        const std::string file = cfg.cursor.find('.') == std::string::npos ? std::format("images/{}.png", cfg.cursor) : cfg.cursor;
-        if (SurfacePtr picture{IMG_Load_IO(files_.open(gameRoot_ + file).release(), true)})
-            cursor_.reset(SDL_CreateColorCursor(picture.get(), cfg.cursorHotspot.x, cfg.cursorHotspot.y));
+    if (!game.mousePointer.empty()) {
+        const std::string file = game.mousePointer.find('.') == std::string::npos ? std::format("images/{}.png", game.mousePointer) : game.mousePointer;
+        if (SurfacePtr image{IMG_Load_IO(files_.open(gameRoot_ + file).release(), true)})
+            cursor_.reset(SDL_CreateColorCursor(image.get(), game.pointerTip.x, game.pointerTip.y));
         if (!cursor_) logWarn("Can't use '{}' as the mouse pointer: {}.", file, SDL_GetError());
     }
     SDL_SetCursor(cursor_ ? cursor_.get() : SDL_GetDefaultCursor());
     assets_->setAtlases(script_.atlases);
-    assets_->setSubPictures(script_.subPictures);
+    assets_->setSubImages(script_.subImages);
     movies_.clear();
-    audio_.setCrossfade(cfg.musicCrossfade);
-    audio_.setDucking(cfg.musicWhileSpeaking);
-    assets_->setMemoryLimit(static_cast<std::size_t>(cfg.imageMemory) * 1024 * 1024);
-    saves_.configure(cfg.savePages, cfg.saveSlots);
+    sound_.setCrossfade(game.musicCrossfade);
+    sound_.setDucking(game.musicUnderVoices);
+    assets_->setMemoryLimit(static_cast<std::size_t>(game.imageMemory) * 1024 * 1024);
+    saves_.configure(game.savePages, game.pageSlots);
     hasSave_ = saves_.newest().has_value();
     if (inPack_) logInfo("Saves and progress go in '{}'.", gameRoot_.substr(0, gameRoot_.size() - 1));
     else if (!noGame_) logInfo("Saves go in '{}'.", saves);
@@ -714,7 +714,7 @@ void Engine::configure() {
 }
 
 std::unique_ptr<Game> Engine::makeGame() {
-    auto game = std::make_unique<Game>(Context{renderer_.get(), *assets_, audio_, settings_, readLog_, persistent_, chart_, canvas_,
+    auto game = std::make_unique<Game>(Context{renderer_.get(), *assets_, sound_, settings_, readLog_, persistent_, flowchart_, canvas_,
                                                [this](std::string_view name) { return builtin(name); }},
                                        script_);
     game->stopWhere([this](std::size_t pc) { return developerMode() && developer_.stopsBefore(pc); }); // (Stop here, Next line)
@@ -743,28 +743,88 @@ std::optional<Value> Engine::builtin(std::string_view name) const {
         return static_cast<int>(std::lround(std::clamp(left.value_or(0.0f), 0.0f, 1.0f) * 100.0f));
     }
     const auto& gallery = script_.records(RecordKind::Gallery);
-    if (name == "cg") return cg_ < gallery.size() ? gallery[cg_].name : std::string{};
-    if (name == "cg_title") return cg_ < gallery.size() ? gallery[cg_].title : std::string{};
-    if (name == "cg_movie") return flag(galleryMovie(cg_));
+    if (name == "gallery_image") return galleryImage_ < gallery.size() ? gallery[galleryImage_].name : std::string{};
+    if (name == "gallery_title") return galleryImage_ < gallery.size() ? gallery[galleryImage_].title : std::string{};
+    if (name == "gallery_movie") return flag(galleryMovie(galleryImage_));
     if (name == "tip" || name == "tip_title" || name == "tip_text") { // the tip being read (none after forgetting progress)
         const Script::Record* tip = tip_ && has(RecordKind::Tip, *tip_) ? &script_.records(RecordKind::Tip)[*tip_] : nullptr;
         return !tip ? std::string{} : name == "tip" ? tip->name : name == "tip_title" ? tip->title : tip->text;
     }
-    if (name == "chart_places") return static_cast<int>(chart_.nodes().size());
-    // How many pictures, endings, songs, achievements and tips there are, and how many the player has.
+    if (name == "flowchart_points") return static_cast<int>(flowchart_.nodes().size());
+    // How many images, endings, songs, achievements and tips there are, and how many the player has.
     static constexpr std::array<std::pair<std::string_view, std::string_view>, kRecordKinds.size()> counts{
-        {{"cg_total", "cg_unlocked"}, {"endings_total", "endings_reached"}, {"songs_total", "songs_heard"},
+        {{"gallery_total", "gallery_unlocked"}, {"endings_total", "endings_reached"}, {"songs_total", "songs_heard"},
          {"achievements_total", "achievements_earned"}, {"tips_total", "tips_found"}}};
     for (std::size_t k = 0; k < counts.size(); ++k) {
         if (name == counts[k].first) return static_cast<int>(script_.lists[k].size());
         if (name == counts[k].second) return count(static_cast<RecordKind>(k));
     }
     if (name == "chapter") return g ? g->chapter() : std::string{};
-    if (name == "messages_total") return g ? static_cast<int>(g->messages().size()) : 0;
-    if (name == "contact") return contact_;
+    // The phone: its messages (proper ones: not someone typing), where it is, what's new on it, its clock...
+    if (name == "messages_total")
+        return g ? static_cast<int>(std::ranges::count_if(g->messages(), [](const MessageItem& m) {
+                       return m.typing <= 0.0f && m.kind != MessageItem::Kind::End;
+                   }))
+                 : 0;
+    // How many chats, calls and people (characters whose contact= is true) the phone has, and messages the open
+    // chat has: a ready-made app says so when it has none.
+    if (name == "chats_total") return g ? static_cast<int>(g->chats().size()) : 0;
+    if (name == "open_chat_messages")
+        return g ? static_cast<int>(std::ranges::count_if(g->messages(), [&](const MessageItem& m) { return m.with == phone_.chat && m.kind != MessageItem::Kind::End; })) : 0;
+    if (name == "calls_total") return g ? static_cast<int>(g->phone().calls.size()) : 0;
+    if (name == "people_total") {
+        const Lookup look = [&](std::string_view n) { return g ? g->variable(n) : Value{0}; };
+        return static_cast<int>(std::ranges::count_if(script_.characters, [&](const auto& c) { return c.second.contact && c.second.contact->test(look); }));
+    }
+    if (name == "open_chat") return phone_.chat;
+    if (name == "phone_app") {
+        const ScreenDef* def = script_.screen("phone");
+        return g && def ? phoneApp(*def) : std::string{};
+    }
     if (name == "has_phone") return flag(playing && g->hasPhone());
-    if (name == "messages_unread") // (not the ones still being typed)
-        return g ? static_cast<int>(std::ranges::count_if(g->messages(), [](const MessageItem& m) { return !m.read && m.typing <= 0.0f; })) : 0;
+    if (name == "phone_button") // (the textbox's Phone button: new messages say so with it, and there's a phone to open, not open already)
+        return flag(playing && g->hasPhone() && gameSettings().newMessages == NewMessages::Button && script_.screen("phone") &&
+                    !std::ranges::contains(overlays_, std::string("phone")));
+    if (name == "messages_unread") return g ? g->unseenMessages() : 0; // (not the ones still being typed)
+    if (name == "calls_missed") return g ? g->unseenCalls() : 0;
+    if (name == "phone_unread") return g ? g->unseenMessages() + g->unseenCalls() : 0; // (what the Phone button counts)
+    if (name == "phone_locked") return flag(phone_.locked);
+    if (name == "in_call") return flag(g && g->call());
+    if (name == "in_chat") return flag(playing && !g->chatScene().empty()); // (a chat scene is on)
+    if (name == "caller") return g && g->call() ? g->call()->who : std::string{};
+    if (name == "call_incoming" || name == "call_outgoing") // (ringing, not answered yet: one coming, or the player's)
+        return flag(g && g->call() && !g->call()->talking && !g->call()->busy && g->call()->outgoing == (name == "call_outgoing"));
+    if (name == "call_busy") return flag(g && g->call() && g->call()->busy); // (declined: it says so a moment)
+    if (name == "call_choice") // (the player's call: a choice of their call scene's waiting on it)
+        return flag(g && g->call() && g->call()->talking && g->waitsOnPhone(g->call()->who, true));
+    if (name == "call_time") { // how long it has gone on: 1:05 (ringing: none)
+        if (!g || !g->call() || !g->call()->talking) return std::string{};
+        const int s = std::max(0, static_cast<int>(g->call()->time));
+        return std::format("{}:{:02}", s / 60, s % 60);
+    }
+    if (name == "caller_avatar" || name == "caller_colour" || name == "caller_initial") { // (as a list's people have theirs: {chat.avatar}...)
+        if (!g || !g->call()) return std::string{};
+        const CallNow& call = *g->call();
+        const CharacterDef* def = call.character.empty() ? nullptr : script_.character(call.character);
+        if (name == "caller_initial") return call.who.empty() ? std::string{} : upper(std::string_view(call.who).substr(0, utf8::offset(call.who, 1)));
+        if (name == "caller_colour") return std::format("#{:02x}{:02x}{:02x}", call.colour.r, call.colour.g, call.colour.b);
+        return def && !def->avatarOf({}).empty() ? def->avatarOf(g->expressionOf(call.character)) : std::string{};
+    }
+    if (name == "open_image") return phone_.image; // (in the phone's image viewer: one from a chat)
+    if (name == "open_image_text") { // ...who sent it and their words
+        const MessageItem* sent = nullptr;
+        for (const MessageItem& m : g ? g->messages() : std::vector<MessageItem>{})
+            if (m.kind == MessageItem::Kind::Image && m.file == phone_.image && m.typing <= 0.0f) sent = &m;
+        return !sent ? std::string{} : sent->from.empty() ? sent->text : sent->text.empty() ? sent->from : sent->from + ": " + sent->text;
+    }
+    if (name == "phone_needs_code") return flag(phone_.locked && !passcode().empty()); // (its lock screen's keypad is needed)
+    if (name == "phone_code") { // the passcode so far: a filled dot for each digit, an empty one for each to go
+        const std::size_t want = g ? utf8::length(passcode()) : 4, typed = utf8::length(phone_.code);
+        std::string dots;
+        for (std::size_t k = 0; k < std::max(want, typed); ++k) dots += k < typed ? "\u25CF" : "\u25CB";
+        return dots;
+    }
+    if (name == "phone_wrong") return flag(phone_.wrongAt && time_ - *phone_.wrongAt < 1.5f); // (a wrong passcode was just tried)
     if (name == "dragging") { // what the player holds, in the screen on top
         for (const auto& screen : overlays_ | std::views::reverse)
             if (auto it = views_.find(screen); it != views_.end()) return it->second.held();
@@ -773,17 +833,17 @@ std::optional<Value> Engine::builtin(std::string_view name) const {
     if (name == "has_face") return flag(playing && g->showingSay() && !g->faceBase().empty());
     if (name == "face_side") return playing && g->showingSay() ? g->faceSide() : std::string{};
     if (name == "fullscreen") return flag(settings_.fullscreen);
-    if (name == "developer") return flag(config().developer);
+    if (name == "developer") return flag(gameSettings().developer);
     if (name == "thumbnail") return flag(thumbnail_);
     if (name == "save_mode") return flag(slots_.mode() == SlotBrowser::Mode::Save);
-    if (name == "title") return config().title;
+    if (name == "title") return gameSettings().title;
     if (name == "language") return languageNames()[static_cast<std::size_t>(languageIndex())];
     if (name == "languages") return static_cast<int>(translations_.size()) + 1;
-    if (name == "version") return config().version;
+    if (name == "version") return gameSettings().version;
     if (name == "engine_version") return std::string(kVersion);
     if (name == "sdl_version") return sdlVersion();
     if (name == "speaker") return g ? g->speaker() : std::string{};
-    if (name == "message") return notice_;
+    if (name == "notice") return notice_;
     if (name == "question") return question_;
     if (name == "page" && !slots_.pages().empty()) {
         const auto& p = slots_.pages()[slots_.page()];
@@ -791,13 +851,13 @@ std::optional<Value> Engine::builtin(std::string_view name) const {
     }
     // The player's settings: as a slider's reads ("45 cps", "80%"), the window's size, or a number (yes: 1).
     if (name == "window_size") return std::format("{} x {}", settings_.windowWidth, settings_.windowHeight);
-    if (const SettingControl* c = findSettingControl(name)) return c->text(settings_, config());
+    if (const SettingControl* c = findSettingControl(name)) return c->text(settings_, gameSettings());
     if (const auto v = settings_.get(name)) return *v;
     return std::nullopt;
 }
 
 void Engine::updatePixelScale() {
-    // Text is rasterized at the size it's shown at: the game's as its view scales the canvas (Settings'
+    // Text is rasterised at the size it's shown at: the game's as its view scales the canvas (Settings'
     // scaling), the developer tools' as sharp as the window's pixels.
     if (!renderer_) return;
     const bool tools = toolsView_;
@@ -846,15 +906,17 @@ void Engine::refreshWindowSizes() {
 // ---------------------------------------------------------------------------
 
 // Messages that come while one is showing wait their turn (an ending, then an achievement...).
-void Engine::notify(std::string message) {
+void Engine::notice(std::string message, std::string phone) {
     logInfo("{}", message);
+    if (!phone.empty() && phone == phone_.chat && std::ranges::contains(overlays_, std::string("phone"))) return; // (it's open there already)
     if (noticeTime_ > 0.0f && !notice_.empty()) {
-        if (message != notice_ && (noticeQueue_.empty() || noticeQueue_.back() != message)) noticeQueue_.push_back(std::move(message));
+        if (message != notice_ && (noticeQueue_.empty() || noticeQueue_.back().text != message)) noticeQueue_.push_back({std::move(message), std::move(phone)});
         if (noticeQueue_.size() > 4) noticeQueue_.pop_front(); // (not a long line of old news)
         return;
     }
     notice_ = std::move(message);
-    noticeTime_ = config().notifyTime;
+    noticePhone_ = std::move(phone);
+    noticeTime_ = gameSettings().noticeTime;
 }
 
 void Engine::showErrors(const std::vector<std::string>& lines) {
@@ -869,7 +931,7 @@ void Engine::showErrors(const std::vector<std::string>& lines) {
 void Engine::leaveStory(bool keepSound) {
     if (mode_ == Mode::Game && !splash_ && !opening_) autosave(); // leaving a game in progress
     splash_ = opening_ = false;
-    if (!keepSound) audio_.stopAll(1.0f);
+    if (!keepSound) sound_.stopAll(1.0f);
     game_ = makeGame(); // idle: title buttons can still set variables and play music
     writeProgress("read.txt", readLogText(readLog_));
     closeAll();
@@ -887,7 +949,7 @@ void Engine::openTitle(bool keepSound) {
         screenHook(title->def(), true);
     } else if (storyStarted_) {
         quit(); // the story is over, and there's no title screen to go back to
-    } else if (script_.findLabel("start")) {
+    } else if (script_.findScene("start")) {
         newGame("start"); // a game without a title screen starts at once
     }
 }
@@ -895,19 +957,19 @@ void Engine::openTitle(bool keepSound) {
 // In developer mode the player doesn't close by itself (Quit, or the story's end without a title screen):
 // it goes back to the developer tools.
 void Engine::quit() {
-    if (config().developer) developer_.backToEditor();
+    if (gameSettings().developer) developer_.backToEditor();
     else quit_ = true;
 }
 
 void Engine::newGame(std::string_view label, bool subroutine) {
     const std::string name(label.empty() ? "start" : label);
-    const auto pc = script_.findLabel(name);
-    if (!pc && name != "start") return logWarn("There's no label called '{}' to start from.", name);
-    // (without "label start" the story starts at its first line; from the title screen, with what was picked before it)
+    const auto pc = script_.findScene(name);
+    if (!pc && name != "start") return logWarn("There's no scene called '{}' to start from.", name);
+    // (without "scene start" the story starts at its first line; from the title screen, with what was picked before it)
     startAt(pc.value_or(0), subroutine, mode_ == Mode::Title && name != "start" ? &beforeTitle_ : nullptr);
 }
 
-// The title screen goes when a game starts or is loaded: its on_hide runs (stop music...).
+// The title screen goes when a game starts or is loaded: its action_on_close runs (stop music...).
 void Engine::leaveTitle() {
     if (!std::exchange(titleShown_, false)) return;
     if (ScreenView* title = view("title")) screenHook(title->def(), false);
@@ -943,12 +1005,170 @@ ScreenView* Engine::view(std::string_view name) {
     return it != views_.end() ? &it->second : nullptr;
 }
 
-ScreenView* Engine::textbox() {
-    if (ScreenView* v = view(game_->textbox())) return v;
-    return view("say");
+bool Engine::showsPhone(std::string_view screen) {
+    const ScreenView* v = view(screen);
+    return v && std::ranges::any_of(v->def().elements, [](const Element& el) { return el.kind == ElementKind::Container && !el.option("app").empty(); });
 }
 
-// Runs on_show / on_hide for screens that "show screen" / "hide screen" changed.
+// The phone screen (from the story): on the chat a chat scene is in, a call, or a message that came; straight
+// there (no lock screen).
+void Engine::showPhone(const cmd::Ui& c) {
+    const ScreenDef* def = script_.screen("phone");
+    if (!def || !playing()) return;
+    const bool up = std::ranges::contains(overlays_, std::string("phone"));
+    if (c.arg == "message" && up) return; // (up already: it shows there)
+    if (!c.phone.empty()) { // its chat, in the app it's in
+        if (std::string app = appHolding(*def, "messages"); !app.empty() || !(app = appHolding(*def, "chats")).empty()) phone_.app = std::move(app);
+        phone_.chat = c.phone;
+        phone_.image.clear();
+    }
+    if (c.arg == "call") phone_.image.clear();
+    phone_.locked = false;
+    if (up) return;
+    phone_.straight = true;
+    open("phone");
+    phone_.straight = false;
+}
+
+// A chat or a call over: the phone's put away, whoever opened it.
+void Engine::hidePhone() {
+    if (!playing() || game_->phoneBusy()) return;
+    if (!overlays_.empty() && overlays_.back() == "phone") return close();
+    if (const auto it = std::ranges::find(overlays_, std::string("phone")); it != overlays_.end()) { // (something over it: it goes from under that)
+        overlays_.erase(it);
+        if (ScreenView* v = view("phone")) screenHook(v->def(), false);
+    }
+}
+
+// An app's on the phone while its when= is true (none: always).
+bool Engine::appOn(const Element& app) const {
+    return !app.visible || app.visible->test(lookup());
+}
+
+std::string Engine::passcode() const { return game_ ? toString(game_->variable("phone_passcode")) : std::string{}; }
+
+namespace {
+// The phone's app called `name`: a container with app=NAME.
+const Element* appIn(const ScreenDef& def, std::string_view name) {
+    const auto it = std::ranges::find_if(def.elements, [&](const Element& el) { return el.kind == ElementKind::Container && el.option("app") == name; });
+    return it != def.elements.end() ? &*it : nullptr;
+}
+} // namespace
+
+std::string Engine::phoneApp(const ScreenDef& def) const {
+    if (game_->call() && !phone_.pinned && appIn(def, "call")) return "call";
+    if (phone_.locked && appIn(def, "lock")) return "lock";
+    if (const Element* open = phone_.app.empty() ? nullptr : appIn(def, phone_.app); open && appOn(*open)) return phone_.app;
+    if (appIn(def, "home")) return "home";
+    for (const Element& el : def.elements)
+        if (const std::string name = el.option("app"); el.kind == ElementKind::Container && !name.empty() && name != "call" && name != "lock" && appOn(el)) return name;
+    return {};
+}
+
+void Engine::openApp(const ScreenDef& def, std::string name) {
+    const std::string now = phoneApp(def);
+    if (name == now) return;
+    if (!now.empty() && now != "call" && now != "lock") phone_.back.push_back(now);
+    if (phone_.back.size() > 20) phone_.back.erase(phone_.back.begin());
+    phone_.app = std::move(name);
+    phone_.chat.clear();
+    phone_.image.clear();
+}
+
+void Engine::back() {
+    if (!phoneBack()) close();
+}
+
+bool Engine::phoneBack() {
+    if (!phone_.image.empty()) return phone_.image.clear(), true;
+    if (playing() && game_->phoneBusy()) { // (a chat scene or a call keeps the phone where it is; in a chat scene, Back goes on as a click does)
+        if (!game_->chatScene().empty() && !game_->phoneAnswers()) game_->nextLine();
+        return true;
+    }
+    if (!phone_.chat.empty()) return phone_.chat.clear(), true;
+    if (!phone_.back.empty()) {
+        phone_.app = phone_.back.back();
+        phone_.back.pop_back();
+        return true;
+    }
+    if (const ScreenDef* def = script_.screen("phone"))
+        if (appIn(*def, "home") && phoneApp(*def) != "home" && !phone_.locked) return phone_.app = "home", true;
+    return false;
+}
+
+bool Engine::unlockPhone(std::string_view code) {
+    if (playing() && !passcode().empty() && code != passcode()) return false; // (it's asked for each time: the phone locks whenever it's put away)
+    phone_.locked = false;
+    return true;
+}
+
+std::string Engine::appHolding(const ScreenDef& def, std::string_view list) const {
+    for (const Element& el : def.elements) {
+        if (el.kind != ElementKind::Container || el.option("list") != list) continue;
+        for (int p = el.parent; p >= 0; p = def.elements[static_cast<std::size_t>(p)].parent)
+            if (const std::string app = def.elements[static_cast<std::size_t>(p)].option("app"); !app.empty()) return app;
+        return {};
+    }
+    return {};
+}
+
+void Engine::openChat(const ScreenDef& def, std::string with) {
+    std::string app = appHolding(def, "messages");
+    if (app.empty()) app = appHolding(def, "chats");
+    if (!app.empty()) openApp(def, std::move(app));
+    phone_.chat = std::move(with);
+    phone_.image.clear();
+}
+
+void Engine::callPerson(const std::string& who) {
+    if (trying_) return tried_.push_back(cmd::Ui{.verb = "call"});
+    if (mode_ == Mode::Game) game_->callPerson(who);
+}
+
+void Engine::pickOnPhone(std::size_t option) {
+    if (trying_) return tried_.push_back(cmd::Ui{.verb = "send answer"});
+    if (mode_ == Mode::Game) game_->pickOnPhone(option);
+}
+
+void Engine::answerCall(bool answer) {
+    if (trying_) return tried_.push_back(cmd::Ui{.verb = answer ? "answer the call" : "decline the call"});
+    if (mode_ == Mode::Game) game_->answerCall(answer);
+}
+
+void Engine::keypad(std::string_view key) {
+    if (key == "back") {
+        if (!phone_.code.empty()) phone_.code.pop_back();
+        return;
+    }
+    phone_.code += key;
+    if (utf8::length(phone_.code) >= (playing() ? std::max<std::size_t>(1, utf8::length(passcode())) : 4)) {
+        if (!unlockPhone(phone_.code)) phone_.wrongAt = time_;
+        phone_.code.clear();
+    }
+}
+
+Image Engine::image(std::string_view name, Frame frame) {
+    return assets_->image(name, frame);
+}
+
+void Engine::rumble(float strength, Uint32 ms) {
+    if (!settings_.vibration) return;
+    const auto low = static_cast<Uint16>(std::clamp(strength, 0.0f, 1.0f) * 65535.0f);
+    for (const GamepadPtr& pad : pads_) SDL_RumbleGamepad(pad.get(), low, static_cast<Uint16>(low / 2), ms); // (a phone's buzz: mostly low)
+}
+
+void Engine::openNotice() {
+    if (noticePhone_.empty()) return;
+    showPhone(cmd::Ui{.verb = "show phone", .arg = "message", .phone = noticePhone_});
+    noticeTime_ = std::min(noticeTime_, 0.25f); // (it goes)
+}
+
+ScreenView* Engine::textbox() {
+    if (ScreenView* v = view(game_->textbox())) return v;
+    return view("textbox");
+}
+
+// Runs action_on_open / action_on_close for screens that "show screen" / "hide screen" changed.
 void Engine::syncShownScreens() {
     const std::vector<std::string> now = mode_ == Mode::Game ? game_->shownScreens() : std::vector<std::string>{};
     const std::vector<std::string> before = std::exchange(shown_, now);
@@ -1000,6 +1220,16 @@ bool Engine::openNow(const std::string& name, ScreenView::Played opening, Screen
     v->reset();
     v->playWith(std::move(opening), std::move(closing));
     backTo_.reset(); // (something opening over the rest: no longer going back)
+    if (!phone_.straight && std::ranges::any_of(v->def().elements, [](const Element& el) { return el.kind == ElementKind::Container && !el.option("app").empty(); })) {
+        // The player opening the phone: on its apps (home), not on a chat or call the story showed on it before
+        // (the story opens it on what it shows: straight).
+        phone_.app.clear();
+        phone_.chat.clear();
+        phone_.image.clear();
+        phone_.back.clear();
+    }
+    if (std::ranges::any_of(v->def().elements, [](const Element& el) { return el.kind == ElementKind::Container && el.option("app") == "lock"; }))
+        phone_.locked = !phone_.straight, phone_.code.clear(); // (its lock screen first, unless the story opens it on something)
     overlays_.push_back(name);
     screenHook(v->def(), true);
     return true;
@@ -1032,7 +1262,7 @@ void Engine::closeNow() {
     saveSettings();
     if (ScreenView* v = view(name)) screenHook(v->def(), false);
     // What was under it comes back into view when the closing ended covered, or when it had faded out for
-    // the one closing to open: its show_animation= plays again, after.
+    // the one closing to open: its animation_on_open= plays again, after.
     const bool covered = std::exchange(coveredClose_, false);
     if (ScreenView* top = topView(); top && (covered || top->hasLeft())) top->opened();
     if (calledDepth_ > overlays_.size()) { // the story was waiting for this screen
@@ -1065,7 +1295,7 @@ void Engine::left(const std::string& name) {
 void Engine::closeAll() {
     overlays_.clear();
     backTo_.reset();
-    contact_.clear();
+    phone_ = {};
     confirmYes_ = {};
     calledDepth_ = 0;
 }
@@ -1085,27 +1315,37 @@ void Engine::screenHook(const ScreenDef& def, bool opening) {
     if (stops.music) stop.emplace_back(cmd::Play{.track = cmd::Play::Track::Music, .fade = 0.5f});
     if (stops.voice) stop.emplace_back(cmd::Play{.track = cmd::Play::Track::Voice});
     run(stop);
-    run(opening ? def.onShow : def.onHide);
+    run(opening ? def.actionOnOpen : def.actionOnClose);
 }
 
-void Engine::run(const Commands& commands, const std::string& confirm) {
+void Engine::run(const Commands& commands, const std::string& confirm, const Variables& item) {
     if (commands.empty()) return;
-    if (trying_) {
-        tried_.insert(tried_.end(), commands.begin(), commands.end());
+    if (trying_) { // (the developer tools say what they'd do: with the item's values in their words)
+        for (Command c : commands) {
+            if (auto* u = std::get_if<cmd::Ui>(&c); u && !item.empty()) u->arg = withValues(u->arg, item);
+            tried_.push_back(std::move(c));
+        }
         return;
     }
-    if (!confirm.empty()) return ask(expand(confirm, lookup()), [this, commands] { run(commands); });
+    const Variables* was = game_ ? game_->item() : nullptr;
+    if (game_ && !item.empty()) game_->setItem(&item);
+    if (!confirm.empty()) {
+        std::string question = expand(confirm, lookup());
+        if (game_) game_->setItem(was);
+        return ask(std::move(question), [this, commands, item] { run(commands, {}, item); });
+    }
     for (const Command& c : commands) {
         command(c);
         if (quit_) break;
     }
+    if (game_) game_->setItem(was);
 }
 
 // One command from a button, key or screen hook.
 void Engine::command(const Command& c) {
     if (const auto* u = std::get_if<cmd::Ui>(&c)) return ui(*u);
     if (const auto* jump = std::get_if<cmd::Jump>(&c)) {
-        if (mode_ != Mode::Game) return newGame(jump->label); // from the title screen
+        if (mode_ != Mode::Game) return newGame(jump->scene); // from the title screen
         closeAll();
     }
     game_->perform(c);
@@ -1120,19 +1360,49 @@ void Engine::ui(const cmd::Ui& c) {
     }
     else if (v == "open") {
         if (c.arg.find("://") != std::string::npos || c.arg.starts_with("www.")) SDL_OpenURL(c.arg.c_str());
-        else if (!overlays_.empty() && overlays_.back() == c.arg) close(); // open already, on top: put it away, so one key opens and closes it
+        else if (!overlays_.empty() && overlays_.back() == c.arg) { // open already, on top: put it away, so one key opens and closes it (a chat scene or a call keeps the phone)
+            if (!showsPhone(c.arg) || !playing() || !game_->phoneBusy()) close();
+        }
         else if (std::ranges::contains(overlays_, c.arg) || (c.arg == "title" && titleShown_)) backTo(c.arg); // open under others: back to it
         else open(c.arg, ScreenView::animationIn(&script_, c.opening), ScreenView::animationIn(&script_, c.closing)); // (with NAME, and close with NAME: this time)
     }
-    else if (v == "close") { // (the title screen, with nothing over it: the story goes on, as with New Game)
+    else if (v == "show phone") showPhone(c); // (a chat scene, a call, or a message came with setting new_messages open)
+    else if (v == "buzz") rumble(0.45f, 180); // (a message came)
+    else if (v == "hide phone") hidePhone();  // (the chat scene or the call is over)
+    else if (v == "back") back();
+    else if (v == "open app" || v == "open chat") { // (the phone opens first, if it isn't open)
+        if (const ScreenDef* def = script_.screen("phone")) {
+            if (!std::ranges::contains(overlays_, std::string("phone"))) open("phone");
+            if (v == "open app") openApp(*def, lower(fillValues(c.arg, lookup())));
+            else openChat(*def, fillValues(c.arg, lookup()));
+        }
+    }
+    else if (v == "open image") openImage(fillValues(c.arg, lookup()));
+    else if (v == "phone call") callPerson(fillValues(c.arg, lookup()));
+    else if (v == "answer call" || v == "decline call") answerCall(v == "answer call");
+    else if (v == "hang up") {
+        if (playing()) game_->hangUp();
+    }
+    else if (v == "send") { // the answer it's on (a list's): a chat scene's, or an option of a choice on the phone
+        const Lookup& item = lookup();
+        const std::string kind = toString(item("answer.kind"));
+        const auto of = static_cast<std::size_t>(std::max(0, toInt(item("answer.of")))), option = static_cast<std::size_t>(std::max(0, toInt(item("answer.option"))));
+        if (toInt(item("answer.on")) != 0) {
+            if (kind == "phone choice") pickOnPhone(option);
+            else if (kind == "choice" && playing()) game_->choose(of);
+        }
+    }
+    else if (v == "keypad") keypad(c.arg);
+    else if (v == "unlock") unlockPhone({}); // (with a passcode: the keypad's)
+    else if (v == "close") { // (the title screen, with nothing over it: the story goes on, as with New Game; a chat scene or a call keeps the phone)
         if (overlays_.empty() && mode_ == Mode::Title) fromTitle([this] { newStory(); });
-        else close();
+        else if (overlays_.empty() || !showsPhone(overlays_.back()) || !playing() || !game_->phoneBusy()) close();
     }
     else if (v == "answer") {
         if (calledDepth_ == overlays_.size() && calledDepth_ > 0) answer_ = expand(c.arg, lookup());
         close();
     }
-    else if (v == "notify") notify(fillValues(c.arg, lookup())); // its text tags are read when it's shown
+    else if (v == "notice") notice(fillValues(c.arg, lookup()), c.phone); // its text tags are read when it's shown
     else if (v == "quit") quit();
     else if (v == "quick save") quickSave();
     else if (v == "quick load") quickLoad();
@@ -1142,10 +1412,10 @@ void Engine::ui(const cmd::Ui& c) {
     else if (v == "rollback") {
         if (mode_ == Mode::Game) game_->rollback();
     }
-    else if (v == "advance") {
+    else if (v == "next line") {
         if (mode_ != Mode::Game) return;
         if (game_->skipMode()) game_->toggleSkip(); // any input stops skipping
-        else game_->advance();
+        else game_->nextLine();
     }
     else if (v == "fullscreen") toggleFullscreen();
     else if (v == "screenshot") screenshotRequest_ = std::format("{}screenshot-{}.png", prefPath_, SDL_GetTicks());
@@ -1158,12 +1428,12 @@ void Engine::ui(const cmd::Ui& c) {
     else if (v == "next page") slots_.turn(+1);
     else if (v == "previous page") slots_.turn(-1);
     else if (v == "delete save") { if (slots_.selected) slotDelete(*slots_.selected, {}); }
-    else if (v == "next cg" || v == "previous cg") { // the next unlocked picture in the gallery
+    else if (v == "next image" || v == "previous image") { // the next unlocked image in the gallery
         const std::size_t n = script_.records(RecordKind::Gallery).size();
         for (std::size_t step = 1; step < n; ++step) {
-            const std::size_t i = (cg_ + (v == "next cg" ? step : n - step)) % n;
+            const std::size_t i = (galleryImage_ + (v == "next image" ? step : n - step)) % n;
             if (has(RecordKind::Gallery, i)) {
-                cg_ = i;
+                galleryImage_ = i;
                 break;
             }
         }
@@ -1182,7 +1452,7 @@ void Engine::ui(const cmd::Ui& c) {
     else if (v == "reset progress") { // forget what's kept between playthroughs (not settings or saves)
         persistent_.clear();
         readLog_.clear();
-        chart_.clear();
+        flowchart_.clear();
         savePersistent();
         writeProgress("read.txt", readLogText(readLog_));
     }
@@ -1462,7 +1732,7 @@ void Engine::setKey(const std::string& name) {
 void Engine::settingsChanged(bool testSound) {
     if (trying_) return;
     applySettings();
-    if (testSound) audio_.playTestSound();
+    if (testSound) sound_.playTestSound();
 }
 
 void Engine::slotPressed(std::size_t index, std::string overwriteQuestion, std::string loadQuestion) {
@@ -1498,10 +1768,10 @@ void Engine::slotDelete(std::size_t index, std::string question) {
 void Engine::playSong(std::size_t index) {
     if (trying_) return tried_.push_back(cmd::Ui{.verb = "play song", .arg = {}});
     if (!has(RecordKind::Song, index)) return; // not heard yet
-    if (!musicBeforeSongs_) musicBeforeSongs_ = audio_.music();
-    const std::string path = assets_->audio(script_.records(RecordKind::Song)[index].name);
-    if (audio_.music() == path) audio_.stopMusic(0.5f); // the one playing: a click stops it
-    else audio_.playMusic(path, true, 0.5f);
+    if (!musicBeforeSongs_) musicBeforeSongs_ = sound_.music();
+    const std::string path = assets_->sound(script_.records(RecordKind::Song)[index].name);
+    if (sound_.music() == path) sound_.stopMusic(0.5f); // the one playing: a click stops it
+    else sound_.playMusic(path, true, 0.5f);
 }
 
 bool Engine::playing() const {
@@ -1511,17 +1781,17 @@ bool Engine::playing() const {
 void Engine::goToPlace(const std::string& id, std::string question) {
     if (trying_) return tried_.push_back(cmd::Ui{.verb = "go to place", .arg = {}});
     auto go = [this, id] {
-        if (const Chart::Node* place = chart_.node(id); place && !place->state.empty())
-            if (const auto went = resume(place->state); !went) logWarn("Can't go back to that place in the story: {}.", went.error());
+        if (const Flowchart::Node* point = flowchart_.node(id); point && !point->state.empty())
+            if (const auto went = resume(point->state); !went) logWarn("Can't go back to that point in the story: {}.", went.error());
     };
     if (mode_ == Mode::Game) ask(std::move(question), go);
     else go();
 }
 
-std::optional<std::size_t> Engine::placeCommand(std::string_view id) const {
+std::optional<std::size_t> Engine::pointCommand(std::string_view id) const {
     const auto colon = id.rfind(':');
     if (colon == std::string_view::npos) return std::nullopt;
-    const auto start = script_.findLabel(id.substr(0, colon));
+    const auto start = script_.findScene(id.substr(0, colon));
     std::size_t offset = 0;
     if (!start || std::from_chars(id.data() + colon + 1, id.data() + id.size(), offset).ec != std::errc{}) return std::nullopt;
     if (*start + offset >= script_.code.size()) return std::nullopt;
@@ -1539,8 +1809,8 @@ void Engine::historyVoice(std::size_t entry) {
     if (trying_) return tried_.push_back(cmd::Ui{.verb = "hear again", .arg = {}});
     if (mode_ != Mode::Game || entry >= game_->history().size()) return;
     const HistoryEntry& h = game_->history()[entry];
-    if (!h.voice.empty()) audio_.replayVoice(h.voice, h.voiceVolume);
-    else if (h.babble > 0.0f && settings_.babble) audio_.replayBabble(h.text, h.babble, h.babbleSpeed);
+    if (!h.voice.empty()) sound_.replayVoice(h.voice, h.voiceVolume);
+    else if (h.madeUpVoice > 0.0f && settings_.madeUpVoices) sound_.replayMadeUpVoice(h.text, h.madeUpVoice, h.madeUpVoiceSpeed);
 }
 
 void Engine::historyBack(std::size_t entry) {
@@ -1553,13 +1823,8 @@ void Engine::drop(const std::string& what, const Commands& commands) {
     run(commands);
 }
 
-void Engine::reply(std::size_t message, std::size_t option) {
-    if (trying_) return tried_.push_back(cmd::Ui{.verb = "send answer", .arg = {}});
-    if (mode_ == Mode::Game && game_->reply(message, option)) closeAll();
-}
-
-// Read aloud (the player's setting): a new line (who says it, then what), a choice's question and
-// options, and on menus what the mouse or the keys are on; each once, stopping what was read before.
+// Read aloud (the player's setting): a new line (who says it, then what), a choice's options (after the line
+// that asks it), and on menus what the mouse or the keys are on; each once, stopping what was read before.
 void Engine::readAloud() {
     if (!settings_.readAloud || developer_.isOpen() || waiting_) {
         if (!spoken_.empty()) speak({});
@@ -1581,7 +1846,7 @@ void Engine::readAloud() {
 }
 
 // Saving and loading say nothing by themselves: a game's buttons say what they want (an action, then
-// notify). What goes wrong is logged.
+// notice). What goes wrong is logged.
 void Engine::quickSave() {
     saveToSlot(saves_.rotatingSlot("quick"));
 }
@@ -1592,7 +1857,7 @@ void Engine::quickLoad() {
 }
 
 void Engine::autosave() {
-    if (config().autosave && mode_ == Mode::Game && game_->canSave()) saveToSlot(saves_.rotatingSlot("auto"));
+    if (gameSettings().autosave && mode_ == Mode::Game && game_->canSave()) saveToSlot(saves_.rotatingSlot("auto"));
 }
 
 bool Engine::saveToSlot(const std::string& slot) {
@@ -1618,11 +1883,11 @@ bool Engine::loadFromSlot(const std::string& slot) {
     const auto note = resume(*data);
     if (!note) return false;
     if (!note->empty()) logInfo("{}", *note);
-    if (script_.findLabel("after_load")) game_->perform(cmd::Jump{.label = "after_load", .call = true});
+    if (script_.findScene("after_load")) game_->perform(cmd::Jump{.scene = "after_load", .call = true});
     return true;
 }
 
-// Plays on from a saved state (a save, a place on the flowchart, the game before F6), in a fresh
+// Plays on from a saved state (a save, a point on the flowchart, the game before F6), in a fresh
 // game, so a broken one leaves the game that was on alone.
 std::expected<std::string, std::string> Engine::resume(std::string_view state) {
     auto game = makeGame();
@@ -1668,13 +1933,13 @@ SurfacePtr Engine::captureThumbnail() {
     return thumbnail;
 }
 
-// F6: reads the scripts, images and audio again and continues where the player was.
+// F6: reads the scripts, images and sounds again and continues where the player was.
 void Engine::reload() {
     std::optional<std::string> snapshot;
     if (mode_ == Mode::Game && game_->canSave()) snapshot = game_->save();
     mode_ = Mode::Title;
     assets_->clear();
-    audio_.clearCache();
+    sound_.clearCache();
     views_.clear(); // (the screens and the story point into the script: let go of before it's replaced)
     game_.reset();
     script_ = readScript();
@@ -1718,7 +1983,7 @@ void Engine::applySettings() {
     applyGameView();
     if (!SDL_SetRenderVSync(renderer, s.vsync ? 1 : 0)) logWarn("Can't change VSync: {}.", SDL_GetError());
     SDL_SetHint(SDL_HINT_MAIN_CALLBACK_RATE, std::to_string(s.frameLimit).c_str());
-    audio_.setVolume(static_cast<float>(s.masterVolume) / 100.0f, static_cast<float>(s.musicVolume) / 100.0f,
+    sound_.setVolume(static_cast<float>(s.masterVolume) / 100.0f, static_cast<float>(s.musicVolume) / 100.0f,
                      static_cast<float>(s.soundVolume) / 100.0f, static_cast<float>(s.voiceVolume) / 100.0f);
     if (s.language != applied_.language && language() != script_.translation()) {
         useLanguage();
@@ -1745,12 +2010,12 @@ void Engine::drawGame(bool thumbnail) {
     thumbnail_ = thumbnail;
     SDL_Renderer* r = renderer_.get();
     game_->draw(fonts_.get("default", 18));
-    if (!game_->uiHidden() && !game_->playingMovie()) { // (a video covers everything but menus)
+    if (!game_->uiHidden() && !game_->playingMovie()) { // (a movie covers everything but menus)
         for (const auto& name : game_->shownScreens())
             if (ScreenView* v = view(name)) v->draw(r);
         for (const std::string& box : game_->boxes()) // every textbox with a line, the line on screen's on top
             if (ScreenView* v = view(box)) v->draw(r);
-        if (ScreenView* v = view(game_->choiceScreen()); v && game_->showingChoices()) v->draw(r);
+        if (ScreenView* v = view("choice"); v && game_->showingChoices() && !game_->phoneAnswers()) v->draw(r); // (a chat's: on the phone)
         if (ScreenView* v = view("hud"); v && !thumbnail) v->draw(r);
     }
     thumbnail_ = false;
@@ -1760,7 +2025,7 @@ void Engine::drawGame(bool thumbnail) {
 // there is).
 std::string Engine::windowTitle() const {
     if (noGame_) return "VNext: developer mode";
-    return config().developer ? std::format("{}  (developer mode: F10 for the developer tools)", config().title) : config().title;
+    return gameSettings().developer ? std::format("{}  (developer mode: F10 for the developer tools)", gameSettings().title) : gameSettings().title;
 }
 
 void Engine::drawErrors() {
@@ -1770,7 +2035,7 @@ void Engine::drawErrors() {
     errorTitle_.set(fonts_.get("", 24 * k), "Something in the script needs fixing");
     errorTitle_.draw(r, 60 * k, 50 * k, {255, 140, 150, 255});
     errorText_.draw(r, 60 * k, 100 * k, theme::text, TextBlock::kAll, {.on = false});
-    errorHint_.set(fonts_.get("", 18 * k), config().developer ? "Fix the lines above, save, then press F6 to try again  ·  F10: developer tools  ·  Esc to quit"
+    errorHint_.set(fonts_.get("", 18 * k), gameSettings().developer ? "Fix the lines above, save, then press F6 to try again  ·  F10: developer tools  ·  Esc to quit"
                                                                  : "Fix the lines above, save, then press F6 to try again  ·  Esc to quit");
     errorHint_.draw(r, 60 * k, canvas_.h - 50 * k, theme::dim);
 }
@@ -1813,8 +2078,8 @@ SDL_AppResult Engine::touch(const SDL_Event& e) {
             return SDL_APP_CONTINUE;
         }
         touch_ = {.finger = e.tfinger.fingerID, .down = true, .x = x, .y = y, .startX = x, .startY = y, .scrolledY = y, .start = SDL_GetTicks()};
-        SDL_Event hover = mouse(SDL_EVENT_MOUSE_MOTION);
-        return event(hover);
+        SDL_Event motion = mouse(SDL_EVENT_MOUSE_MOTION);
+        return event(motion);
     }
     case SDL_EVENT_FINGER_MOTION:
         if (!touch_.down || e.tfinger.fingerID != touch_.finger) return SDL_APP_CONTINUE;
@@ -1951,10 +2216,10 @@ SDL_AppResult Engine::event(SDL_Event& e) {
 
     if (rebinding_ && captureKey(e)) return done(); // the Controls screen is waiting for a key
 
-    // Controls with everywhere=yes work on every screen (fullscreen, screenshot, reload...).
-    auto works = [&](std::size_t i) { return !script_.controls[i].condition || script_.controls[i].condition->test(lookup()); }; // (if=)
+    // Controls with in_menus=yes work on every screen (fullscreen, screenshot, reload...).
+    auto works = [&](std::size_t i) { return !script_.controls[i].condition || script_.controls[i].condition->test(lookup()); }; // (when=)
     for (std::size_t i = 0; i < script_.controls.size(); ++i)
-        if (script_.controls[i].everywhere && pressed(i) && works(i)) {
+        if (script_.controls[i].inMenus && pressed(i) && works(i)) {
             run(script_.controls[i].actions);
             return done();
         }
@@ -1972,10 +2237,19 @@ SDL_AppResult Engine::event(SDL_Event& e) {
                 return done();
             }
 
-    // Open menus, top first. Copy the list: buttons may open or close screens.
+    // Open menus, top first (one that lets the story go on keeps the clicks on what it shows: inside the phone
+    // they aren't the story's, but while the story's on it, in a chat scene, a call that came or a chat= or call=
+    // scene's lines, they go on with it, a tap on its chat too). Copy the list: buttons may open or close screens.
     const std::vector<std::string> open = overlays_;
+    const bool story = playing() && game_->storyOnPhone();
     for (const auto& name : open | std::views::reverse)
-        if (ScreenView* v = view(name); v && (v->handleEvent(e) || v->modal())) return done();
+        if (ScreenView* v = view(name); v && (v->handleEvent(e) || v->modal() || (!story && v->catches(e)))) {
+            if (v->takeTapped() && story) { // (as a click outside it would)
+                if (game_->skipMode()) game_->toggleSkip();
+                else game_->nextLine();
+            }
+            return done();
+        }
 
     if (mode_ == Mode::Title) {
         if (ScreenView* title = view("title")) title->handleEvent(e);
@@ -1985,14 +2259,14 @@ SDL_AppResult Engine::event(SDL_Event& e) {
         if (isPress(e)) game_->setUiHidden(false); // any key or click brings the UI back
         return done();
     }
-    if (ScreenView* v = view(game_->choiceScreen()); v && game_->showingChoices() && v->handleEvent(e)) return done();
+    if (ScreenView* v = view("choice"); v && game_->showingChoices() && !game_->phoneAnswers() && v->handleEvent(e)) return done();
     if (ScreenView* v = textbox(); v && game_->showingSay() && v->handleEvent(e)) return done();
     const std::vector<std::string> shown = game_->shownScreens();
     for (const auto& name : shown | std::views::reverse)
         if (ScreenView* v = view(name); v && (v->handleEvent(e) || v->modal())) return done();
     if (ScreenView* v = view("hud"); v && v->handleEvent(e)) return done();
     for (std::size_t i = 0; i < script_.controls.size(); ++i)
-        if (!script_.controls[i].everywhere && pressed(i) && works(i)) {
+        if (!script_.controls[i].inMenus && pressed(i) && works(i)) {
             run(script_.controls[i].actions);
             break;
         }
@@ -2007,7 +2281,7 @@ SDL_AppResult Engine::iterate() {
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, clickThrough_ ? "1" : "0");
     }
     if (std::exchange(reloadRequested_, false)) {
-        developer_.dropPreviews(); // (its game uses the pictures let go of)
+        developer_.dropPreviews(); // (its game uses the images let go of)
         reload();
         developer_.reloaded();
     }
@@ -2017,38 +2291,39 @@ SDL_AppResult Engine::iterate() {
     lastTicks_ = now;
     toolsTime_ += frame;
     // While the developer tools are open over a game (F10), it stands still: its clock, its timers,
-    // its sounds and videos, and the story.
+    // its sounds and movies, and the story.
     if (const bool paused = developer_.isOpen() && !noGame_ && !waiting_; paused != paused_) {
         paused_ = paused;
-        audio_.holdGame(paused);
+        sound_.holdGame(paused);
     }
     const float dt = paused_ ? 0.0f : frame;
     time_ += dt;
     noticeTime_ -= dt;
     if (noticeTime_ <= 0.0f && !noticeQueue_.empty()) { // the next message waiting
-        notice_ = std::move(noticeQueue_.front());
+        notice_ = std::move(noticeQueue_.front().text);
+        noticePhone_ = std::move(noticeQueue_.front().phone);
         noticeQueue_.pop_front();
-        noticeTime_ = config().notifyTime;
+        noticeTime_ = gameSettings().noticeTime;
     }
-    audio_.update(dt);
-    std::vector<std::pair<Commands, std::string>> pressed; // (buttons whose click animations are over: what they do; and what chosen ones set)
+    sound_.update(dt);
+    std::vector<ScreenView::Pressed> pressed; // (buttons whose click animations are over: what they do; and what chosen ones set)
     for (auto& [name, v] : views_) {
         if (auto did = v.takePressed()) pressed.push_back(std::move(*did));
-        if (Commands kept = v.takeChosen(); !kept.empty()) pressed.emplace_back(std::move(kept), std::string{});
+        if (Commands kept = v.takeChosen(); !kept.empty()) pressed.push_back({.actions = std::move(kept)});
     }
-    for (const auto& [commands, confirm] : pressed) run(commands, confirm);
+    for (const ScreenView::Pressed& p : pressed) run(p.actions, p.confirm, p.item);
 
     assets_->beginFrame();
     ++frameNumber_;
-    // A menu covers the story and stops it (one with modal=no, like the phone, lets it go on).
+    // A menu covers the story and stops it (one with story=goes_on, like the phone, lets it go on).
     const bool covered = mode_ == Mode::Game && (developer_.isOpen() || std::ranges::any_of(overlays_, [&](const std::string& name) {
                                                      const ScreenDef* screen = script_.screen(name);
-                                                     return !screen || screen->modal;
+                                                     return !screen || screen->storyWaits;
                                                  }));
     if (covered != covered_) {
         covered_ = covered;
-        game_->setCovered(covered); // its voice line and video wait under menus
-        if (!covered) audio_.stopReplay(); // a voice heard again from the history stops with it
+        game_->setCovered(covered); // its voice line and movie wait under menus
+        if (!covered) sound_.stopReplay(); // a voice heard again from the history stops with it
     }
     if (touch_.down && !touch_.moved && !touch_.second && !touch_.longPressed && SDL_GetTicks() - touch_.start >= 600) {
         touch_.longPressed = true; // a finger held still: a long press
@@ -2056,16 +2331,22 @@ SDL_AppResult Engine::iterate() {
     }
     if (mode_ == Mode::Game) {
         game_->updatePhone(dt); // (answers are typed while the phone is open too)
-        if (!game_->hasPhone()) // "phone off": screens showing it close
+        if (const auto& call = game_->call(); call && !call->outgoing && !call->talking) { // a call coming: controllers buzz while it rings
+            if ((ringPulse_ -= dt) <= 0.0f) {
+                rumble(0.6f, 500);
+                ringPulse_ = 1.5f;
+            }
+        } else {
+            ringPulse_ = 0.0f;
+        }
+        if (!game_->hasPhone()) // (setting has_phone's condition false, or flat): screens showing it close
             for (std::size_t i = 0; i < overlays_.size(); ++i)
-                if (const ScreenView* v = view(overlays_[i]); v && std::ranges::any_of(v->def().elements, [](const Element& el) {
-                        return el.kind == ElementKind::Phone || el.kind == ElementKind::Contacts;
-                    })) {
+                if (showsPhone(overlays_[i])) {
                     while (overlays_.size() > i) close(false);
                     break;
                 }
-        // Loads one of the pictures the story is about to show, so it doesn't stop to load it then.
-        for (const auto& [name, looks] : game_->upcomingPictures(config().preload))
+        // Loads one of the images the story is about to show, so it doesn't stop to load it then.
+        for (const auto& [name, looks] : game_->upcomingImages(gameSettings().loadAhead))
             if (assets_->preload(name, looks)) break;
         if (!covered) {
             game_->update(dt);
@@ -2073,7 +2354,7 @@ SDL_AppResult Engine::iterate() {
             if (game_->takeAutosaveRequest() && !splash_ && !opening_) autosave();
         }
         if (game_->stoppedThere() && !developer_.isOpen()) developer_.storyStopped(); // (Stop here, Next line: the developer tools at that line)
-        for (const auto& request : game_->takeRequests()) ui(request); // notify, open... from the story
+        for (const auto& request : game_->takeRequests()) ui(request); // notice, open... from the story
     }
     if (mode_ == Mode::Game) {
         if (game_->takeScreenRequest()) { // "open", "ask", a chapter's title card: show it and wait
@@ -2093,6 +2374,7 @@ SDL_AppResult Engine::iterate() {
             }
         }
         if (mode_ == Mode::Game) syncShownScreens();
+        if (mode_ == Mode::Game) game_->chatOpen(std::ranges::contains(overlays_, std::string("phone")) ? phone_.chat : std::string{}); // (its chat scene's lines as it's opened and left)
         if (mode_ == Mode::Game && game_->finished()) {
             if (!game_->error().empty()) showErrors({game_->error()});
             else if (splash_) beginStory(); // the splash screen's "return"
@@ -2100,8 +2382,8 @@ SDL_AppResult Engine::iterate() {
         }
     }
     if (game_->takePersistentChanged()) savePersistent();
-    if (chart_.takeChanged() && !writeProgress("chart.txt", chart_.text())) logWarn("Can't save the flowchart: {}.", SDL_GetError());
-    // Screens whose hide_animation= is over: closed now (and the story goes on, if it waited).
+    if (flowchart_.takeChanged() && !writeProgress("flowchart.txt", flowchart_.text())) logWarn("Can't save the flowchart: {}.", SDL_GetError());
+    // Screens whose animation_on_close= is over: closed now (and the story goes on, if it waited).
     for (std::size_t i = 0; i < leaving_.size();) {
         const ScreenView* v = view(leaving_[i].name);
         if (v && v->hasLeft() && v->leaving()) {
@@ -2120,9 +2402,9 @@ SDL_AppResult Engine::iterate() {
         close();
     }
     if (musicBeforeSongs_ && !songsOpen()) { // the music room closed: back to what played before
-        if (mode_ == Mode::Game && !game_->music().empty()) audio_.playMusic(assets_->audio(game_->music()), true, 0.5f, game_->musicVolume());
-        else if (musicBeforeSongs_->empty()) audio_.stopMusic(0.5f);
-        else audio_.playMusic(*musicBeforeSongs_, true, 0.5f);
+        if (mode_ == Mode::Game && !game_->music().empty()) sound_.playMusic(assets_->sound(game_->music()), true, 0.5f, game_->musicVolume());
+        else if (musicBeforeSongs_->empty()) sound_.stopMusic(0.5f);
+        else sound_.playMusic(*musicBeforeSongs_, true, 0.5f);
         musicBeforeSongs_.reset();
     }
 
@@ -2130,7 +2412,7 @@ SDL_AppResult Engine::iterate() {
 
     SDL_Renderer* r = renderer_.get();
     useView(false); // (the game as it's shown, under the developer tools too)
-    const SDL_Color bars = config().letterboxColor;
+    const SDL_Color bars = gameSettings().letterboxColour;
     SDL_SetRenderDrawColor(r, bars.r, bars.g, bars.b, 255);
     SDL_RenderClear(r);
     textInputWanted_ = false; // input fields drawn below ask for it again
@@ -2149,7 +2431,7 @@ SDL_AppResult Engine::iterate() {
         if (ScreenView* v = view(name)) v->draw(r);
     for (const Leaving& l : leaving_) // ("show screen" ones hidden, going: the others are drawn where they are)
         if (ScreenView* v = !l.then && !std::ranges::contains(overlays_, l.name) ? view(l.name) : nullptr) v->draw(r);
-    if (ScreenView* v = view("notify"); v && noticeTime_ > 0.0f) v->draw(r, std::min(1.0f, noticeTime_ * 2.0f));
+    if (ScreenView* v = view("notice"); v && noticeTime_ > 0.0f) v->draw(r, std::min(1.0f, noticeTime_ * 2.0f));
     if (developer_.isOpen()) {
         useView(true); // (the tools lay themselves out in the window's own size)
         developer_.drawDeveloper();
@@ -2161,7 +2443,7 @@ SDL_AppResult Engine::iterate() {
         else SDL_StopTextInput(window_.get());
     }
 
-    for (auto& [name, v] : views_) v.endFrame(frameNumber_); // videos of screens no longer shown stop
+    for (auto& [name, v] : views_) v.endFrame(frameNumber_); // movies of screens no longer shown stop
 
     // The frame can only be read before it is presented.
     if (!screenshotRequest_.empty()) screenshot(std::exchange(screenshotRequest_, {}));

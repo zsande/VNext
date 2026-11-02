@@ -4,7 +4,7 @@ Free code signing provided by [SignPath.io](https://about.signpath.io/), certifi
 
 ## What is signed
 
-The Windows player, `VNext.exe` in `VNext-Windows.zip` on the [Releases page](https://github.com/zsande/VNext/releases). GitHub Actions builds it from this repository's source for each release, with the [build workflow](.github/workflows/build.yml), and each signing is approved by hand on SignPath. The libraries built into the player are compiled from their own source in the same build; [licenses.txt](engine/licenses.txt) lists them.
+The Windows player, `VNext.exe` in `VNext-Windows.zip` on the [Releases page](https://github.com/zsande/VNext/releases). GitHub Actions builds it from this repository's source for each release, with the [build workflow](.github/workflows/build.yml), and each signing is approved by hand on SignPath. The libraries built into the player are compiled from their own source in the same build; [licences.txt](engine/licences.txt) lists them.
 
 The macOS and Linux players aren't signed yet.
 
