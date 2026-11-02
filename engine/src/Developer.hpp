@@ -76,7 +76,7 @@ inline constexpr float mediumButtonH = 28;   // (the Map's + New scene, Line up 
 inline constexpr float bigButtonH = 34;      // (Make it the game's own, the first + New scene)
 inline constexpr float wideButtonW = 120;    // the least for: Play, Replace..., Import..., Replace all (DeveloperUi::buttonWidth)
 inline constexpr float widerButtonW = 160;   // the least for: + Font, + Sub-image, Go to the line, Move to the Trash, Make it the game's own, Only untranslated
-inline constexpr float optionButtonW = 140;  // the least for: + Option, + Answer, + Else, the Map's + New scene
+inline constexpr float optionButtonW = 140;  // the least for: + Option, + Else, the Map's + New scene
 inline constexpr float listenW = 64;         // the voice row's Play
 inline constexpr float buttonText = 14, smallButtonText = 13;
 inline constexpr float buttonPad = 24;       // a button in a row of them: its label and this much
@@ -117,12 +117,11 @@ inline constexpr float popupShadow = 3, popupMargin = 8, popupGap = 2;
 // it has no form for stay as they are, to be edited as text.
 class StoryEditor {
 public:
-    // A Line is someone speaking, or narration (no one; in a chat, a message); a Background is a scene
-    // line; a Character shows or hides someone (or an image); an Option is one of a choice's, or an answer
-    // to a message, a chat or a post; Game is quick save, fullscreen, screenshot or quit. On the phone (one
-    // kind, Phone, to the person: its first box says which, see phoneWord): a Message (or a chat's line that
-    // sends something, types...), a Chat scene, a Call (and its Missed lines), and Phone (the phone itself: on,
-    // off, its apps, clock...).
+    // A Line is someone speaking, or narration (no one; in a chat, a message); a Background is a background
+    // line; a Character shows or hides someone (or an image); an Option is one of a choice's; Game is quick save,
+    // fullscreen, screenshot or quit. On the phone (one kind, Phone, to the person: its first box says which, see
+    // phoneWord): a Message (a chat's line that sends something, types...), a Chat scene, and a Call (and its
+    // Missed lines).
     // Other is any line without a form (a mistake).
     enum class Kind : std::uint8_t { Line, Character, Background, Choice, Option, If, Else, Set, Jump, End, Music, Sound, Voice, Stop, Wait,
                                      Effect, Weather, Camera, Movie, Screen, Notice, Textbox, NewPage, Together, Chapter,

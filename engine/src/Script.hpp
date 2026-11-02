@@ -499,17 +499,17 @@ enum class ElementKind : std::uint8_t {
     Container, // parts in it (any part can hold parts; list=: once for each item of a list, the phone's...)
 };
 // What a container can repeat its parts for (list=NAME), and what one of them is called in its parts' values
-// ({chat.name}): the phone's apps, its chats, the messages in the one open (answers: a choice's on the phone),
+// ({chat.name}): the phone's apps, its chats, the messages in the one open, the options of a choice on the phone,
 // its calls, the people in it, and what's new on its lock screen.
 inline constexpr std::array<std::pair<std::string_view, std::string_view>, 7> kLists{{
-    {"apps", "app"}, {"chats", "chat"}, {"messages", "message"}, {"answers", "answer"}, {"calls", "call"}, {"people", "person"}, {"notices", "notice"}}};
+    {"apps", "app"}, {"chats", "chat"}, {"messages", "message"}, {"options", "option"}, {"calls", "call"}, {"people", "person"}, {"notices", "notice"}}};
 // Each list's items' values, after its word ({chat.name}): ScreenView::listItems() gives these. Someone's (a
 // chat's, a message's, a call's or a person's) have their character, avatar, initial and colour too.
 inline constexpr std::array<std::pair<std::string_view, std::string_view>, 7> kItemValues{{
     {"app", "name title icon initial count open"},
     {"chat", "name text time unread typing open character avatar initial colour"},
     {"message", "number from mine text typing image sticker sound time day edited deleted seen reaction ended character avatar initial colour"},
-    {"answer", "text locked note on kind of option"},
+    {"option", "text locked note on kind number"},
     {"call", "who missed busy outgoing incoming time length character avatar initial colour"},
     {"person", "name about character avatar initial colour"},
     {"notice", "who text chat call time"}}};
@@ -799,9 +799,6 @@ private:
 // definition, someone speaking or text in quotes ("notify ...", "next line"): that word, else empty.
 // It's a mistake, not text: text that starts with a lower-case letter goes in quotes.
 [[nodiscard]] std::string unknownCommand(std::string_view line);
-// An answer in a chat or under a post: "Words": (its lines under it), "Words" -> scene, with (if ...) or
-// (needs ...); or words not in quotes ending with their only colon.
-[[nodiscard]] bool answerLine(std::string_view text, bool hasLines);
 
 // The player's built-in screens, as script (at the end of Script.cpp): every game starts with them.
 [[nodiscard]] std::string_view defaultUi();

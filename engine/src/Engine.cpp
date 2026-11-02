@@ -1082,7 +1082,7 @@ void Engine::back() {
 bool Engine::phoneBack() {
     if (!phone_.image.empty()) return phone_.image.clear(), true;
     if (playing() && game_->phoneBusy()) { // (a chat scene or a call keeps the phone where it is; in a chat scene, Back goes on as a click does)
-        if (!game_->chatScene().empty() && !game_->phoneAnswers()) game_->nextLine();
+        if (!game_->chatScene().empty() && !game_->choiceOnPhone()) game_->nextLine();
         return true;
     }
     if (!phone_.chat.empty()) return phone_.chat.clear(), true;
@@ -1383,13 +1383,13 @@ void Engine::ui(const cmd::Ui& c) {
     else if (v == "hang up") {
         if (playing()) game_->hangUp();
     }
-    else if (v == "send") { // the answer it's on (a list's): a chat scene's, or an option of a choice on the phone
+    else if (v == "send") { // the option it's on (an options list's): of a chat scene's choice, or of one waiting on the phone
         const Lookup& item = lookup();
-        const std::string kind = toString(item("answer.kind"));
-        const auto of = static_cast<std::size_t>(std::max(0, toInt(item("answer.of")))), option = static_cast<std::size_t>(std::max(0, toInt(item("answer.option"))));
-        if (toInt(item("answer.on")) != 0) {
-            if (kind == "phone choice") pickOnPhone(option);
-            else if (kind == "choice" && playing()) game_->choose(of);
+        const std::string kind = toString(item("option.kind"));
+        const auto number = static_cast<std::size_t>(std::max(0, toInt(item("option.number"))));
+        if (toInt(item("option.on")) != 0) {
+            if (kind == "phone choice") pickOnPhone(number);
+            else if (kind == "choice" && playing()) game_->choose(number);
         }
     }
     else if (v == "keypad") keypad(c.arg);
@@ -2015,7 +2015,7 @@ void Engine::drawGame(bool thumbnail) {
             if (ScreenView* v = view(name)) v->draw(r);
         for (const std::string& box : game_->boxes()) // every textbox with a line, the line on screen's on top
             if (ScreenView* v = view(box)) v->draw(r);
-        if (ScreenView* v = view("choice"); v && game_->showingChoices() && !game_->phoneAnswers()) v->draw(r); // (a chat's: on the phone)
+        if (ScreenView* v = view("choice"); v && game_->showingChoices() && !game_->choiceOnPhone()) v->draw(r); // (a chat's: on the phone)
         if (ScreenView* v = view("hud"); v && !thumbnail) v->draw(r);
     }
     thumbnail_ = false;
@@ -2259,7 +2259,7 @@ SDL_AppResult Engine::event(SDL_Event& e) {
         if (isPress(e)) game_->setUiHidden(false); // any key or click brings the UI back
         return done();
     }
-    if (ScreenView* v = view("choice"); v && game_->showingChoices() && !game_->phoneAnswers() && v->handleEvent(e)) return done();
+    if (ScreenView* v = view("choice"); v && game_->showingChoices() && !game_->choiceOnPhone() && v->handleEvent(e)) return done();
     if (ScreenView* v = textbox(); v && game_->showingSay() && v->handleEvent(e)) return done();
     const std::vector<std::string> shown = game_->shownScreens();
     for (const auto& name : shown | std::views::reverse)
@@ -2330,7 +2330,7 @@ SDL_AppResult Engine::iterate() {
         gesture(KeyChord::Gesture::LongPress);
     }
     if (mode_ == Mode::Game) {
-        game_->updatePhone(dt); // (answers are typed while the phone is open too)
+        game_->updatePhone(dt); // (messages are typed while the phone is open too)
         if (const auto& call = game_->call(); call && !call->outgoing && !call->talking) { // a call coming: controllers buzz while it rings
             if ((ringPulse_ -= dt) <= 0.0f) {
                 rumble(0.6f, 500);

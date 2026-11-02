@@ -1161,18 +1161,14 @@ void Developer::drawStoryForm(const StoryFrame& f) {
             f.startTyping(editor.add(scene, &row, false, {"\"\""}));
             return;
         }
-        // A choice adds its options, a message its answers, and an "if" an "else" (or another "else if"
-        // before the last "else").
+        // A choice adds its options, a call what happens when nobody answers, and an "if" an "else" (or another
+        // "else if" before the last "else").
         const auto at = static_cast<std::size_t>(selected - rows.data());
         std::optional<std::vector<std::string>> adding;
         const Row* after = &row;
         bool inside = true;
         if (row.kind == Kind::Choice && ui.button({fieldX, y, std::min(fieldW, ui.buttonWidth("+ Option"_tr, layout::buttonText, layout::optionButtonW)), boxH}, "+ Option"_tr, false, true, layout::buttonText))
             adding = newLines(Kind::Option, editor);
-        // A chat adds answers among its lines (at their end), and a call what happens when nobody answers.
-        if (row.kind == Kind::Chat &&
-            ui.button({fieldX, y, std::min(fieldW, ui.buttonWidth("+ Answer"_tr, layout::buttonText, layout::optionButtonW)), boxH}, "+ Answer"_tr, false, true, layout::buttonText))
-            adding = std::vector<std::string>{"\"\":"};
         bool missed = false; // (a call has its missed: lines already)
         for (std::size_t j = at + 1; j < rows.size() && rows[j].depth > row.depth; ++j) missed = missed || (rows[j].depth == row.depth + 1 && rows[j].kind == Kind::Missed);
         if (row.kind == Kind::Call && !missed &&

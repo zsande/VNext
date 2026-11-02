@@ -201,8 +201,8 @@ constexpr std::string_view kPhoneScreen = R"vnext(screen phone story=goes_on
                     text "Edited" x=right style=phone_time when="message.edited and message.mine"
                     text "Seen" x=right style=phone_time when=message.seen
                 bar x=right width=196 height=4 value=time_left full_at=100 track=#ffffff28 fill=tip when=time_left
-                container list=answers x=right width=196 fit=parts spacing=6
-                    button "{answer.text}" x=0 y=0 width=196 height=34 style=phone_small_button action=send clickable=answer.on
+                container list=options x=right width=196 fit=parts spacing=6
+                    button "{option.text}" x=0 y=0 width=196 height=34 style=phone_small_button action=send clickable=option.on
         container app=calls title="Calls" x=0 y=0 width=276 height=394
             text "Calls" x=4 y=0 width=268 style=phone_title
             text "No calls" x=0 y=190 width=276 style=phone_preview align=centre when="calls_total is 0"
@@ -258,8 +258,8 @@ constexpr std::string_view kPhoneScreen = R"vnext(screen phone story=goes_on
             text "{call_time}" x=0 y=198 width=276 style=phone_preview align=centre when=call_time
             button "Decline" x=17 y=322 width=112 height=44 style=phone_decline action="decline call" when=call_incoming
             button "Answer" x=147 y=322 width=112 height=44 style=phone_answer action="answer call" when=call_incoming
-            container list=answers x=17 y=226 width=242 height=88 item_height=34 spacing=6 scroll=yes when=call_choice
-                button "{answer.text}" x=0 y=0 width=242 height=34 style=phone_small_button action=send clickable=answer.on
+            container list=options x=17 y=226 width=242 height=88 item_height=34 spacing=6 scroll=yes when=call_choice
+                button "{option.text}" x=0 y=0 width=242 height=34 style=phone_small_button action=send clickable=option.on
             button "Hang up" x=82 y=322 width=112 height=44 style=phone_decline action="hang up" when=call_choice
         container app=lock x=0 y=0 width=276 height=394
             button x=0 y=0 width=276 height=394 style=phone_photo action=unlock when="not phone_needs_code"

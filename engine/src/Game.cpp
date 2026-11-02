@@ -2321,7 +2321,7 @@ void Game::callPerson(std::string_view who) {
     if (!gameSettings().phoneCallingSound.empty()) ctx_.sound.playChannel(std::string(kRinging), ctx_.assets.sound(gameSettings().phoneCallingSound), true, 1.0f, 0.0f);
 }
 
-bool Game::phoneAnswers() const {
+bool Game::choiceOnPhone() const {
     const cmd::Menu* m = wait_ == Wait::Menu ? menu() : nullptr;
     return m && !m->phone.empty();
 }

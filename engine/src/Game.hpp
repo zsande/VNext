@@ -503,9 +503,9 @@ public:
     [[nodiscard]] bool asking() const { return asked_ && callStack_.size() >= asked_->depth; } // (a chat or call scene's lines, running)
     void hangUp(); // the player's call ends: the rest of its call scene first, its choices passed
     void chatOpen(const std::string& with); // the player's chat open on the phone now (none: ""): its chat= scene as it's opened, its rest as it's left
-    // A chat scene on: its chat (empty: none). Its answers are choices() while phoneAnswers().
+    // A chat scene on: its chat (empty: none). A choice in it is on the phone: its options are choices().
     [[nodiscard]] const std::string& chatScene() const { return chat_; }
-    [[nodiscard]] bool phoneAnswers() const;
+    [[nodiscard]] bool choiceOnPhone() const; // (the choice waited on is a chat scene's)
     // A call ringing or under way, and the player answering or declining one that comes.
     [[nodiscard]] const std::optional<CallNow>& call() const { return call_; }
     void answerCall(bool answer);
@@ -522,7 +522,7 @@ public:
     [[nodiscard]] bool hasPhone() const {
         return (!gameSettings().hasPhone || gameSettings().hasPhone->test(lookup_)) && toNumber(variable("phone_battery")) > 0;
     }
-    void updatePhone(float dt); // answers being typed arrive, calls ring (under menus too)
+    void updatePhone(float dt); // messages being typed arrive, calls ring (under menus too)
     // How much of a timed choice's time is left (1 down to 0), if one is on screen.
     [[nodiscard]] std::optional<float> timeLeft() const;
     [[nodiscard]] const std::vector<HistoryEntry>& history() const { return history_; }

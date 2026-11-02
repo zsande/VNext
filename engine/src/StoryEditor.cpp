@@ -52,7 +52,6 @@ StoryEditor::Kind classify(std::string_view t, StoryEditor::Kind parent) {
     using Kind = StoryEditor::Kind;
     if (t.starts_with('#')) return Kind::Note;
     if (parent == Kind::Choice) return Kind::Option; // (whatever its words: the lines under them are options)
-    if (parent == Kind::Chat && answerLine(t, false)) return Kind::Option; // (a chat's answers)
     if (parent == Kind::Call && (lower(trim(t)) == "missed:" || lower(trim(t)) == "missed")) return Kind::Missed;
     const std::string command = storyCommandOf(t);
     if (!command.empty() && startsWithCapital(t)) return Kind::Other; // ("Show me": text, or a command)
@@ -392,7 +391,7 @@ const StoryEditor::BoxKind& StoryEditor::kindOf(Box box) {
         {.box = Box::PhoneAction, .suggest = ToolsSuggestions(actionKindList("phone"))},
         {.box = Box::ContainerFit, .choices = "box parts"_choices, .labels = "Fills its box|As big as its parts"_labels},
         {.box = Box::Stack, .choices = "no down across"_choices, .labels = "By their places|One under another|Side by side"_labels},
-        {.box = Box::List, .suggest = "apps:the phone's apps|chats:its chats|messages:the open chat's messages|answers:what the player can answer|calls:its calls|people:the people in it|notices:what's new, for its lock screen"_suggest},
+        {.box = Box::List, .suggest = "apps:the phone's apps|chats:its chats|messages:the open chat's messages|options:what the player can pick|calls:its calls|people:the people in it|notices:what's new, for its lock screen"_suggest},
         {.box = Box::Playing, .suggest = "music:the music|sound:looping sounds|voice:the voice"_suggest},
         {.box = Box::KeySlot, .suggest = "1:the first|2:the second|pad:its controller button"_suggest},
         {.box = Box::SaveMode, .suggest = "save:saving|load:loading"_suggest},
@@ -862,7 +861,7 @@ const ActionKind kActionKinds[]{
     {"phone", "open chat", "open a chat on the phone", "With", Box::Text},
     {"phone", "open image", "open an image on the phone, big", "Image", Box::Image},
     {"phone", "back", "back a step on the phone"},
-    {"phone", "send", "send the answer it's on (in a list of answers)"},
+    {"phone", "send", "send the option it's on (in a list of options)"},
     {"phone", "phone call", "call someone", "Who", Box::Text},
     {"phone", "answer call", "answer the call that rings"},
     {"phone", "hang up", "end the player's call"},
@@ -1778,8 +1777,6 @@ std::vector<StoryEditor::Field> StoryEditor::rowFields(const Row& row) const {
         out[1].group = "Availability"_group;
         if (!o.condition.empty()) out.push_back({.name = "Until then"_text, .value = o.locked ? "locked" : "hidden", .box = Box::Visibility, .choices = "hidden locked"_choices});
         if (o.locked) out.push_back({.name = "What it needs"_text, .value = o.note, .label = "Locked note"_text, .box = Box::Text});
-        if (const std::string_view whole = trim(t); whole.ends_with(':') && !isQuoted(whole)) // (a chat's or a post's answer: it stays one)
-            out.push_back({.name = "Colon", .value = "yes", .hidden = true});
         return out;
     }
     case Kind::If:
@@ -1910,7 +1907,7 @@ std::string StoryEditor::lineOf(Kind kind, const std::vector<Field>& f) const {
         const bool plain = !text.empty() && !text.starts_with('#') && !text.starts_with('"') && !text.ends_with(')') && !text.ends_with(':');
         std::string out = plain ? text : "\"" + text + "\"";
         if (!when.empty()) out += value("Until then") == "locked" ? " (needs " + when + (needs.empty() ? "" : ": " + needs) + ")" : " (if " + when + ")";
-        return value("Colon") == "yes" ? out + ":" : out; // (an answer's: still one)
+        return out;
     }
     case Kind::If:
     case Kind::Else: {

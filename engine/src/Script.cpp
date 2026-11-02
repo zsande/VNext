@@ -636,9 +636,7 @@ private:
             const std::string second = lower(firstWord(afterWords(line.text, 1)));
             const bool exact = !capitalised(line.text);
             const bool hasBlock = !line.children.empty();
-            if (chat_ && isAnswer(line)) { // (a chat's answers: the ones together are what the player can send)
-                i = chatAnswers(lines, i);
-            } else if (const auto phone = head == "scene" && hasBlock && phase_ == Phase::Story ? phoneSceneFor(line) : std::nullopt) {
+            if (const auto phone = head == "scene" && hasBlock && phase_ == Phase::Story ? phoneSceneFor(line) : std::nullopt) {
                 phoneScene(line, *phone->first, phone->second);
             } else if (head == "if" && (exact || hasBlock)) {
                 i = ifChain(lines, i);
@@ -714,34 +712,18 @@ private:
             m.phone = chat_ ? chat_->with : callWith_;
             m.call = !chat_;
         }
-        options(line, line.children, std::move(m), {});
+        options(line, line.children, std::move(m));
     }
-
-    // A chat's answers: quoted lines ending with ':' (their own lines indented under them) or an arrow, the
-    // ones together; returns the index of the last. They're a choice whose options show on the phone.
-    std::size_t chatAnswers(std::span<const Line> lines, std::size_t i) {
-        std::size_t end = i;
-        while (end < lines.size() && isAnswer(lines[end])) ++end;
-        if (phase_ == Phase::Definitions) {
-            for (std::size_t k = i; k < end; ++k) block(lines[k].children);
-            return end - 1;
-        }
-        options(lines[i], lines.subspan(i, end - i), cmd::Menu{.phone = chat_->with}, chat_->with);
-        return end - 1;
-    }
-
-    static bool isAnswer(const Line& line) { return answerLine(line.text, !line.children.empty()); }
 
     // A choice's options (`optionLines`, under `line`), each with its own lines run when it's picked.
-    // `within`: what their "picked before" ids are made with besides their words (a chat's answers: whose chat).
-    void options(const Line& line, std::span<const Line> optionLines, cmd::Menu m, std::string_view within) {
+    void options(const Line& line, std::span<const Line> optionLines, cmd::Menu m) {
         const bool meanwhile = m.lines > 0, repeats = m.repeats;
         const std::size_t at = emit(std::move(m), line);
         std::vector<cmd::Choice> choices;
         std::vector<std::size_t> exits;   // jumps to the end of the choice
         std::vector<std::size_t> skipped; // options without lines: continue after the choice
         for (const auto& option : optionLines) {
-            cmd::Choice choice = this->option(option, within);
+            cmd::Choice choice = this->option(option);
             if (!option.children.empty()) {
                 choice.target = s_.code.size();
                 block(option.children);
@@ -766,9 +748,8 @@ private:
         emitted.after = s_.code.size();
     }
 
-    // An option of a choice, or an answer in a chat: "Text [(if CONDITION) | (needs CONDITION: what)]".
-    // `within`: what its "picked before" id is made with besides its words.
-    cmd::Choice option(const Line& option, std::string_view within) {
+    // An option of a choice: "Text [(if CONDITION) | (needs CONDITION: what)]".
+    cmd::Choice option(const Line& option) {
         std::string text(trim(option.text));
         std::optional<Expr> condition;
         if (text.ends_with(':') && !isQuoted(text)) text.pop_back();
@@ -797,7 +778,7 @@ private:
         text = unquote(text);
         checkTextOf(option, text);
         return cmd::Choice{.text = text, .condition = std::move(condition), .shownLocked = shownLocked, .note = std::move(note),
-                           .id = fnv1a(text, fnv1a(within, fnv1a(currentScene_, fnv1a("choice"))))};
+                           .id = fnv1a(text, fnv1a(currentScene_, fnv1a("choice")))};
     }
 
     // together, with lines indented under it: they all show at once, each in its own textbox (a
@@ -872,7 +853,7 @@ private:
     std::string callWith_; // in someone's call= scene: whose (its choices show on the call)
 
     // chat WHO, with its lines under it: a chat scene. Its lines are the phone's (Mika: words, me: words,
-    // Mika sends IMAGE...), quoted lines ending with ':' are answers, and the rest are the story's, as anywhere.
+    // Mika sends IMAGE...), a choice in it shows its options on the phone, and the rest are the story's, as anywhere.
     void chatBlock(const Line& line) {
         if (phase_ == Phase::Definitions) return block(line.children);
         if (chat_) return error(line, "A chat can't be inside another chat."_tr());
@@ -2775,18 +2756,6 @@ std::pair<std::string, std::size_t> Script::locate(std::size_t pc) const {
         }
     }
     return best;
-}
-
-bool answerLine(std::string_view text, bool hasLines) {
-    const std::string_view t = trim(text);
-    if (t.starts_with('"')) {
-        const auto close = t.find('"', 1);
-        if (close == std::string_view::npos) return false;
-        const std::string_view after = trim(t.substr(close + 1));
-        return hasLines || after.ends_with(':') || after.starts_with("(if ") || after.starts_with("(needs ");
-    }
-    const auto colon = t.find(':');
-    return colon != std::string_view::npos && colon + 1 == t.size() && colon > 0;
 }
 
 std::string storyCommandOf(std::string_view line) {

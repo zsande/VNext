@@ -2425,17 +2425,18 @@ std::vector<ScreenView::ListItem> ScreenView::listItems(const Element& list, std
         v.insert_or_assign(std::format("{}.initial", word), initialOf(who));
         v.insert_or_assign(std::format("{}.colour", word), hexOf(def && character.empty() ? def->nameColour : colour));
     };
-    // The chat a list of messages (and its answers) is of: the one open, else the newest.
+    // The chat a list of messages (and its options) is of: the one open, else the newest.
     auto open = [&] {
         if (!engine_.openChat().empty()) return engine_.openChat();
         const auto chats = game.chats();
         return chats.empty() ? std::string{} : chats.front().name;
     };
-    auto answers = [&](std::vector<ChoiceItem> items, std::string_view kind, std::size_t of) {
+    // The options of a chat= or call= scene's choice waiting on the phone (send picks one).
+    auto phoneOptions = [&](std::vector<ChoiceItem> items) {
         for (ChoiceItem& a : items)
-            out.push_back({std::format("{}:{}:{}", kind, of, a.option),
-                           {{"answer.text", a.text}, {"answer.locked", flag(a.locked)}, {"answer.note", a.note}, {"answer.on", flag(!a.locked && truthy(game.variable("phone_signal")))},
-                            {"answer.kind", std::string(kind)}, {"answer.of", static_cast<int>(of)}, {"answer.option", a.option}}});
+            out.push_back({std::format("phone choice:{}", a.option),
+                           {{"option.text", a.text}, {"option.locked", flag(a.locked)}, {"option.note", a.note}, {"option.on", flag(!a.locked && truthy(game.variable("phone_signal")))},
+                            {"option.kind", std::string("phone choice")}, {"option.number", a.option}}});
     };
     if (name == "apps") {
         for (const Element& app : source_->elements) {
@@ -2491,22 +2492,22 @@ std::vector<ScreenView::ListItem> ScreenView::listItems(const Element& list, std
             someone(v, "message", m.from, m.character, m.expression, m.colour);
             out.push_back({std::format("{}{}", m.number > 0 ? std::to_string(m.number) : "i" + std::to_string(i), typing ? ":typing" : ""), std::move(v)});
         }
-    } else if (name == "answers") { // a choice on the call, in the open chat (a chat= scene's), or a chat scene's answers
+    } else if (name == "options") { // a choice on the call, in the open chat (a chat= scene's), or a chat scene's
         if (const auto& call = game.call(); call && call->talking) { // (a choice of their call scene's)
             context = "call:" + call->who;
-            answers(game.phoneChoices(call->who, true), "phone choice", 0);
+            phoneOptions(game.phoneChoices(call->who, true));
         } else {
             const std::string with = open();
             context = with;
             const bool coming = std::ranges::any_of(game.messages(), [&](const MessageItem& m) { return m.with == with && m.typing > 0.0f; });
             if (!with.empty() && game.chatScene().empty() && !game.call() && !coming) { // (a choice of their chat scene's, once its messages have come)
-                answers(game.phoneChoices(with, false), "phone choice", 0);
-            } else if (!with.empty() && game.chatScene() == with && game.phoneAnswers()) {
+                phoneOptions(game.phoneChoices(with, false));
+            } else if (!with.empty() && game.chatScene() == with && game.choiceOnPhone()) {
                 const auto& items = game.choices();
                 for (std::size_t k = 0; k < items.size(); ++k)
-                    out.push_back({std::format("choice:{}", k), {{"answer.text", items[k].text}, {"answer.locked", flag(items[k].locked)}, {"answer.note", items[k].note},
-                                                                  {"answer.on", flag(!items[k].locked)}, {"answer.kind", std::string("choice")}, {"answer.of", static_cast<int>(k)},
-                                                                  {"answer.option", static_cast<int>(k)}}});
+                    out.push_back({std::format("choice:{}", k), {{"option.text", items[k].text}, {"option.locked", flag(items[k].locked)}, {"option.note", items[k].note},
+                                                                  {"option.on", flag(!items[k].locked)}, {"option.kind", std::string("choice")},
+                                                                  {"option.number", static_cast<int>(k)}}});
             }
         }
     } else if (name == "calls") {
