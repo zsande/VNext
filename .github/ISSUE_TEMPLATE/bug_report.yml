@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in VNext doesn't work as it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting this! The more of it you fill in, the faster it can be fixed.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What went wrong, and what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: The steps that lead to it, one per line, if you know them.
+  - type: input
+    id: version
+    attributes:
+      label: VNext version
+      description: The first line of About, in the developer tools, names it (for example 0.6.1).
+    validations:
+      required: true
+  - type: dropdown
+    id: computer
+    attributes:
+      label: Computer
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System version
+      description: For example Windows 11, macOS 15 or Ubuntu 24.04.
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: If you can, paste VNext's log.txt here. The Log tab in the developer tools says which folder it's in ("The player's data is in …").
+      render: text
+  - type: textarea
+    id: files
+    attributes:
+      label: Pictures or files
+      description: Screenshots, or a small game that shows the problem. Drag them into this box.
