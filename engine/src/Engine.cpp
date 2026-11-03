@@ -808,7 +808,9 @@ std::optional<Value> Engine::builtin(std::string_view name) const {
         const CharacterDef* def = call.character.empty() ? nullptr : script_.character(call.character);
         if (name == "caller_initial") return call.who.empty() ? std::string{} : upper(std::string_view(call.who).substr(0, utf8::offset(call.who, 1)));
         if (name == "caller_colour") return std::format("#{:02x}{:02x}{:02x}", call.colour.r, call.colour.g, call.colour.b);
-        return def && !def->avatarOf({}).empty() ? def->avatarOf(g->expressionOf(call.character)) : std::string{};
+        if (!def || def->avatarOf({}).empty()) return std::string{};
+        const std::string avatar = def->avatarOf(g->expressionOf(call.character)); // (their face's expression; without its own image, their usual one)
+        return assets_->hasImage(avatar) ? avatar : def->avatarOf({});
     }
     if (name == "open_image") return phone_.image; // (in the phone's image viewer: one from a chat)
     if (name == "open_image_text") { // ...who sent it and their words

@@ -116,6 +116,12 @@ public:
     [[nodiscard]] std::optional<std::string> findSound(std::string_view name) const;
     // Whether images/ (or the language's) has an image by this name (not an atlas's frame).
     [[nodiscard]] bool hasImageFile(std::string_view name) const;
+    // Whether there's an image by this name: a file, a sub-image, or an atlas or one of its expressions (without the
+    // warning a missing one gets when drawn).
+    [[nodiscard]] bool hasImage(std::string_view name) const {
+        const std::string key = lower(name);
+        return frames_.contains(key) || subImages_.contains(key) || hasImageFile(name);
+    }
     // The movie a script means: movies/<name>.mpg (or .mpeg, .mp4, .mov, .m4v), or `name` as written.
     [[nodiscard]] std::optional<std::string> findMovie(std::string_view name) const;
 

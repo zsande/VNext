@@ -1203,6 +1203,9 @@ ScreenView::ScreenView(const ScreenDef& def, Engine& engine, bool tools) : sourc
 void ScreenView::reset() {
     for (auto& st : state_) {
         st.scroll = 0.0f;
+        st.keptScroll = -1.0f; // (a list with position=bottom starts at its end again, and stays there as more comes)
+        st.keptMost = 0.0f;
+        st.glideX = st.glideY = 0.0f;
         st.since.reset(); // (animations start again)
         st.clicked.reset();
         st.pointedPlayed = 0.0f;
@@ -2418,7 +2421,7 @@ std::vector<ScreenView::ListItem> ScreenView::listItems(const Element& list, std
         std::string avatar;
         if (def && !def->avatarOf({}).empty()) {
             avatar = def->avatarOf(expression);
-            if (!expression.empty() && !engine_.image(avatar)) avatar = def->avatarOf({});
+            if (!expression.empty() && !engine_.assets().hasImage(avatar)) avatar = def->avatarOf({});
         }
         v.insert_or_assign(std::format("{}.character", word), def ? def->key : std::string{});
         v.insert_or_assign(std::format("{}.avatar", word), std::move(avatar));
