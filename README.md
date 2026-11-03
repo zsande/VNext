@@ -1,6 +1,10 @@
 <h1 align="center"><img src=".github/banner.png" alt="VNext" width="800"></h1>
 
-**VNext is a visual novel engine with the editor built right in.** You write your story as scenes and lines in simple forms, see each moment in a live preview, design your menus by dragging things around, and translate your game, all in the same app. No programming is needed, though everything is also saved as plain, readable script files if you'd rather type.
+**VNext is a free visual novel engine with the editor built right in, and your characters can even text and call the player.** You write your story as scenes and lines in simple forms, see each moment in a live preview, design your menus by dragging things around, and translate your game, all in the same app. No programming is needed, though everything is also saved as plain, readable script files if you'd rather type.
+
+**[Download VNext](https://github.com/zsande/VNext/releases/latest)** for Windows, macOS or Linux. It's free, also for games you sell.
+
+<p align="center"><img src=".github/phone.gif" width="320" alt="A chat in a VNext game: Kaede types a message to Haru, deletes it, sends “Hey.”, sees it read, and gets “k”, then an invitation to the summer festival"></p>
 
 ## What's in it
 
@@ -11,6 +15,13 @@ Open VNext in developer mode and you get an editor that fits any window size, wi
 - **Screens**: the title screen, menus and textbox, designed by dragging their parts around, with "Try it" to click through them.
 - **Library**: images, sounds, movies and fonts, and the styles, animations (on a timeline) and gallery entries a game uses.
 - **Settings** and **Translate**: the game's options, and its translations, with a spreadsheet for translators.
+
+<p align="center">
+  <img src=".github/editor-story.png" width="48%" alt="The Story tab: a scene's lines, the chosen line's form and a live preview of Haru in a park">
+  <img src=".github/editor-chat.png" width="48%" alt="The Story tab on a chat: the phone line's form, and a preview with the chat on Kaede's phone">
+  <img src=".github/editor-screens.png" width="48%" alt="The Screens tab: the phone's parts, a preview with an app button chosen, and the button's settings">
+  <img src=".github/editor-map.png" width="48%" alt="The Map tab: eight scenes as boxes, with arrows from start to two endings">
+</p>
 
 Games made with it can have voices and made-up "speech" sounds, movies, timed and locked choices, a phone (chats, calls and apps), a story flowchart, a gallery, music room and achievements, saving, loading and rewinding, controller and touch support, text read aloud, high-contrast and text-size options, and right-to-left languages. A finished game packs into one file, game.vnext, which also keeps its players' saves and progress: with VNext next to it, it plays on Windows, macOS and Linux.
 
