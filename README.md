@@ -44,7 +44,3 @@ In `engine/`, run `cmake --preset release`, then `cmake --build --preset release
 ## Licence
 
 VNext is free to use under the [zlib licence](LICENCE.txt): you may use it, change it and share it, also in games you sell, as long as you don't claim you wrote it.
-
-## Supporting VNext
-
-If you'd like to support the project, you can become a member on [Patreon](https://www.patreon.com/vnext). It's entirely optional: following along is free, and nobody is expected to pay.
