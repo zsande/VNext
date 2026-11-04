@@ -6,7 +6,7 @@
 
 <p align="center"><img src=".github/phone.gif" width="320" alt="A chat in a VNext game: Kaede types a message to Haru, deletes it, sends “Hey.”, sees it read, and gets “k”, then an invitation to the summer festival"></p>
 
-## What's in it
+## The editor
 
 Open VNext in developer mode and you get an editor that fits any window size, with a tab for each part of the work:
 
@@ -23,15 +23,21 @@ Open VNext in developer mode and you get an editor that fits any window size, wi
   <img src=".github/editor-map.png" width="48%" alt="The Map tab: eight scenes as boxes, with arrows from start to two endings">
 </p>
 
-Games made with it can have voices and made-up "speech" sounds, movies, timed and locked choices, a phone (chats, calls and apps), a story flowchart, a gallery, music room and achievements, saving, loading and rewinding, controller and touch support, text read aloud, high-contrast and text-size options, and right-to-left languages. A finished game packs into one file, game.vnext, which also keeps its players' saves and progress: with VNext next to it, it plays on Windows, macOS and Linux.
+## The phone
+
+Characters text the player: messages type out, people send images, stickers and voice messages, react, read yours, and edit or delete their own. A choice in a chat shows its options on the phone. Calls ring and can be missed, and players can text and call characters themselves. The ready-made phone, with its chats, calls and apps, is made of ordinary screen parts, so every bit of it can be restyled.
+
+## And more
+
+Games made with VNext can have voices and made-up "speech" sounds, movies, timed and locked choices, a story flowchart, a gallery, music room and achievements, saving, loading and rewinding, controller and touch support, text read aloud, high-contrast and text-size options, and right-to-left languages. A finished game packs into one file, game.vnext, which also keeps its players' saves and progress: with VNext next to it, it plays on Windows, macOS and Linux.
 
 ## How it's made
 
-The idea, the design and the direction of VNext are mine, and every line of its code is written by Claude, an AI made by Anthropic. I decide what VNext should be, test what comes out and say what to change; Claude writes the code and tests it.
+The idea, the design and the direction of VNext are mine. Every line of its code is written by Claude, an AI made by Anthropic, and so are the characters in the pictures, drawn in code. I decide what VNext should be, test what comes out and say what to change; Claude writes the code and tests it.
 
 ## Download
 
-Get VNext from the [Releases page](https://github.com/zsande/VNext/releases) or [itch.io](https://zsande.itch.io/vnext): a zip for Windows, macOS or Linux, with the player and licences.txt (on Linux, the player is an AppImage). VNext isn't signed by Apple or Microsoft yet, so the first time, macOS asks you to allow it in System Settings → Privacy & Security (Open Anyway), and Windows says it protected your PC (More info, then Run anyway). The [code signing policy](CODE_SIGNING.md) says how the players are signed.
+Get VNext from GitHub's [Releases page](https://github.com/zsande/VNext/releases) or [itch.io](https://zsande.itch.io/vnext): a zip for Windows, macOS or Linux, with the player and licences.txt (on Linux, the player is an AppImage). VNext isn't signed by Apple or Microsoft yet, so the first time, macOS asks you to allow it in System Settings → Privacy & Security (Open Anyway), and Windows says it protected your PC (More info, then Run anyway). The [code signing policy](CODE_SIGNING.md) says how the players are signed.
 
 ## Status
 
