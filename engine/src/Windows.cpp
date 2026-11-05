@@ -1,6 +1,6 @@
 // What Windows offers the player through its own parts: spelling (its spell checker), reading text
 // aloud (SAPI) and movies other than MPEG-1 (Media Foundation: MP4, MOV and M4V). System.hpp says what
-// each does; Apple.mm is the Mac's.
+// each does; Apple.mm and Linux.cpp are the Mac's and Linux's own.
 #ifndef _WIN32_WINNT // (Windows 10 on: what the spell checker and the movie reader need)
 #define _WIN32_WINNT 0x0A00
 #endif

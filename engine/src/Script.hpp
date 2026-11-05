@@ -136,8 +136,6 @@ using TagHandler = std::function<void(std::string_view name, std::string_view ar
 // Fills in {expressions} now, but leaves text tags (and {{ }}) for a later expand(); braces in the
 // values are doubled, so they stay text. (Messages and choices, shown later as rich text.)
 [[nodiscard]] std::string fillValues(std::string_view text, const Lookup& lookup);
-// `text` with each {NAME} that `values` has filled in (braces in them doubled), and the rest as it is.
-[[nodiscard]] std::string withValues(std::string_view text, const Variables& values);
 // Checks the {...} parts of a text; returns the first problem.
 [[nodiscard]] std::string checkText(std::string_view text);
 // The names a text's {...} parts read (not its tags'), each once.
@@ -171,7 +169,9 @@ enum class Ease : std::uint8_t { Linear, In, Out, InOut, Bounce, Spring, Oversho
 [[nodiscard]] float eased(Ease e, float t);
 
 // Things the player collects, each listed once in the scripts ("gallery", "ending", "song",
-// "achievement" and "tip" lines) and remembered for good once reached: persistent.<kind>.<name>.
+// "achievement" and "tip" lines) and remembered for good once reached: persistent.<kind>.<name>,
+// which the story sets ("set persistent.ending.good = yes"). Images and songs are also had by showing
+// or playing them, tips by a line that shows {tip NAME}.
 enum class RecordKind : std::uint8_t { Gallery, Ending, Song, Achievement, Tip };
 inline constexpr std::array<std::string_view, 5> kRecordKinds{"gallery", "ending", "song", "achievement", "tip"};
 
@@ -230,12 +230,11 @@ struct Menu {
 struct Jump {
     std::string scene;
     std::size_t target = 0;
-    bool call = false;            // come back here on "return"
     bool again = false;           // back to its repeating choice, after an option's lines (shown without the line before it)
     std::optional<Expr> unless;   // only jump when this is false (if / else)
 };
-struct Return {};
-struct End {};
+struct Return {}; // back to the line after what started this part (an option's lines, a phone scene)
+struct End {};    // a scene's end: back to what started it, if something did; else the story's over
 struct Set {
     std::string variable;
     char op = '=';                // '=', '+' (add), '-' (subtract), '!' (toggle)
@@ -248,12 +247,13 @@ struct Play {
     std::string channel; // sounds: a named channel that can loop and be stopped
     bool loop = false;
     float volume = 1.0f;
-    float fade = 0.0f;
+    float fade = 0.0f;               // in (stopping: out)
+    std::optional<float> fadeOut;    // music: the song before's (else setting music_crossfade); a sound: the one before by its name
+                                     // (else at once), or for one without a name the others playing (else they play on)
     std::optional<bool> textFollows; // voice: the next line types out with it (else setting text_follows_voices)
 };
 struct Wait { float seconds = -1.0f; }; // < 0: until a click
 struct Screen { std::string name; bool show = true; }; // "show screen" / "hide screen": up while playing
-struct Ask { std::string variable, prompt, fallback; int mostLetters = 24; };
 // Rain, snow, petals, leaves or embers over the stage. kind empty: stop.
 struct Weather {
     std::string kind;
@@ -278,22 +278,13 @@ struct Movie {
     bool skippable = true;  // clicks, keys and skipping go past it
     float volume = 1.0f;    // its sound, on top of the music volume
 };
-// "textbox NAME": the screen every line uses from now on (else "textbox"); "new page" empties the page;
-// "hide textbox [NAME]": a textbox's kept line goes (all of them without NAME).
-struct Textbox { std::string screen; bool newPage = false, hide = false; };
 // Menu commands: open (from the story it waits for the screen to close), close, answer, quick
-// save, notice...
+// save...
 struct Ui {
     std::string verb, arg;
     std::optional<std::string> opening, closing; // open SCREEN with NAME and close with NAME: what it plays this time (none said: its own show_ and animation_on_close=)
-    std::string phone; // what the game asks of the phone: the chat to show (a notice of a message: clicking it opens it there)
+    std::string phone; // what the game asks of the phone: the chat to show
 };
-// "gallery IMAGE", "ending NAME", "achievement NAME", "tip NAME": the player has it now (an image,
-// an ending reached, an achievement earned, a tip learned). Images and songs are also had by
-// showing / playing them, tips by a line that shows {tip NAME}.
-struct Record { RecordKind kind; std::string name; };
-// "chapter TITLE": the story's part from here on (saves show it; a "chapter" screen shows it big).
-struct Chapter { std::string title; };
 // "effect sepia noise": how the whole stage looks, until "effect none" (StageLook bits). With
 // "for N seconds" they're added for that long, on top of what's there.
 struct Effect {
@@ -302,8 +293,6 @@ struct Effect {
     float fade = 0.0f;   // coming in (or going) over this many seconds
     float seconds = 0.0f;
 };
-// "flowchart TITLE": a point on the flowchart (chapters, choices and endings are on it by themselves).
-struct Mark { std::string title; };
 // A line of a chat scene: a message on the phone in its chat, "Mika: words" someone's and
 // "me: words" the player's. Its other forms send an image, a sticker or a voice message, or change the
 // chat: someone deletes or edits their last message, reacts to the last one someone else sent, reads the
@@ -329,6 +318,18 @@ struct Chat {
     std::string with; // whose: their name, as shown
     bool end = false;
 };
+// "time 18:30", "time evening", "time saturday evening", "time morning day=3": the story's time goes on to the next
+// such moment (staying when it's that already; day=N: to that day; a weekday or a day without a time of day: at the
+// same time); "time passes 2 hours" (minutes, hours or days; alone: to the next part of the day). With setting time
+// real, the story waits for the player's own clock instead.
+struct Time {
+    int weekday = -1;    // 0 Monday to 6 Sunday (-1: none said)
+    int day = 0;         // day=N (0: none said)
+    int minutes = -1;    // a time of day, in minutes from midnight (-1: none said)...
+    std::string part;    // ...or a part of the day (setting time_parts), by its name
+    bool passes = false; // time passes...
+    int passing = 0;     // ...this many minutes (0: to the next part of the day)
+};
 // "phone call WHO": they call, and the phone rings until it's answered or declined (or `for N seconds`
 // pass). Its lines are the call; its `missed:` lines run instead when nobody answers. `end`: the call is
 // over (after its lines).
@@ -342,9 +343,9 @@ struct Call {
 } // namespace cmd
 
 using Command = std::variant<cmd::Say, cmd::Background, cmd::Show, cmd::Hide, cmd::Menu, cmd::Jump,
-                             cmd::Return, cmd::End, cmd::Set, cmd::Play, cmd::Wait, cmd::Screen, cmd::Ask, cmd::Ui,
-                             cmd::Weather, cmd::Camera, cmd::Textbox, cmd::Movie, cmd::Record, cmd::Chapter, cmd::Mark,
-                             cmd::Message, cmd::Effect, cmd::Chat, cmd::Call>;
+                             cmd::Return, cmd::End, cmd::Set, cmd::Play, cmd::Wait, cmd::Screen, cmd::Ui,
+                             cmd::Weather, cmd::Camera, cmd::Movie,
+                             cmd::Message, cmd::Effect, cmd::Chat, cmd::Call, cmd::Time>;
 using Commands = std::vector<Command>;
 
 // When a character's mouth moves (their images need mouth frames: see Atlas).
@@ -490,8 +491,8 @@ struct Animation {
 };
 
 enum class ElementKind : std::uint8_t {
-    Image, Text, Button, Key,                                                         // general
-    Namebox, Dialogue, Indicator, Choices, History, Pages, Slots, Notice, Face, Control, Gallery, Page, // engine widgets
+    Image, Text, Button,                                                              // general
+    Namebox, Dialogue, Indicator, Choices, History, Pages, Slots, Face, Control, Gallery, Page, // engine widgets
     Input, Bar, Slider,                                                             // variable widgets
     Movie,                                                                          // a movie playing (loops)
     Endings, Songs, Achievements, Tips,                                             // lists of what was reached
@@ -513,17 +514,22 @@ inline constexpr std::array<std::pair<std::string_view, std::string_view>, 7> kI
     {"call", "who missed busy outgoing incoming time length character avatar initial colour"},
     {"person", "name about character avatar initial colour"},
     {"notice", "who text chat call time"}}};
+// Whether a kind of part ("history", "container"...) takes a setting of its own ("columns", "glide"...):
+// the ones the editor's form for it shows, besides any part's place, size and look.
+[[nodiscard]] bool partTakes(std::string_view kind, std::string_view key);
+
 // What screens' conditions and texts (and the story's) know besides the variables: every value
 // Engine::builtin gives, in its order (the player's settings, by their names, too: Settings::has).
 inline constexpr std::string_view kBuiltinValues[]{
     "in_game", "has_save", "can_save", "can_rollback", "skip", "auto", "speaking", "choosing", "prompt", "text_complete", "time_left",
     "gallery_image", "gallery_title", "gallery_movie", "tip", "tip_title", "tip_text", "flowchart_points", "gallery_total", "gallery_unlocked",
     "endings_total", "endings_reached", "songs_total", "songs_heard", "achievements_total", "achievements_earned", "tips_total", "tips_found",
-    "chapter", "messages_total", "chats_total", "open_chat_messages", "calls_total", "people_total", "open_chat", "phone_app", "has_phone", "phone_button", "messages_unread", "calls_missed", "phone_unread",
+    "messages_total", "chats_total", "open_chat_messages", "calls_total", "people_total", "open_chat", "phone_app", "has_phone", "phone_button", "messages_unread", "calls_missed", "phone_unread",
     "phone_locked", "in_call", "in_chat", "caller",
     "call_incoming", "call_outgoing", "call_busy", "call_choice", "call_time", "caller_avatar", "caller_colour", "caller_initial", "open_image", "open_image_text", "phone_needs_code",
     "phone_code", "phone_wrong", "dragging", "has_face", "face_side", "fullscreen", "developer", "thumbnail", "save_mode", "title", "language", "languages",
-    "version", "engine_version", "sdl_version", "speaker", "notice", "question", "page", "window_size"};
+    "version", "engine_version", "sdl_version", "speaker", "question", "page", "window_size",
+    "time_day", "time_hour", "time_minute", "time_part", "time_weekday", "time_month", "time_year", "time_clock", "time_date", "time_waiting", "time_until"};
 
 // A key (with modifiers), mouse button, wheel direction, controller button or touch gesture:
 // "escape", "alt+return", "mouse_right", "wheel_up", "pad_a", "swipe_left", "long_press".
@@ -562,7 +568,7 @@ struct Element {
     Commands actions;
     Commands drop;       // drop=: what dropping something dragged on it does ({dropped} is what it was)
     std::string confirm; // ask this question before running the actions
-    std::optional<KeyChord> key;
+    std::vector<KeyChord> keys; // keys=, a button's: they press it
     std::optional<Expr> visible, clickable, chosen; // when=, clickable= and chosen=
     std::map<std::string, Style, std::less<>> substyles;    // options ending in "_style"
     std::map<std::string, SDL_Color, std::less<>> colours;   // colour options (top, bottom, track...)
@@ -594,10 +600,7 @@ struct ScreenDef {
     std::string name;
     std::vector<Element> elements;
     bool storyWaits = true; // story=waits: the story waits while it's open (and nothing underneath takes clicks)
-    bool arrowKeys = true;  // arrow keys / Enter move between and press its controls
     float closeAfter = 0.0f; // close_after=: it closes by itself after this many seconds (0: it doesn't)
-    bool keep = false;       // keep=yes, a textbox: its last line stays while other textboxes show theirs
-    float textSpeed = 1.0f;  // text_speed=, a textbox: how fast its lines type, as a part of the player's speed
     // stop_music_on_open= and stop_voice_on_open= (or _on_close=): the music, or the voice line, stops then.
     struct Stops {
         bool music = false, voice = false;
@@ -609,7 +612,7 @@ struct ScreenDef {
     std::shared_ptr<const Animation> animationOnOpen, animationOnClose;
 };
 
-// Something a key does ("control" lines). Players can change the keys on the Controls screen.
+// Something a key does ("control" lines). Players can change its keys with a screen's control parts (Settings' Keys).
 struct Control {
     std::string name;
     std::vector<KeyChord> keys; // the defaults
@@ -619,7 +622,7 @@ struct Control {
 };
 
 // The messages the player shows, in English: the ones "setting text.ID" lines don't change.
-// What a Controls screen calls the mouse buttons, the wheel, controller buttons and touch gestures
+// What a screen's control parts call the mouse buttons, the wheel, controller buttons and touch gestures
 // (keys are named by the system): the only words the player shows that aren't the game's own, so a
 // translation file lists them.
 inline constexpr std::array<std::pair<std::string_view, std::string_view>, 29> kKeyWords{{
@@ -632,11 +635,23 @@ inline constexpr std::array<std::pair<std::string_view, std::string_view>, 29> k
 [[nodiscard]] std::string_view keyWord(std::string_view id); // (the id itself when it isn't listed)
 
 // What tells players a message has come to their phone (setting new_messages): a Phone button on the textbox
-// and a notice, the phone opening, or a notice.
-enum class NewMessages : std::uint8_t { Button, Open, Notice };
+// that counts them, or the phone opening.
+enum class NewMessages : std::uint8_t { Button, Open };
 // How a chat scene's messages come (setting chat_messages): as they're typed (dots first; a click hurries one),
 // or each after a click.
 enum class ChatMessages : std::uint8_t { Typed, Click };
+
+// The story's time (setting time): none, the story's own clock and calendar, the player's real ones (the story
+// waits for them), or days and parts of the day (no clock).
+enum class TimeKind : std::uint8_t { None, Story, Real, Days };
+// Dates as days since 1 January 1970, and back; a date's weekday (0 Monday); the English names the
+// scripts use (shown in the player's language).
+[[nodiscard]] int daysFromDate(int year, int month, int day);
+[[nodiscard]] std::array<int, 3> dateFromDays(int days); // year, month (1 to 12), day
+[[nodiscard]] inline int weekdayOf(int days) { return ((days % 7) + 7 + 3) % 7; }
+inline constexpr std::array<std::string_view, 7> kWeekdays{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+inline constexpr std::array<std::string_view, 12> kMonths{"January", "February", "March", "April", "May", "June",
+                                                         "July", "August", "September", "October", "November", "December"};
 
 struct GameSettings {
     std::string title = "VNext";
@@ -666,11 +681,10 @@ struct GameSettings {
     int imageMemory = 512;   // MB of images kept loaded before old ones are let go (0: no limit)
     TextAppears textAppears = TextAppears::Letter;
     SDL_Color narrationColour{150, 170, 255, 255};
-    float noticeTime = 2.5f;  // seconds a notice stays
     float musicCrossfade = 0.5f;
     bool glide = true;        // lists and containers that scroll glide on after a drag (unless a part says), ...
     float glideSpeed = 1.0f, glideDistance = 1.0f; // ...this fast (of the speed they were let go at) and this far
-    float scrollbarThickness = 6.0f; // pixels thick a container's scrollbar is (a part can say otherwise)
+    float scrollbarThickness = 6.0f; // pixels thick a scrollbar is (a part can say otherwise)
     float fadingEdges = 0.0f;      // pixels a fading edge (edges=fade) spans (0: a fifth of the box, at most 64)
     bool textFollowsVoices = false;   // the text of a voiced line types out in time with the voice
     float musicUnderVoices = 0.7f; // how loud music plays while a voice does (1: unchanged)
@@ -686,8 +700,20 @@ struct GameSettings {
     float madeUpVoiceSpeed = 1.0f, secondsBetweenBlinks = 4.0f, mouthSpeed = 4.0f; // defaults for characters
     bool blink = true;        // (blink no: nothing blinks, unless a character says blink=yes)
     MouthMoves mouthsMove = MouthMoves::Yes; // (mouths_move no: no mouth moves, unless a character says mouth_moves=)
-    bool developer = false;   // developer mode: developer tools (F10), F6 reload, labelled stand-ins for missing files
+    bool developer = false;   // developer mode: developer tools (F10), the reload action, labelled stand-ins for missing files
     std::map<std::string, int, std::less<>> settingDefaults; // "setting default.<setting>"
+    // Time (setting time, and how it starts: time_start "2025-07-14 8:00", a date or a weekday, then a time of day
+    // or a part of the day; no date and no weekday: days only by number).
+    TimeKind time = TimeKind::None;
+    int timeStartDate = -1;     // (days since 1970: see daysFromDate; -1: none)
+    int timeStartWeekday = -1;  // (0 Monday; -1: none)
+    int timeStartMinutes = 480; // (8:00)
+    // The parts of the day (time_parts "morning 6:00, afternoon 12:00, evening 18:00, night 22:00"): each from the
+    // minute it starts at, in order.
+    std::vector<std::pair<std::string, int>> dayParts{{"morning", 360}, {"afternoon", 720}, {"evening", 1080}, {"night", 1320}};
+    bool clock12 = false;              // setting clock 12: 6:30 PM (else 18:30)
+    bool phoneFollowsTime = true;      // the phone's clock and date are the time's (phone_follows_time)
+    bool backgroundsFollowTime = true; // a background's version for the part of the day shows, when there is one (park_evening)
 };
 
 // ---------------------------------------------------------------------------
@@ -698,8 +724,8 @@ struct Instruction {
     Command command;
     std::uint16_t file = 0;
     int line = 0;
-    // A jump or return at the end of what's under a line (an if's branch, an option's or an answer's
-    // lines), with that line's number: the story isn't at that line when it does it (the developer
+    // A jump or return at the end of what's under a line (an if's branch, an option's lines), with that
+    // line's number: the story isn't at that line when it does it (the developer
     // tools don't stop there).
     bool tail = false;
 };
@@ -730,7 +756,7 @@ public:
     std::vector<Instruction> code;
     std::unordered_map<std::string, std::size_t, StringHash, std::equal_to<>> scenes;
     // A character's chat= or call= scene (by name): where its lines start (played when the player opens their chat or
-    // calls them; they end at a return).
+    // calls them; at its end the story goes back to where it was).
     std::unordered_map<std::string, std::size_t, StringHash, std::equal_to<>> phoneScenes;
     std::unordered_map<std::string, CharacterDef, StringHash, std::equal_to<>> characters;
     std::vector<Atlas> atlases;

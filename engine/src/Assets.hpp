@@ -40,7 +40,7 @@ struct Atlas {
     std::optional<Part> eyesPart, mouthPart;
 };
 
-// A part of an image with a name of its own ("image" lines), shown like any image: a logo on a
+// A part of an image with a name of its own ("sub-image" lines), shown like any image: a logo on a
 // sheet of a menu's pieces.
 struct SubImage {
     std::string name;  // lower-case
@@ -207,11 +207,14 @@ public:
     Sound& operator=(Sound&&) = delete;
 
     bool init();
-    void playMusic(const std::string& path, bool loop = true, float fadeIn = 0.0f, float volume = 1.0f);
+    // The song before it fades out over `fadeOut` seconds (none: the crossfade).
+    void playMusic(const std::string& path, bool loop = true, float fadeIn = 0.0f, float volume = 1.0f, std::optional<float> fadeOut = std::nullopt);
     void stopMusic(float fadeOut = 0.0f);
-    void playSound(const std::string& path, float volume = 1.0f); // one-shot effect
-    // Named channels (ambience, loops) can be stopped later; one sound per channel.
-    void playChannel(const std::string& channel, const std::string& path, bool loop, float volume, float fadeIn);
+    // A one-shot effect; with `fadeOut`, the ones still playing fade out over that long (else they play on).
+    void playSound(const std::string& path, float volume = 1.0f, float fadeIn = 0.0f, std::optional<float> fadeOut = std::nullopt);
+    // Named channels (ambience, loops) can be stopped later; one sound per channel: the one there before
+    // fades out over `fadeOut` seconds (0: stops at once).
+    void playChannel(const std::string& channel, const std::string& path, bool loop, float volume, float fadeIn, float fadeOut = 0.0f);
     void stopChannel(const std::string& channel, float fadeOut); // empty name: every channel
     void playVoice(const std::string& path, float volume = 1.0f);
     // Plays made-up speech for `text` as the voice line (see "Made-up voices" below); false if it has nothing to say.
@@ -257,10 +260,9 @@ public:
     void closeStream(SDL_AudioStream* stream);
     void playTestSound(); // short beep used by the volume sliders
     void update(float dt);
-    // Forgets loaded files so edited or newly added sounds are picked up (F6). The next playMusic()
+    // Forgets loaded files so edited or newly added sounds are picked up (a reload). The next playMusic()
     // reloads the song even if the same path is already playing, crossfading to the new version.
     void clearCache();
-    // Paths that got a generated placeholder since the last call (for an on-screen notice).
 
     [[nodiscard]] const std::string& music() const { return musicPath_; }
     void setVolume(float master, float music, float sound, float voice); // 0..1 each
@@ -270,7 +272,8 @@ public:
 private:
     static constexpr std::size_t kSoundTracks = 8;
     struct Channel {
-        MIX_Track* track = nullptr; // owned by the mixer
+        MIX_Track* tracks[2]{}; // owned by the mixer: the one playing (`current`), and the one before it, fading out
+        int current = 0;
         std::string path;
         float volume = 1.0f;
     };
@@ -288,7 +291,7 @@ private:
     enum class Kind : std::uint8_t { Music, Sound };
     MIX_Audio* load(const std::string& path, Kind kind);
     MIX_Audio* placeholder(const std::string& key, Kind kind, std::uint64_t seed);
-    void play(MIX_Audio* clip, float volume);
+    void play(MIX_Audio* clip, float volume, float fadeIn = 0.0f);
     bool start(MIX_Track* track, MIX_Audio* clip, bool loop, float fadeIn);
     [[nodiscard]] Sint64 frames(MIX_Track* track, float seconds) const;
 
@@ -405,7 +408,7 @@ private:
         void operator()(plm_t* p) const noexcept;
     };
     std::unique_ptr<plm_t, PlmDeleter> plm_; // (after data_: it reads from it, so it goes first)
-    // A movie the system plays instead (MP4, MOV, M4V on a Mac): the next image, waiting for its time.
+    // A movie the system plays instead (MP4, MOV, M4V: Apple.mm, Windows.cpp, Linux.cpp): the next image, waiting for its time.
     void updateSystem(float dt);
     std::unique_ptr<SystemMovie> system_;
     std::vector<std::uint8_t> image_, shownImage_; // (the next one, and the one shown)

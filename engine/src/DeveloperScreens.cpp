@@ -3,6 +3,10 @@
 #include "DeveloperShared.hpp"
 #include "DeveloperUi.hpp"
 
+#include <numeric>
+#include <ranges>
+#include <tuple>
+
 namespace vn {
 
 namespace {
@@ -25,74 +29,99 @@ const std::array kScreenStarts{
     ScreenStart{"history", "History", "The lines so far"},
     ScreenStart{"confirm", "Confirm", "A Yes or No question, for buttons that ask first"},
     ScreenStart{"choice", "Choice", "The story's choices, as the built-in menu has them"},
-    ScreenStart{"notice", "Notice", "The story's notices, as the built-in one shows them"},
     ScreenStart{"phone", "Phone", "A phone at the side: its home screen, chats, calls and people"},
     ScreenStart{"credits", "Credits", "Who made the game"},
+    ScreenStart{"calendar", "Calendar", "The date and the time, for a moment as each new day starts (open calendar: any time)"},
+    ScreenStart{"input", "Input", "A question, and a box the player types the answer into (it goes in a variable): open input"},
 };
 
 constexpr std::string_view kUsualMenus[]{"title", "pause", "save", "load", "settings", "history", "confirm", "phone"};
 
-// The ones that start as a built-in screen (the choice menu, the notice): copies of it, in places already.
-bool builtIn(std::string_view name) { return name == "choice" || name == "notice"; }
+// The one that starts as a built-in screen (the choice menu): a copy of it, in places already.
+bool builtIn(std::string_view name) { return name == "choice"; }
 
 // Their look: colours and styles, each added when the game has none by that name.
 constexpr std::string_view kLook = R"vnext(colour text #f0f0f5
 colour dim #9696a5
-colour accent #96aaff
-colour line #ffffff2d
-colour button #16192ae1
-colour pointed #545caaf0
-colour card_pointed #222644f5
-colour backdrop #080912f5
-colour panel #141626fa
-colour tip #7fc8ff
+colour accent #ada2ff
+colour line #5b51b8
+colour button #2b2563
+colour pointed #3b3392
+colour chosen #4d41c4
+colour field #0c0a22
+colour backdrop #141230f5
+colour panel #141230fa
 colour shade #000000aa
-style title size=64
-style dim size=18 colour=dim
-style label size=18 align_vertically=centre
-style heading colour=accent
-style button align=centre align_vertically=centre background=button border=line pointed_background=pointed pointed_border=accent chosen_background=pointed chosen_border=accent unclickable_colour=dim
+style title size=64 shadow=no
+style dim size=18 colour=dim shadow=no
+style label size=18 colour=dim align_vertically=centre shadow=no
+style heading colour=accent shadow=no
+style screen_title based_on=heading size=32
+style calendar size=44 align=centre align_vertically=centre shadow=no
+style calendar_time based_on=heading align=centre
+style centred align=centre align_vertically=centre shadow=no
+style framed border=line shadow=no
+style card background=panel border=line padding=16 shadow=no
+style shaded background=shade shadow=no
+style input size=24 align=centre align_vertically=centre background=field border=line pointed_border=accent padding=12 shadow=no
+style button align=centre align_vertically=centre background=button border=line pointed_background=pointed chosen_background=chosen unclickable_colour=dim shadow=no
 style small_button based_on=button size=18
 style choice based_on=button
-style tab size=18 colour=dim align=centre align_vertically=centre background=button border=line pointed_border=accent chosen_background=pointed chosen_border=accent chosen_colour=text
-style slot background=button border=line pointed_background=card_pointed pointed_border=accent padding=4
-style slot_title size=18 colour=accent
-style slot_text size=18
-style slot_empty size=18 colour=dim background=#10111c
-style setting size=18 colour=dim align=centre align_vertically=centre background=button border=line pointed_border=accent chosen_background=pointed chosen_colour=text unclickable_colour=#5a5a66
-style setting_value size=18 align_vertically=centre
-style history size=24 text_size_follows=yes
+style tab size=18 colour=dim align=centre align_vertically=centre background=button border=line pointed_background=pointed chosen_background=chosen chosen_colour=text shadow=no
+style slot background=button border=line pointed_background=pointed padding=4 shadow=no
+style slot_title size=18 colour=accent shadow=no
+style slot_text size=18 shadow=no
+style slot_empty size=18 colour=dim background=field shadow=no
+style setting size=18 align=centre align_vertically=centre background=button border=line pointed_background=pointed chosen_background=chosen unclickable_colour=dim shadow=no
+style setting_value size=18 align_vertically=centre shadow=no
+style setting_choice based_on=setting_value align=centre
+style history size=24 text_size_follows=yes shadow=no
 style history_name based_on=history
 style history_choice based_on=history colour=dim
-style history_button colour=dim background=#ffffff10 border=line pointed_background=pointed pointed_border=accent pointed_colour=text
-style record background=button border=line padding=16 pointed_border=accent chosen_background=pointed chosen_border=accent
+style history_button based_on=small_button
+style record background=button border=line padding=16 pointed_background=pointed chosen_background=chosen shadow=no
+style record_locked based_on=record colour=dim background=field
+style flowchart size=16 align=centre align_vertically=centre background=button border=line padding=8 pointed_background=pointed chosen_background=chosen shadow=no
+style flowchart_unreached based_on=flowchart colour=dim background=field
+style flowchart_ending based_on=flowchart colour=accent
+style flowchart_choice size=14 colour=dim shadow=no
 style phone_title size=20 shadow=no
+style phone_title_centre based_on=phone_title align=centre
 style phone_status size=14 shadow=no padding=4
-style phone_icon size=24 align=centre align_vertically=centre background=button border=line pointed_background=pointed pointed_border=accent
-style phone_label size=14
+style phone_status_right based_on=phone_status align=right
+style phone_icon size=24 align=centre align_vertically=centre background=button border=line pointed_background=pointed shadow=no
+style phone_label size=14 colour=dim shadow=no
+style phone_label_centre based_on=phone_label align=centre
 style phone_card based_on=record padding=10
 style phone_name size=16 shadow=no
 style phone_preview size=15 colour=dim shadow=no
+style phone_preview_centre based_on=phone_preview align=centre
+style phone_preview_right based_on=phone_preview align=right
 style phone_time size=13 colour=dim shadow=no
-style phone_unread size=13 colour=#0d0f1a align=centre align_vertically=centre background=tip shadow=no
-style phone_initial size=16 colour=#0d0f1a align=centre align_vertically=centre shadow=no
+style phone_time_centre based_on=phone_time align=centre
+style phone_time_right based_on=phone_time align=right
+style phone_unread size=13 colour=field align=centre align_vertically=centre background=accent shadow=no
+style phone_initial size=16 colour=field align=centre align_vertically=centre shadow=no
 style phone_caller_initial based_on=phone_initial size=48
-style phone_missed based_on=phone_name colour=#ff7a8a
-style phone_text size=17 background=#1d2136 border=line padding=9
-style phone_mine based_on=phone_text background=#2b3468
-style phone_reaction size=13 background=#2b3468 border=line padding=3 shadow=no
-style phone_small_button size=16 colour=tip align=centre align_vertically=centre background=button border=line pointed_background=pointed pointed_border=accent pointed_colour=text chosen_colour=text chosen_background=pointed unclickable_colour=dim
-style phone_notice size=15 align_vertically=centre background=button border=line padding=8 pointed_border=accent
-style phone_photo pointed_border=accent
-style phone_viewer background=#05060cf2
-style phone_caller size=24 shadow=no
-style phone_answer based_on=phone_small_button colour=text background=#2d7a4f pointed_background=#3a9a63
-style phone_decline based_on=phone_small_button colour=text background=#8a2f3a pointed_background=#ad3d4a
-style phone_clock size=48
-style namebox size=28 background=card_pointed padding=20 colour=speaker opacity_follows=yes
-style dialogue size=28 text_size_follows=yes
-style indicator colour=accent
-style notice size=20 background=panel border=accent padding=14)vnext";
+style phone_missed based_on=phone_name colour=#ff8c96
+style phone_text size=17 background=button border=line padding=9 shadow=no
+style phone_input size=17 background=field border=line pointed_border=accent padding=9 shadow=no
+style phone_mine based_on=phone_text background=chosen
+style phone_reaction size=13 background=chosen border=line padding=3 shadow=no
+style phone_small_button size=16 align=centre align_vertically=centre background=button border=line pointed_background=pointed chosen_background=chosen unclickable_colour=dim shadow=no
+style phone_notice size=15 align_vertically=centre background=button border=line padding=8 pointed_background=pointed shadow=no
+style phone_photo pointed_border=accent shadow=no
+style phone_viewer background=field shadow=no
+style phone_caller size=24 align=centre shadow=no
+style phone_answer based_on=phone_small_button background=#2f7a50 pointed_background=#3a9562
+style phone_decline based_on=phone_small_button background=#963240 pointed_background=#b03c4c
+style phone_clock size=48 align=centre shadow=no
+style namebox size=28 background=button padding=20 colour=speaker opacity_follows=yes shadow=no
+style dialogue size=28 text_size_follows=yes shadow=no
+style indicator colour=accent shadow=no
+style textbox_panel border=line opacity_follows=yes shadow=no
+style textbox_phone size=20 align=centre align_vertically=centre background=button border=line pointed_background=pointed shadow=no
+style textbox_unread size=15 colour=field align=centre align_vertically=centre shadow=no)vnext";
 
 // The keys that open them.
 constexpr std::array<std::pair<std::string_view, std::string_view>, 3> kScreenControls{{
@@ -103,28 +132,23 @@ constexpr std::array<std::pair<std::string_view, std::string_view>, 3> kScreenCo
 
 constexpr std::string_view kSlotsScreen = R"vnext(screen NAME
     image backdrop x=0 y=0 width=1280 height=720
-    text "TITLE" x=60 y=32 width=600
+    text "TITLE" x=60 y=32 width=600 style=screen_title
     pages x=200 y=30 height=34 item_width=44 wide_tab_width=76 spacing=6 mode=MODE auto=Auto quick=Quick
     slots x=60 y=92 columns=3 item_width=360 item_height=262 spacing_across=40 spacing_down=16 mode=MODE title_style=slot_title text_style=slot_text empty_style=slot_empty confirm="Overwrite this save?" load_confirm="Load this save? Progress since your last save will be lost." delete_confirm="Delete this save?"
-    button "Back" x=1080 y=654 width=140 height=40 style=small_button action=close
-    key escape action=close)vnext";
+    button "Back" x=1080 y=654 width=140 height=40 style=small_button action=close keys=escape)vnext";
 
 constexpr std::string_view kHistoryScreen = R"vnext(screen history
     image backdrop x=0 y=0 width=1280 height=720
-    text "History" x=60 y=32 width=600
-    history x=60 y=92 width=1160 height=540 name_width=200 spacing=18 close_at_end=yes name_style=history_name text_style=history choice_style=history_choice button_style=history_button
-    button "Back" x=1080 y=654 width=140 height=40 style=small_button action=close
-    key escape action=close
-    key l action=close)vnext";
+    text "History" x=60 y=32 width=600 style=screen_title
+    history x=60 y=92 width=1160 height=540 name_width=200 spacing=18 close_at_end=yes scrollbar=yes name_style=history_name text_style=history choice_style=history_choice button_style=history_button
+    button "Back" x=1080 y=654 width=140 height=40 style=small_button action=close keys="escape l")vnext";
 
 constexpr std::string_view kConfirmScreen = R"vnext(screen confirm
     image shade x=0 y=0 width=1280 height=720
-    image panel x=310 y=210 width=660 height=300 border=accent
-    text "{question}" x=330 y=226 width=620 height=212 align=centre align_vertically=centre
-    button "Yes" x=660 y=454 width=140 height=40 style=small_button action=yes
-    button "No" x=810 y=454 width=140 height=40 style=small_button action=no
-    key return action=yes
-    key escape action=no)vnext";
+    image panel x=310 y=210 width=660 height=300 style=framed
+    text "{question}" x=330 y=226 width=620 height=212 style=centred
+    button "Yes" x=660 y=454 width=140 height=40 style=small_button action=yes keys=return
+    button "No" x=810 y=454 width=140 height=40 style=small_button action=no keys=escape)vnext";
 
 // The phone: at the side (the story goes on while it's open), above the textbox, made of containers like any
 // screen. Along its top its clock, signal and battery; in it its apps (each a container with app=: the home
@@ -132,177 +156,191 @@ constexpr std::string_view kConfirmScreen = R"vnext(screen confirm
 // message, call...; the call and lock screens), the image viewer over them, and a Back button: back from an
 // image, a chat, an app, then the phone itself.
 constexpr std::string_view kPhoneScreen = R"vnext(screen phone story=goes_on
-    image panel x=950 y=12 width=300 height=472 border=accent
-    container x=962 y=20 width=276 height=22
-        text "{phone_clock}" x=0 y=0 style=phone_status
-        text "No signal" x=104 y=0 width=126 style=phone_status align=right when="not phone_signal"
-        image "#f0f0f5" x=212 y=13 width=3 height=4 when=phone_signal
-        image "#f0f0f5" x=217 y=11 width=3 height=6 when=phone_signal
-        image "#f0f0f5" x=222 y=9 width=3 height=8 when=phone_signal
-        image "#f0f0f5" x=227 y=7 width=3 height=10 when=phone_signal
-        bar x=238 y=6 width=24 height=10 value=phone_battery full_at=100 track=#ffffff30 fill=#f0f0f5 when="phone_battery is more than 20"
-        bar x=238 y=6 width=24 height=10 value=phone_battery full_at=100 track=#ffffff30 fill=#eb5050 when="phone_battery is at most 20"
-        image "#f0f0f5" x=262 y=9 width=2 height=4
+    image panel x=950 y=12 width=300 height=472 style=framed
+    text "{phone_clock}" x=962 y=20 width=100 height=22 style=phone_status
+    text "No signal" x=1066 y=20 width=126 height=22 style=phone_status_right when="not phone_signal"
+    image text x=1174 y=33 width=3 height=4 when=phone_signal
+    image text x=1179 y=31 width=3 height=6 when=phone_signal
+    image text x=1184 y=29 width=3 height=8 when=phone_signal
+    image text x=1189 y=27 width=3 height=10 when=phone_signal
+    bar x=1200 y=26 width=24 height=10 value=phone_battery full_at=100 track=#ffffff30 fill=#f0f0f5 when="phone_battery is more than 20"
+    bar x=1200 y=26 width=24 height=10 value=phone_battery full_at=100 track=#ffffff30 fill=#ff8c96 when="phone_battery is at most 20"
+    image text x=1224 y=29 width=2 height=4
     image "{phone_wallpaper}" x=962 y=46 width=276 height=394 fit=cover when="phone_wallpaper and phone_app is 'home'"
     image "{phone_lock_wallpaper}" x=962 y=46 width=276 height=394 fit=cover when="phone_lock_wallpaper and phone_app is 'lock'"
-    container x=962 y=46 width=276 height=394
-        container app=home x=0 y=0 width=276 height=394
-            container list=apps x=8 y=10 width=260 height=376 columns=3 item_height=96 spacing=10 scroll=yes
-                button "{app.initial}" x=11 y=4 width=58 height=58 style=phone_icon action="open app {app.name}"
-                image "{app.icon}" x=11 y=4 width=58 height=58 fit=cover when=app.icon
-                text "{app.title}" x=0 y=66 width=80 style=phone_label align=centre lines=1
-                container x=56 y=0 width=22 height=18 style=phone_unread when=app.count
-                    text "{app.count}" x=0 y=0 width=22 height=18 style=phone_unread
-        container app=chats title="Chats" x=0 y=0 width=276 height=394
-            text "Chats" x=4 y=0 width=268 style=phone_title when="not open_chat"
-            text "{open_chat}" x=4 y=0 width=268 style=phone_title when=open_chat
-            text "No chats" x=0 y=190 width=276 style=phone_preview align=centre when="not open_chat and chats_total is 0"
-            text "No messages" x=0 y=190 width=276 style=phone_preview align=centre when="open_chat and open_chat_messages is 0"
-            container list=chats x=0 y=34 width=276 height=360 item_height=58 spacing=6 scroll=yes when="not open_chat"
-                button x=0 y=0 width=276 height=58 style=phone_card action="open chat {chat.name}" chosen=chat.open
-                image "{chat.avatar}" x=10 y=12 width=34 height=34 fit=cover when=chat.avatar
-                image "{chat.colour}" x=10 y=12 width=34 height=34 when="not chat.avatar"
-                text "{chat.initial}" x=10 y=12 width=34 height=34 style=phone_initial when="not chat.avatar"
-                text "{colour chat.colour}{chat.name}{/colour}" x=54 y=9 width=150 style=phone_name lines=1
-                text "{chat.time}" x=204 y=11 width=62 style=phone_time align=right
-                text "{chat.text}" x=54 y=31 width=180 style=phone_preview lines=1
-                container x=240 y=32 width=26 height=18 style=phone_unread when=chat.unread
-                    text "{chat.unread}" x=0 y=0 width=26 height=18 style=phone_unread
-            container x=0 y=34 width=276 height=360 stack=down spacing=8 position=bottom scroll=yes when=open_chat
-                container list=messages x=0 width=276 fit=parts stack=down spacing=8
-                    text "{message.day}" x=0 width=276 style=phone_time align=centre when=message.day
-                    text "Chat ended" x=0 width=276 style=phone_time align=centre when=message.ended
-                    container x=0 fit=parts stack=across spacing=6 when="not message.mine and not message.ended"
-                        container width=28 height=28
-                            image "{message.avatar}" x=0 y=0 width=28 height=28 fit=cover when=message.avatar
-                            image "{message.colour}" x=0 y=0 width=28 height=28 when="not message.avatar"
-                            text "{message.initial}" x=0 y=0 width=28 height=28 style=phone_initial when="not message.avatar"
-                        container fit=parts stack=down style=phone_text when="not message.sticker"
-                            text "{message.text}" width_at_most=196 style=phone_text when=message.text
-                            text "{italic}Message deleted{/italic}" style=phone_text when=message.deleted
-                            container width=160 height=120 when=message.image
-                                image "{message.image}" x=0 y=0 width=160 height=120 fit=cover
-                                button x=0 y=0 width=160 height=120 style=phone_photo action="open image {message.image}"
-                            button "Play the voice message" width=196 height=34 style=phone_small_button action="sound {message.sound}" when=message.sound
-                        image "{message.image}" width=96 height=96 fit=contain when=message.sticker
-                    container x=right fit=parts stack=down style=phone_mine when="message.mine and not message.sticker"
-                        text "{message.text}" width_at_most=196 style=phone_mine when=message.text
-                        text "{italic}Message deleted{/italic}" style=phone_mine when=message.deleted
+    container app=home x=962 y=46 width=276 height=394
+        container list=apps x=8 y=10 width=260 height=376 columns=3 item_height=96 spacing=10 scroll=yes
+            button "{app.initial}" x=11 y=4 width=58 height=58 style=phone_icon action="open app {app.name}"
+            image "{app.icon}" x=11 y=4 width=58 height=58 fit=cover when=app.icon
+            text "{app.title}" x=0 y=76 width=80 style=phone_label_centre lines=1
+            container x=56 y=0 width=22 height=18 style=phone_unread when=app.count
+                text "{app.count}" x=0 y=0 width=22 height=18 style=phone_unread
+    container app=chats title="Chats" x=962 y=46 width=276 height=394
+        text "Chats" x=4 y=0 width=268 style=phone_title when="not open_chat"
+        text "{open_chat}" x=4 y=0 width=268 style=phone_title when=open_chat
+        text "No chats" x=0 y=190 width=276 style=phone_preview_centre when="not open_chat and chats_total is 0"
+        text "No messages" x=0 y=190 width=276 style=phone_preview_centre when="open_chat and open_chat_messages is 0"
+        container list=chats x=0 y=34 width=276 height=360 item_height=58 spacing=6 scroll=yes when="not open_chat"
+            button x=0 y=0 width=276 height=58 style=phone_card action="open chat {chat.name}" chosen=chat.open
+            image "{chat.avatar}" x=10 y=12 width=34 height=34 fit=cover when=chat.avatar
+            image "{chat.colour}" x=10 y=12 width=34 height=34 when="not chat.avatar"
+            text "{chat.initial}" x=10 y=12 width=34 height=34 style=phone_initial when="not chat.avatar"
+            text "{colour chat.colour}{chat.name}{/colour}" x=54 y=9 width=150 style=phone_name lines=1
+            text "{chat.time}" x=204 y=11 width=62 style=phone_time_right
+            text "{chat.text}" x=54 y=31 width=180 style=phone_preview lines=1
+            container x=240 y=32 width=26 height=18 style=phone_unread when=chat.unread
+                text "{chat.unread}" x=0 y=0 width=26 height=18 style=phone_unread
+        container x=0 y=34 width=276 height=360 stack=down spacing=8 position=bottom scroll=yes when=open_chat
+            container list=messages x=0 width=276 fit=parts stack=down spacing=8
+                text "{message.day}" x=0 width=276 style=phone_time_centre when=message.day
+                text "Chat ended" x=0 width=276 style=phone_time_centre when=message.ended
+                container x=0 fit=parts stack=across spacing=6 when="not message.mine and not message.ended"
+                    container width=28 height=28
+                        image "{message.avatar}" x=0 y=0 width=28 height=28 fit=cover when=message.avatar
+                        image "{message.colour}" x=0 y=0 width=28 height=28 when="not message.avatar"
+                        text "{message.initial}" x=0 y=0 width=28 height=28 style=phone_initial when="not message.avatar"
+                    container fit=parts stack=down style=phone_text when="not message.sticker"
+                        text "{message.text}" width_at_most=196 style=phone_text when=message.text
+                        text "{italic}Message deleted{/italic}" style=phone_text when=message.deleted
                         container width=160 height=120 when=message.image
                             image "{message.image}" x=0 y=0 width=160 height=120 fit=cover
                             button x=0 y=0 width=160 height=120 style=phone_photo action="open image {message.image}"
                         button "Play the voice message" width=196 height=34 style=phone_small_button action="sound {message.sound}" when=message.sound
-                    image "{message.image}" x=right width=96 height=96 fit=contain when="message.mine and message.sticker"
-                    container x=34 fit=parts style=phone_reaction when="message.reaction and not message.mine"
-                        text "{message.reaction}" style=phone_reaction
-                    container x=right fit=parts style=phone_reaction when="message.reaction and message.mine"
-                        text "{message.reaction}" style=phone_reaction
-                    text "Edited" x=34 style=phone_time when="message.edited and not message.mine"
-                    text "Edited" x=right style=phone_time when="message.edited and message.mine"
-                    text "Seen" x=right style=phone_time when=message.seen
-                bar x=right width=196 height=4 value=time_left full_at=100 track=#ffffff28 fill=tip when=time_left
-                container list=options x=right width=196 fit=parts spacing=6
-                    button "{option.text}" x=0 y=0 width=196 height=34 style=phone_small_button action=send clickable=option.on
-        container app=calls title="Calls" x=0 y=0 width=276 height=394
-            text "Calls" x=4 y=0 width=268 style=phone_title
-            text "No calls" x=0 y=190 width=276 style=phone_preview align=centre when="calls_total is 0"
-            container list=calls x=0 y=34 width=276 height=360 item_height=52 spacing=6 scroll=yes
-                button x=0 y=0 width=276 height=52 style=phone_card action="phone call {call.who}"
-                image "{call.avatar}" x=10 y=11 width=30 height=30 fit=cover when=call.avatar
-                image "{call.colour}" x=10 y=11 width=30 height=30 when="not call.avatar"
-                text "{call.initial}" x=10 y=11 width=30 height=30 style=phone_initial when="not call.avatar"
-                text "{colour call.colour}{call.who}{/colour}" x=50 y=6 width=150 style=phone_name lines=1 when="not call.missed"
-                text "{call.who}" x=50 y=6 width=150 style=phone_missed lines=1 when=call.missed
-                text "Incoming {call.time}" x=50 y=27 width=150 style=phone_preview lines=1 when=call.incoming
-                text "Outgoing {call.time}" x=50 y=27 width=150 style=phone_preview lines=1 when=call.outgoing
-                text "Missed {call.time}" x=50 y=27 width=150 style=phone_preview lines=1 when=call.missed
-                text "Busy {call.time}" x=50 y=27 width=150 style=phone_preview lines=1 when=call.busy
-                text "{call.length}" x=200 y=16 width=66 style=phone_preview align=right
-        container app=people title="People" x=0 y=0 width=276 height=394
-            text "People" x=4 y=0 width=268 style=phone_title
-            text "No people" x=0 y=190 width=276 style=phone_preview align=centre when="people_total is 0"
-            container list=people x=0 y=34 width=276 height=360 item_height=66 spacing=6 scroll=yes
-                container x=0 y=0 width=276 height=66 style=phone_card
-                image "{person.avatar}" x=10 y=14 width=38 height=38 fit=cover when=person.avatar
-                image "{person.colour}" x=10 y=14 width=38 height=38 when="not person.avatar"
-                text "{person.initial}" x=10 y=14 width=38 height=38 style=phone_initial when="not person.avatar"
-                container x=58 y=centre width=128 fit=parts stack=down
-                    text "{colour person.colour}{person.name}{/colour}" width=128 style=phone_name lines=1
-                    text "{person.about}" width=128 style=phone_preview lines=1 when=person.about
-                button "Chat" x=192 y=6 width=74 height=26 style=phone_small_button action="open chat {person.name}"
-                button "Call" x=192 y=34 width=74 height=26 style=phone_small_button action="phone call {person.name}"
-        container app=settings title="Settings" x=0 y=0 width=276 height=394
-            text "Settings" x=4 y=0 width=268 style=phone_title
-            text "Owner" x=10 y=44 width=256 style=phone_label
-            input variable=phone_owner x=10 y=64 width=256 height=38 most_letters=20 style=phone_text
-            text "Passcode" x=10 y=114 width=256 style=phone_label
-            input variable=phone_passcode x=10 y=134 width=256 height=38 most_letters=6 style=phone_text
-            text "Home screen wallpaper" x=10 y=184 width=256 style=phone_label
-            button "None" x=10 y=204 width=60 height=34 style=phone_small_button action="set phone_wallpaper to ''" chosen="not phone_wallpaper"
-            button "Night" x=75 y=204 width=60 height=34 style=phone_small_button action="set phone_wallpaper to '#1b2140'" chosen="phone_wallpaper is '#1b2140'"
-            button "Dusk" x=140 y=204 width=60 height=34 style=phone_small_button action="set phone_wallpaper to '#4a2c4f'" chosen="phone_wallpaper is '#4a2c4f'"
-            button "Sea" x=205 y=204 width=61 height=34 style=phone_small_button action="set phone_wallpaper to '#1f4f5f'" chosen="phone_wallpaper is '#1f4f5f'"
-            text "Lock screen wallpaper" x=10 y=250 width=256 style=phone_label
-            button "None" x=10 y=270 width=60 height=34 style=phone_small_button action="set phone_lock_wallpaper to ''" chosen="not phone_lock_wallpaper"
-            button "Night" x=75 y=270 width=60 height=34 style=phone_small_button action="set phone_lock_wallpaper to '#1b2140'" chosen="phone_lock_wallpaper is '#1b2140'"
-            button "Dusk" x=140 y=270 width=60 height=34 style=phone_small_button action="set phone_lock_wallpaper to '#4a2c4f'" chosen="phone_lock_wallpaper is '#4a2c4f'"
-            button "Sea" x=205 y=270 width=61 height=34 style=phone_small_button action="set phone_lock_wallpaper to '#1f4f5f'" chosen="phone_lock_wallpaper is '#1f4f5f'"
-        container app=call x=0 y=0 width=276 height=394
-            image "{caller_avatar}" x=83 y=40 width=110 height=110 fit=cover when=caller_avatar
-            image "{caller_colour}" x=83 y=40 width=110 height=110 when="not caller_avatar"
-            text "{caller_initial}" x=83 y=40 width=110 height=110 style=phone_caller_initial when="not caller_avatar"
-            text "{caller}" x=0 y=164 width=276 style=phone_caller align=centre
-            text "Incoming call" x=0 y=198 width=276 style=phone_preview align=centre when=call_incoming
-            text "Calling..." x=0 y=198 width=276 style=phone_preview align=centre when=call_outgoing
-            text "Busy" x=0 y=198 width=276 style=phone_preview align=centre when=call_busy
-            text "{call_time}" x=0 y=198 width=276 style=phone_preview align=centre when=call_time
-            button "Decline" x=17 y=322 width=112 height=44 style=phone_decline action="decline call" when=call_incoming
-            button "Answer" x=147 y=322 width=112 height=44 style=phone_answer action="answer call" when=call_incoming
-            container list=options x=17 y=226 width=242 height=88 item_height=34 spacing=6 scroll=yes when=call_choice
-                button "{option.text}" x=0 y=0 width=242 height=34 style=phone_small_button action=send clickable=option.on
-            button "Hang up" x=82 y=322 width=112 height=44 style=phone_decline action="hang up" when=call_choice
-        container app=lock x=0 y=0 width=276 height=394
-            button x=0 y=0 width=276 height=394 style=phone_photo action=unlock when="not phone_needs_code"
-            text "{phone_owner}" x=0 y=4 width=276 style=phone_label align=centre lines=1 when=phone_owner
-            text "{phone_clock}" x=0 y=24 width=276 style=phone_clock align=centre
-            text "{phone_date}" x=0 y=86 width=276 style=phone_label align=centre when=phone_date
-            container list=notices x=10 y=118 width=256 height=210 spacing=6 when="not phone_needs_code"
-                button "{notice.who}: {notice.text}" x=0 y=0 width=256 height=34 style=phone_notice action="unlock; open chat {notice.chat}" when="not notice.call"
-                button "Missed call from {notice.who}" x=0 y=0 width=256 height=34 style=phone_notice action="unlock; open app calls" when=notice.call
-            text "Click to unlock" x=0 y=356 width=276 style=phone_label align=centre when="not phone_needs_code"
-            text "{phone_code}" x=0 y=118 width=276 style=phone_title align=centre when=phone_needs_code
-            text "Wrong code" x=0 y=150 width=276 style=phone_label align=centre when="phone_needs_code and phone_wrong"
-            button "1" x=32 y=178 width=64 height=44 style=phone_small_button action="keypad 1" when=phone_needs_code
-            button "2" x=106 y=178 width=64 height=44 style=phone_small_button action="keypad 2" when=phone_needs_code
-            button "3" x=180 y=178 width=64 height=44 style=phone_small_button action="keypad 3" when=phone_needs_code
-            button "4" x=32 y=230 width=64 height=44 style=phone_small_button action="keypad 4" when=phone_needs_code
-            button "5" x=106 y=230 width=64 height=44 style=phone_small_button action="keypad 5" when=phone_needs_code
-            button "6" x=180 y=230 width=64 height=44 style=phone_small_button action="keypad 6" when=phone_needs_code
-            button "7" x=32 y=282 width=64 height=44 style=phone_small_button action="keypad 7" when=phone_needs_code
-            button "8" x=106 y=282 width=64 height=44 style=phone_small_button action="keypad 8" when=phone_needs_code
-            button "9" x=180 y=282 width=64 height=44 style=phone_small_button action="keypad 9" when=phone_needs_code
-            button "0" x=106 y=334 width=64 height=44 style=phone_small_button action="keypad 0" when=phone_needs_code
-            button "<" x=180 y=334 width=64 height=44 style=phone_small_button action="keypad back" when=phone_needs_code
-        container x=0 y=0 width=276 height=394 style=phone_viewer when=open_image
-            image "{open_image}" x=4 y=4 width=268 height=340 fit=contain
-            text "{open_image_text}" x=4 y=350 width=268 style=phone_preview align=centre lines=2
-            button x=0 y=0 width=276 height=394 style=phone_photo action=back
-    button "Back" x=1104 y=446 width=134 height=30 style=small_button action=back when="not in_call and not in_chat"
-    key escape action=back
-    key pad_b action=back)vnext";
+                    image "{message.image}" width=96 height=96 fit=contain when=message.sticker
+                container x=right fit=parts stack=down style=phone_mine when="message.mine and not message.sticker"
+                    text "{message.text}" width_at_most=196 style=phone_mine when=message.text
+                    text "{italic}Message deleted{/italic}" style=phone_mine when=message.deleted
+                    container width=160 height=120 when=message.image
+                        image "{message.image}" x=0 y=0 width=160 height=120 fit=cover
+                        button x=0 y=0 width=160 height=120 style=phone_photo action="open image {message.image}"
+                    button "Play the voice message" width=196 height=34 style=phone_small_button action="sound {message.sound}" when=message.sound
+                image "{message.image}" x=right width=96 height=96 fit=contain when="message.mine and message.sticker"
+                container x=34 fit=parts style=phone_reaction when="message.reaction and not message.mine"
+                    text "{message.reaction}" style=phone_reaction
+                container x=right fit=parts style=phone_reaction when="message.reaction and message.mine"
+                    text "{message.reaction}" style=phone_reaction
+                text "Edited" x=34 style=phone_time when="message.edited and not message.mine"
+                text "Edited" x=right style=phone_time when="message.edited and message.mine"
+                text "Seen" x=right style=phone_time when=message.seen
+            bar x=right width=196 height=4 value=time_left full_at=100 track=#ffffff28 fill=accent when=time_left
+            container list=options x=right width=196 fit=parts spacing=6
+                button "{option.text}" x=0 y=0 width=196 height=34 style=phone_small_button action=send clickable=option.on
+    container app=calls title="Calls" x=962 y=46 width=276 height=394
+        text "Calls" x=4 y=0 width=268 style=phone_title
+        text "No calls" x=0 y=190 width=276 style=phone_preview_centre when="calls_total is 0"
+        container list=calls x=0 y=34 width=276 height=360 item_height=52 spacing=6 scroll=yes
+            button x=0 y=0 width=276 height=52 style=phone_card action="phone call {call.who}"
+            image "{call.avatar}" x=10 y=11 width=30 height=30 fit=cover when=call.avatar
+            image "{call.colour}" x=10 y=11 width=30 height=30 when="not call.avatar"
+            text "{call.initial}" x=10 y=11 width=30 height=30 style=phone_initial when="not call.avatar"
+            text "{colour call.colour}{call.who}{/colour}" x=50 y=6 width=150 style=phone_name lines=1 when="not call.missed"
+            text "{call.who}" x=50 y=6 width=150 style=phone_missed lines=1 when=call.missed
+            text "Incoming {call.time}" x=50 y=27 width=150 style=phone_preview lines=1 when=call.incoming
+            text "Outgoing {call.time}" x=50 y=27 width=150 style=phone_preview lines=1 when=call.outgoing
+            text "Missed {call.time}" x=50 y=27 width=150 style=phone_preview lines=1 when=call.missed
+            text "Busy {call.time}" x=50 y=27 width=150 style=phone_preview lines=1 when=call.busy
+            text "{call.length}" x=200 y=16 width=66 style=phone_preview_right
+    container app=people title="People" x=962 y=46 width=276 height=394
+        text "People" x=4 y=0 width=268 style=phone_title
+        text "No people" x=0 y=190 width=276 style=phone_preview_centre when="people_total is 0"
+        container list=people x=0 y=34 width=276 height=360 item_height=66 spacing=6 scroll=yes
+            container x=0 y=0 width=276 height=66 style=phone_card
+            image "{person.avatar}" x=10 y=14 width=38 height=38 fit=cover when=person.avatar
+            image "{person.colour}" x=10 y=14 width=38 height=38 when="not person.avatar"
+            text "{person.initial}" x=10 y=14 width=38 height=38 style=phone_initial when="not person.avatar"
+            container x=58 y=centre width=128 fit=parts stack=down
+                text "{colour person.colour}{person.name}{/colour}" width=128 style=phone_name lines=1
+                text "{person.about}" width=128 style=phone_preview lines=1 when=person.about
+            button "Chat" x=192 y=6 width=74 height=26 style=phone_small_button action="open chat {person.name}"
+            button "Call" x=192 y=34 width=74 height=26 style=phone_small_button action="phone call {person.name}"
+    container app=settings title="Settings" x=962 y=46 width=276 height=394
+        text "Settings" x=4 y=0 width=268 style=phone_title
+        text "Owner" x=10 y=44 width=256 style=phone_label
+        input variable=phone_owner x=10 y=64 width=256 height=38 most_letters=20 style=phone_input
+        text "Passcode" x=10 y=114 width=256 style=phone_label
+        input variable=phone_passcode x=10 y=134 width=256 height=38 most_letters=6 style=phone_input
+        text "Home screen wallpaper" x=10 y=184 width=256 style=phone_label
+        button "None" x=10 y=204 width=60 height=34 style=phone_small_button action="set phone_wallpaper to ''" chosen="not phone_wallpaper"
+        button "Night" x=75 y=204 width=60 height=34 style=phone_small_button action="set phone_wallpaper to '#1b2140'" chosen="phone_wallpaper is '#1b2140'"
+        button "Dusk" x=140 y=204 width=60 height=34 style=phone_small_button action="set phone_wallpaper to '#4a2c4f'" chosen="phone_wallpaper is '#4a2c4f'"
+        button "Sea" x=205 y=204 width=61 height=34 style=phone_small_button action="set phone_wallpaper to '#1f4f5f'" chosen="phone_wallpaper is '#1f4f5f'"
+        text "Lock screen wallpaper" x=10 y=250 width=256 style=phone_label
+        button "None" x=10 y=270 width=60 height=34 style=phone_small_button action="set phone_lock_wallpaper to ''" chosen="not phone_lock_wallpaper"
+        button "Night" x=75 y=270 width=60 height=34 style=phone_small_button action="set phone_lock_wallpaper to '#1b2140'" chosen="phone_lock_wallpaper is '#1b2140'"
+        button "Dusk" x=140 y=270 width=60 height=34 style=phone_small_button action="set phone_lock_wallpaper to '#4a2c4f'" chosen="phone_lock_wallpaper is '#4a2c4f'"
+        button "Sea" x=205 y=270 width=61 height=34 style=phone_small_button action="set phone_lock_wallpaper to '#1f4f5f'" chosen="phone_lock_wallpaper is '#1f4f5f'"
+    container app=call x=962 y=46 width=276 height=394
+        image "{caller_avatar}" x=83 y=40 width=110 height=110 fit=cover when=caller_avatar
+        image "{caller_colour}" x=83 y=40 width=110 height=110 when="not caller_avatar"
+        text "{caller_initial}" x=83 y=40 width=110 height=110 style=phone_caller_initial when="not caller_avatar"
+        text "{caller}" x=0 y=164 width=276 style=phone_caller
+        text "Incoming call" x=0 y=198 width=276 style=phone_preview_centre when=call_incoming
+        text "Calling..." x=0 y=198 width=276 style=phone_preview_centre when=call_outgoing
+        text "Busy" x=0 y=198 width=276 style=phone_preview_centre when=call_busy
+        text "{call_time}" x=0 y=198 width=276 style=phone_preview_centre when=call_time
+        button "Decline" x=17 y=322 width=112 height=44 style=phone_decline action="decline call" when=call_incoming
+        button "Answer" x=147 y=322 width=112 height=44 style=phone_answer action="answer call" when=call_incoming
+        container list=options x=17 y=226 width=242 height=88 item_height=34 spacing=6 scroll=yes when=call_choice
+            button "{option.text}" x=0 y=0 width=242 height=34 style=phone_small_button action=send clickable=option.on
+        button "Hang up" x=82 y=322 width=112 height=44 style=phone_decline action="hang up" when=call_choice
+    container app=lock x=962 y=46 width=276 height=394
+        button x=0 y=0 width=276 height=394 style=phone_photo action=unlock when="not phone_needs_code"
+        text "{phone_owner}" x=0 y=4 width=276 style=phone_label_centre lines=1 when=phone_owner
+        text "{phone_clock}" x=0 y=24 width=276 style=phone_clock
+        text "{phone_date}" x=0 y=86 width=276 style=phone_label_centre when=phone_date
+        container list=notices x=10 y=118 width=256 height=210 spacing=6 when="not phone_needs_code"
+            button "{notice.who}: {notice.text}" x=0 y=0 width=256 height=34 style=phone_notice action="unlock; open chat {notice.chat}" when="not notice.call"
+            button "Missed call from {notice.who}" x=0 y=0 width=256 height=34 style=phone_notice action="unlock; open app calls" when=notice.call
+        text "Click to unlock" x=0 y=356 width=276 style=phone_label_centre when="not phone_needs_code"
+        text "{phone_code}" x=0 y=118 width=276 style=phone_title_centre when=phone_needs_code
+        text "Wrong code" x=0 y=150 width=276 style=phone_label_centre when="phone_needs_code and phone_wrong"
+        button "1" x=32 y=178 width=64 height=44 style=phone_small_button action="keypad 1" when=phone_needs_code
+        button "2" x=106 y=178 width=64 height=44 style=phone_small_button action="keypad 2" when=phone_needs_code
+        button "3" x=180 y=178 width=64 height=44 style=phone_small_button action="keypad 3" when=phone_needs_code
+        button "4" x=32 y=230 width=64 height=44 style=phone_small_button action="keypad 4" when=phone_needs_code
+        button "5" x=106 y=230 width=64 height=44 style=phone_small_button action="keypad 5" when=phone_needs_code
+        button "6" x=180 y=230 width=64 height=44 style=phone_small_button action="keypad 6" when=phone_needs_code
+        button "7" x=32 y=282 width=64 height=44 style=phone_small_button action="keypad 7" when=phone_needs_code
+        button "8" x=106 y=282 width=64 height=44 style=phone_small_button action="keypad 8" when=phone_needs_code
+        button "9" x=180 y=282 width=64 height=44 style=phone_small_button action="keypad 9" when=phone_needs_code
+        button "0" x=106 y=334 width=64 height=44 style=phone_small_button action="keypad 0" when=phone_needs_code
+        button "<" x=180 y=334 width=64 height=44 style=phone_small_button action="keypad back" when=phone_needs_code
+    container x=962 y=46 width=276 height=394 style=phone_viewer when=open_image
+        image "{open_image}" x=4 y=4 width=268 height=340 fit=contain
+        text "{open_image_text}" x=4 y=350 width=268 style=phone_preview_centre lines=2
+        button x=0 y=0 width=276 height=394 style=phone_photo action=back
+    button "Back" x=1104 y=446 width=134 height=30 style=small_button action=back keys="escape pad_b" when="not in_call and not in_chat")vnext";
+
+// The calendar: as each new day starts (setting time), the date and the time on a card, until a click (on the shade,
+// a button) or a key, or a moment has gone by.
+constexpr std::string_view kCalendarScreen = R"vnext(screen calendar close_after=2.5
+    button x=0 y=0 width=1280 height=720 style=shaded action=close keys="space return escape"
+    container x=340 y=260 width=600 height=200 style=card
+        text "{time_date}" x=0 y=30 width=600 height=80 style=calendar
+        text "{time_clock}" x=0 y=120 width=600 style=calendar_time)vnext";
+
+// Input: a question, a box the player types the answer into (it goes in the variable its variable= names), and OK
+// (Enter in the box too). The story opens it (open input) and waits until it's closed.
+constexpr std::string_view kInputScreen = R"vnext(screen input
+    image shade x=0 y=0 width=1280 height=720
+    image panel x=340 y=220 width=600 height=280 style=framed
+    text "What's your name?" x=360 y=250 width=560 style=centred
+    input x=440 y=320 width=400 height=56 variable=name most_letters=24 style=input action=close
+    button "OK" x=570 y=420 width=140 height=44 style=small_button action=close)vnext";
 
 constexpr std::string_view kCreditsScreen = R"vnext(screen credits
     image backdrop x=0 y=0 width=1280 height=720
-    text "Credits" x=60 y=32 width=600
-    text "Written by you" x=0 y=330 width=1280 align=centre
-    button "Back" x=1080 y=654 width=140 height=40 style=small_button action=close
-    key escape action=close)vnext";
+    text "Credits" x=60 y=32 width=600 style=screen_title
+    text "Written by you" x=0 y=330 width=1280 style=centred
+    button "Back" x=1080 y=654 width=140 height=40 style=small_button action=close keys=escape)vnext";
 
 // The Settings screen, in two columns: a heading over each group and a row for each setting (a
 // container with its name, and buttons or a slider that change it), without the ones for what the
 // game doesn't use (`uses`: made-up voices without made_up_voice=, typing sounds without typing_sound=...; `phone`:
-// vibration without a phone).
-std::vector<std::string> settingsScreen(const std::function<bool(std::string_view)>& uses, bool phone) {
+// vibration without a phone); then Keys, a row for each of `controls` with its key to change (click it, then
+// press the new one), at the end of the shorter column. Longer than the room down to the buttons at the
+// bottom, the groups scroll under the title.
+std::vector<std::string> settingsScreen(const std::function<bool(std::string_view)>& uses, bool phone, std::span<const std::string> controls) {
     struct Row {
         std::string_view label, setting, choices; // "Label:value|..." for buttons, "slider", or "arrows" (bigger/smaller, next/previous)
         bool shown = true;
@@ -322,34 +360,44 @@ std::vector<std::string> settingsScreen(const std::function<bool(std::string_vie
         {{"Sound",
           {{"Master volume", "master_volume", "slider"}, {"Music volume", "music_volume", "slider"}, {"Sound volume", "sound_volume", "slider"},
            {"Voice volume", "voice_volume", "slider", uses("voice") || uses("made_up_voice=")}, {"Made-up voices", "made_up_voices", onOff, uses("made_up_voice=")},
-           {"Typing sounds", "typing_sounds", onOff, uses("typing_sound=")}, {"Mouths move", "mouths", "Always:always|With a voice:voice|Never:never", uses("mouth")},
+           {"Typing sounds", "typing_sounds", onOff, uses("typing_sound=")}, {"Mouths move", "mouths", "Always:yes|With a voice:voice|Never:no", uses("mouth")},
            {"Vibration", "vibration", onOff, phone}}},
          {"Skip",
           {{"Skip", "skip_unread", "Read text:no|All text:yes"}, {"After choices", "skip_after_choices", "Stop skipping:no|Keep skipping:yes"},
            {"Skip movies", "skip_movies", onOff, uses("movie")}, {"Rollback", "rollback", onOff}}}},
     };
-    std::vector<std::string> lines{"screen settings", "    image backdrop x=0 y=0 width=1280 height=720", "    text \"Settings\" x=60 y=32 width=600"};
+    std::vector<std::string> lines{"screen settings", "    image backdrop x=0 y=0 width=1280 height=720", "    text \"Settings\" x=60 y=32 width=600 style=screen_title"};
     constexpr int labelW = 180, controlX = 190, controlW = 342, rowH = 32;
+    const std::size_t first = lines.size(); // (the groups' lines, from here)
+    int ends[2]{};                          // (where each column's groups end)
     for (int c = 0; c < 2; ++c) {
         const int x = c == 0 ? 60 : 680;
-        int y = 92;
+        int& y = ends[c] = 92;
         for (const Group& g : columns[c]) {
             lines.push_back(std::format("    text \"{}\" x={} y={} width={} style=heading", g.heading, x, y, controlX + controlW));
             y += 38;
             for (const Row& row : g.rows) {
                 if (!row.shown) continue;
-                lines.push_back(std::format("    container x={} y={} width={} height={}{}", x, y, controlX + controlW, rowH, row.more));
-                lines.push_back(std::format("        text \"{}\" x=0 y=0 width={} height={} style=label", row.label, labelW, rowH));
-                if (row.choices == "slider") {
-                    lines.push_back(std::format("        slider setting={} x={} y=0 width={} height={}", row.setting, controlX, controlW - 92, rowH));
-                    lines.push_back(std::format("        text \"{{{}}}\" x={} y=0 width=80 height={} style=setting_value", row.setting, controlX + controlW - 80, rowH));
+                // (its parts on the screen; a row shown only sometimes: in a container that says when)
+                const bool sometimes = !row.more.empty();
+                const int rx = sometimes ? 0 : x, ry = sometimes ? 0 : y;
+                const std::string_view in = sometimes ? "        " : "    ";
+                if (sometimes) lines.push_back(std::format("    container x={} y={} width={} height={}{}", x, y, controlX + controlW, rowH, row.more));
+                lines.push_back(std::format("{}text \"{}\" x={} y={} width={} height={} style=label", in, row.label, rx, ry, labelW, rowH));
+                if (row.choices == "slider") { // (its value after it, in its unit; the text speed's fastest, At once)
+                    lines.push_back(std::format("{}slider setting={} x={} y={} width={} height={}", in, row.setting, rx + controlX, ry, controlW - 92, rowH));
+                    const std::string_view unit = row.setting == "text_speed" || row.setting == "auto_delay" ? "" : "%";
+                    const std::string_view when = row.setting == "text_speed" ? " when=\"text_speed is not 0\"" : "";
+                    lines.push_back(std::format("{}text \"{{{}}}{}\" x={} y={} width=80 height={} style=setting_value{}", in, row.setting, unit, rx + controlX + controlW - 80, ry, rowH, when));
+                    if (row.setting == "text_speed")
+                        lines.push_back(std::format("{}text \"At once\" x={} y={} width=80 height={} style=setting_value when=\"text_speed is 0\"", in, rx + controlX + controlW - 80, ry, rowH));
                 } else if (row.choices == "arrows") {
                     const bool size = row.setting == "window_size";
                     const std::string_view down = size ? "smaller" : "previous", up = size ? "bigger" : "next";
                     const std::string_view enabled = size ? " clickable=\"not fullscreen\"" : "";
-                    lines.push_back(std::format("        button \"<\" x={} y=0 width=40 height={} style=setting action=\"setting {} {}\"{}", controlX, rowH, row.setting, down, enabled));
-                    lines.push_back(std::format("        text \"{{{}}}\" x={} y=0 width={} height={} style=setting_value align=centre", row.setting, controlX + 46, controlW - 92, rowH));
-                    lines.push_back(std::format("        button \">\" x={} y=0 width=40 height={} style=setting action=\"setting {} {}\"{}", controlX + controlW - 40, rowH, row.setting, up, enabled));
+                    lines.push_back(std::format("{}button \"<\" x={} y={} width=40 height={} style=setting action=\"setting {} {}\"{}", in, rx + controlX, ry, rowH, row.setting, down, enabled));
+                    lines.push_back(std::format("{}text \"{{{}}}\" x={} y={} width={} height={} style=setting_choice", in, row.setting, rx + controlX + 46, ry, controlW - 92, rowH));
+                    lines.push_back(std::format("{}button \">\" x={} y={} width=40 height={} style=setting action=\"setting {} {}\"{}", in, rx + controlX + controlW - 40, ry, rowH, row.setting, up, enabled));
                 } else {
                     std::vector<std::pair<std::string_view, std::string_view>> options; // (label, value)
                     for (auto&& one : std::views::split(row.choices, '|')) {
@@ -358,17 +406,44 @@ std::vector<std::string> settingsScreen(const std::function<bool(std::string_vie
                     }
                     const int n = static_cast<int>(options.size()), w = (controlW - 6 * (n - 1)) / n;
                     for (int i = 0; i < n; ++i)
-                        lines.push_back(std::format("        button \"{}\" x={} y=0 width={} height={} style=setting action=\"setting {} {}\"", options[static_cast<std::size_t>(i)].first,
-                                                    controlX + i * (w + 6), w, rowH, row.setting, options[static_cast<std::size_t>(i)].second));
+                        lines.push_back(std::format("{}button \"{}\" x={} y={} width={} height={} style=setting action=\"setting {} {}\"", in, options[static_cast<std::size_t>(i)].first,
+                                                    rx + controlX + i * (w + 6), ry, w, rowH, row.setting, options[static_cast<std::size_t>(i)].second));
                 }
                 y += 36;
             }
             y += 8;
         }
     }
+    if (!controls.empty()) {
+        const int c = ends[0] <= ends[1] ? 0 : 1, x = c == 0 ? 60 : 680;
+        int& y = ends[c];
+        lines.push_back(std::format("    text \"Keys\" x={} y={} width={} style=heading", x, y, controlX + controlW));
+        y += 38;
+        for (const std::string& control : controls) {
+            std::string label = control == "menu" ? std::string("Pause menu") : control; // (the pause menu's is menu; the rest as they're called)
+            std::ranges::replace(label, '_', ' ');
+            label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(label[0])));
+            lines.push_back(std::format("    text \"{}\" x={} y={} width={} height={} style=label", label, x, y, labelW, rowH));
+            lines.push_back(std::format("    control {} x={} y={} width={} height={} waiting=\"Press a key (Esc keeps it)\"", control, x + controlX, y, controlW, rowH));
+            y += 36;
+        }
+        y += 8;
+    }
+    constexpr int top = 92, bottom = 646; // (the room under the title, down to the buttons)
+    if (std::max(ends[0], ends[1]) - 12 > bottom) { // (a column's last row past it: the groups in a box that scrolls, its bar at the screen's edge)
+        for (std::size_t i = first; i < lines.size(); ++i) {
+            std::string& line = lines[i];
+            if (const auto at = line.find(" y="); indentOf(line) == 4 && at != npos) { // (a row of its own: from the box's top; one in a container stays)
+                const auto end = line.find(' ', at + 3);
+                line.replace(at + 3, end - at - 3, std::to_string(std::stoi(line.substr(at + 3, end - at - 3)) - top));
+            }
+            line.insert(0, "    ");
+        }
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(first), std::format("    container x=0 y={} width=1280 height={} scroll=yes scrollbar=yes", top, bottom - top));
+    }
     lines.insert(lines.end(), {"    button \"Reset to defaults\" x=860 y=654 width=200 height=40 style=small_button action=\"reset settings\" "
                                "confirm=\"Reset all settings to their defaults?\"",
-                               "    button \"Back\" x=1080 y=654 width=140 height=40 style=small_button action=close", "    key escape action=close"});
+                               "    button \"Back\" x=1080 y=654 width=140 height=40 style=small_button action=close keys=escape"});
     return lines;
 }
 
@@ -378,9 +453,10 @@ std::string replaced(std::string text, std::string_view from, std::string_view t
 }
 
 // A screen to start from, for a 1280 x 720 game, called `as`; `has`: the screens there will be (the
-// title's and the pause menu's buttons open those); `uses`: whether the scripts have these words.
+// title's and the pause menu's buttons open those); `uses`: whether the scripts have these words;
+// `controls`: the ones there will be (Settings has a key to change for each).
 std::vector<std::string> startScreen(std::string_view name, const std::string& as, const std::function<bool(std::string_view)>& has,
-                                     const std::function<bool(std::string_view)>& uses) {
+                                     const std::function<bool(std::string_view)>& uses, std::span<const std::string> controls) {
     struct Item {
         std::string_view label, action, more, needs;
     };
@@ -395,7 +471,7 @@ std::vector<std::string> startScreen(std::string_view name, const std::string& a
     };
     std::vector<std::string> lines;
     if (name == "title") {
-        lines = {"screen title", "    image backdrop x=0 y=0 width=1280 height=720", "    text \"{title}\" x=60 y=32 width=1160"};
+        lines = {"screen title", "    image backdrop x=0 y=0 width=1280 height=720", "    text \"{title}\" x=60 y=32 width=1160 style=title"};
         std::ranges::copy(buttons(180, 62, 52, {{"New game", "start", "", ""},
                                                 {"Continue", "continue", " clickable=has_save", ""},
                                                 {"Load", "\"open load\"", " clickable=has_save", "load"},
@@ -404,8 +480,8 @@ std::vector<std::string> startScreen(std::string_view name, const std::string& a
                                                 {"Quit", "quit", "", ""}}),
                           std::back_inserter(lines));
     } else if (name == "pause") {
-        lines = {"screen pause", "    image shade x=0 y=0 width=1280 height=720", "    text \"Paused\" x=60 y=32 width=600"};
-        std::ranges::copy(buttons(148, 62, 52, {{"Resume", "close", "", ""},
+        lines = {"screen pause", "    image shade x=0 y=0 width=1280 height=720", "    text \"Paused\" x=60 y=32 width=600 style=screen_title"};
+        std::ranges::copy(buttons(148, 62, 52, {{"Resume", "close", " keys=escape", ""},
                                                 {"Save", "\"open save\"", " clickable=can_save", "save"},
                                                 {"Load", "\"open load\"", " clickable=has_save", "load"},
                                                 {"History", "\"open history\"", "", "history"},
@@ -413,14 +489,13 @@ std::vector<std::string> startScreen(std::string_view name, const std::string& a
                                                 {"Main menu", "\"open title\"", "", "title"},
                                                 {"Quit", "quit", "", ""}}),
                           std::back_inserter(lines));
-        lines.emplace_back("    key escape action=close");
     } else if (name == "save" || name == "load") {
         const bool save = name == "save";
         std::string text = replaced(std::string(kSlotsScreen), "NAME", name);
         text = replaced(replaced(text, "TITLE", save ? "Save" : "Load"), "MODE", name);
         lines = linesOf(text);
     } else if (name == "settings") {
-        lines = settingsScreen(uses, has("phone"));
+        lines = settingsScreen(uses, has("phone"), controls);
     } else if (name == "history") {
         lines = linesOf(kHistoryScreen);
     } else if (name == "confirm") {
@@ -433,9 +508,12 @@ std::vector<std::string> startScreen(std::string_view name, const std::string& a
         }
     } else if (name == "credits") {
         lines = linesOf(kCreditsScreen);
+    } else if (name == "calendar") {
+        lines = linesOf(kCalendarScreen);
+    } else if (name == "input") {
+        lines = linesOf(kInputScreen);
     } else if (name == "phone") {
         lines = linesOf(kPhoneScreen);
-
     } else { // (an empty one: nothing in it)
         lines = {"screen " + as};
     }
@@ -445,14 +523,12 @@ std::vector<std::string> startScreen(std::string_view name, const std::string& a
 }
 
 // A built-in screen (say, choice) as the game's own: its lines as the game shows them, with the
-// look's colours by their names and its parts' look left to the look's styles for their kinds
-// (namebox, dialogue, indicator, choice: the ready-made screens' way; needsOf() brings those), for
-// the game's screens file. `phone`: whether the game has a phone screen (else the textbox's Phone
+// look's colours by their names (its parts' styles: the look's, which needsOf() brings), for the
+// game's screens file. `phone`: whether the game has a phone screen (else the textbox's Phone
 // button stays out: it would open nothing).
 std::vector<std::string> ownScreenLines(std::string_view name, float sy, bool phone) {
-    static constexpr std::pair<std::string_view, std::string_view> kNamed[]{{"#141626fa", "panel"}, {"#222644f5", "card_pointed"}, {"#ffffff2d", "line"}, {"#96aaff", "accent"},
-                                                                            {"#16192ae1", "button"}, {"#545caaf0", "pointed"}, {"#7fc8ff", "tip"}};
-    static constexpr std::string_view kStyled[]{"namebox", "dialogue", "indicator", "choices"};
+    static constexpr std::pair<std::string_view, std::string_view> kNamed[]{{"#141230fa", "panel"}, {"#5b51b8", "line"}, {"#ada2ff", "accent"},
+                                                                            {"#2b2563", "button"}, {"#3b3392", "pointed"}, {"#4d41c4", "chosen"}};
     std::vector<std::string> lines;
     bool in = false;
     for (std::string& line : linesOf(defaultUi())) {
@@ -461,15 +537,6 @@ std::vector<std::string> ownScreenLines(std::string_view name, float sy, bool ph
         std::string out = scaled(line, sy);
         for (const auto& [code, named] : kNamed)
             for (auto at = out.find(code); at != npos; at = out.find(code, at)) out.replace(at, code.size(), named);
-        if (indentOf(out) > 0 && std::ranges::contains(kStyled, lower(firstWord(out)))) { // (what its style says: left to it)
-            std::string kept = leading(out);
-            for (const std::string& word : rawWords(trim(out))) {
-                const auto eq = word.find('=');
-                if (eq != npos && std::ranges::contains(kStyleSlots, std::string_view(word).substr(0, eq), &Slot::key)) continue;
-                kept += (kept.empty() || kept.back() == ' ' ? "" : " ") + word;
-            }
-            out = kept;
-        }
         lines.push_back(std::move(out));
     }
     return lines;
@@ -487,7 +554,8 @@ std::vector<std::string> needsOf(const StoryEditor& editor, const std::vector<st
     for (const std::string& line : lines) {
         const std::string kind = lower(firstWord(line));
         for (const auto& [part, style] : {std::pair{"button", "button"}, {"slots", "slot"}, {"pages", "tab"}, {"history", "history"}, {"choices", "choice"},
-                                          {"namebox", "namebox"}, {"dialogue", "dialogue"}, {"indicator", "indicator"}, {"notice", "notice"}})
+                                          {"namebox", "namebox"}, {"dialogue", "dialogue"}, {"indicator", "indicator"}, {"endings", "record"},
+                                          {"songs", "record"}, {"achievements", "record"}, {"tips", "record"}, {"flowchart", "flowchart"}})
             if (kind == part) wanted.emplace_back(style);
         for (const std::string& word : rawWords(line))
             if (const auto eq = word.find('='); eq != std::string::npos && (word.substr(0, eq) == "style" || word.substr(0, eq).ends_with("_style")))
@@ -530,10 +598,10 @@ std::vector<std::string> needsOf(const StoryEditor& editor, const std::vector<st
 // Screens written in a game's pixels (x and y from the top left of the part they're in: a list's parts, of
 // their item's box; or left, centre and right, top and bottom for where its edges line up; w and h in pixels,
 // a container without a size as big as what's in it, unless it fits its parts), written in places and shares
-// instead: x and y from -1 to 1 in the box a part is in, w and h (and item_width, item_height, gap,
+// instead: x and y from -1 to 1 in the box a part is in, w and h (and item_width, item_height, spacing,
 // spacing_across, spacing_down, name_width, wide_tab_width, width_at_most) shares of it. They show in the same
 // places on a `width` x `height` screen.
-std::vector<std::string> dev::placesFromPixels(const std::vector<std::string>& lines, float width, float height) {
+std::vector<std::string> dev::placesFromPixels(const std::vector<std::string>& lines, float width, float height, const std::map<std::size_t, SDL_FPoint>& sizes) {
     struct Px {
         std::size_t line = 0;
         int indent = 0, parent = -1;
@@ -579,7 +647,9 @@ std::vector<std::string> dev::placesFromPixels(const std::vector<std::string>& l
         for (const auto& [name, place] : kDown)
             if (wordOf(words, "y") == name) p.placeY = place;
         const SDL_FRect box = p.parent >= 0 ? parts[static_cast<std::size_t>(p.parent)].in : screen;
-        p.at = {box.x + p.x.value_or(0.0f), box.y + p.y.value_or(0.0f), p.w.value_or(0.0f), p.h.value_or(0.0f)};
+        const auto own = sizes.find(i); // (one sized by what it shows: placed by that size, as the game will)
+        p.at = {box.x + p.x.value_or(0.0f), box.y + p.y.value_or(0.0f), p.w.value_or(own != sizes.end() ? own->second.x : 0.0f),
+                p.h.value_or(own != sizes.end() ? own->second.y : 0.0f)};
         p.in = p.at;
         if (p.kind == "container" && !wordOf(words, "list").empty()) { // (a list's parts: in its first item's box)
             const float columns = std::max(1.0f, number(words, "columns").value_or(1.0f));
@@ -636,13 +706,13 @@ std::vector<std::string> dev::placesFromPixels(const std::vector<std::string>& l
             const float wide = at >= 0 ? parts[static_cast<std::size_t>(at)].in.w : screen.w;
             put("width_at_most", unitText(*most / std::max(1.0f, wide)));
         }
-        for (const auto& [key, across] : {std::pair{"item_width", true}, {"spacing_across", true}, {"name_width", true}, {"wide_tab_width", true}, {"item_height", false}, {"spacing_down", false},
-                                          {"image_size", false}})
+        for (const auto& [key, across] : {std::pair{"item_width", true}, {"spacing_across", true}, {"name_width", true}, {"wide_tab_width", true}, {"item_height", false}, {"spacing_down", false}})
             if (const auto v = number(words, key)) put(key, unitText(*v / (across ? box.w : box.h)));
-        if (const auto gap = number(words, "spacing")) { // (the same gap across and down: a share of each)
-            if (!number(words, "spacing_across")) put("spacing_across", unitText(*gap / box.w));
-            if (!number(words, "spacing_down")) put("spacing_down", unitText(*gap / box.h));
-            put("spacing", std::nullopt);
+        if (const auto gap = number(words, "spacing")) { // (the same gap across and down: a share of each; a part whose items go one way, its one gap)
+            const bool across = partTakes(p.kind, "spacing_across"), down = partTakes(p.kind, "spacing_down");
+            if (across && !number(words, "spacing_across")) put("spacing_across", unitText(*gap / box.w));
+            if (down && !number(words, "spacing_down")) put("spacing_down", unitText(*gap / box.h));
+            put("spacing", across || down ? std::nullopt : std::optional(unitText(*gap / (p.kind == "pages" ? box.w : box.h)))); // (a row of tabs: across)
         }
         out[p.line] = leading(lines[p.line]) + joined(words);
     }
@@ -661,17 +731,16 @@ struct PartStart {
 };
 const PartStart kPartBasics[]{
     {"Container", "container x=310 y=210 width=660 height=300"},
-    {"Text", "text \"Text\" x=460 y=345 width=360 align=centre"},
+    {"Text", "text \"Text\" x=460 y=345 width=360"},
     {"Button", "button \"Button\" x=460 y=334 width=360 height=52"},
     {"Image", "image \"IMAGE\" x=0 y=0 width=1280 height=720 fit=cover"},
     {"Movie", "movie \"MOVIE\" x=0 y=0 width=1280 height=720 fit=cover"},
-    {"Key", "key escape action=close"},
 };
 const PartStart kPartValues[]{
-    {"Bar", "bar x=460 y=354 width=360 height=12 value=points full_at=10"},
+    {"Bar", "bar x=460 y=354 width=360 height=12 value=VARIABLE full_at=10"},
     {"Slider", "slider x=460 y=344 width=360 height=32 setting=master_volume"},
     {"Input", "input x=460 y=334 width=360 height=52 variable=name"},
-    {"Control", "control next_line x=460 y=344 width=360 height=32 waiting=\"Press a key...\""},
+    {"Control", "control next_line x=460 y=344 width=360 height=32 waiting=\"Press a key (Esc keeps it)\""},
 };
 const PartStart kPartTextbox[]{
     {"Namebox", "namebox x=64 y=470 height=46"},
@@ -679,19 +748,20 @@ const PartStart kPartTextbox[]{
     {"Indicator", "indicator x=1195 y=648 width=18 height=12"},
     {"Face", "face x=64 y=452 width=190 height=232"},
     {"Choices", "choices x=280 y=40 width=720 height=420 item_height=54 spacing=14"},
-    {"Notice", "notice x=680 y=40 width=560"},
 };
 const PartStart kPartLists[]{
     {"Pages", "pages x=200 y=30 height=34 item_width=44 wide_tab_width=76 spacing=6 auto=Auto quick=Quick"},
     {"Slots", "slots x=60 y=92 columns=3 item_width=360 item_height=262 spacing_across=40 spacing_down=16 confirm=\"Overwrite this save?\" load_confirm=\"Load this save? Progress since your last save will be lost.\" delete_confirm=\"Delete this save?\""},
-    {"History", "history x=60 y=92 width=1160 height=540 name_width=200 spacing=18"},
+    {"History", "history x=60 y=92 width=1160 height=540 name_width=200 spacing=18 scrollbar=yes"},
     {"Page", "page x=60 y=92 width=1160 height=560 name_width=200 spacing=18"},
-    {"Gallery", "gallery x=60 y=92 width=1160 height=560 columns=3 item_height=208 spacing=24"},
-    {"Endings", "endings x=60 y=92 width=1160 height=560 item_height=80 spacing=10 secret=???"},
-    {"Songs", "songs x=60 y=92 width=1160 height=560 item_height=60 spacing=10"},
-    {"Achievements", "achievements x=60 y=92 width=1160 height=560 item_height=80 spacing=10 secret=???"},
-    {"Tips", "tips x=60 y=92 width=1160 height=560 item_height=60 spacing=10"},
-    {"Flowchart", "flowchart x=60 y=92 width=1160 height=560 confirm=\"Go back to this point? Progress since your last save will be lost.\""},
+};
+const PartStart kPartExtras[]{
+    {"Gallery", "gallery x=60 y=92 width=1160 height=560 columns=3 item_height=208 spacing=24 locked_style=record_locked scrollbar=yes"},
+    {"Endings", "endings x=60 y=92 width=1160 height=560 item_height=80 spacing=10 secret=??? locked_style=record_locked scrollbar=yes"},
+    {"Songs", "songs x=60 y=92 width=1160 height=560 item_height=60 spacing=10 locked_style=record_locked scrollbar=yes"},
+    {"Achievements", "achievements x=60 y=92 width=1160 height=560 item_height=80 spacing=10 secret=??? locked_style=record_locked scrollbar=yes"},
+    {"Tips", "tips x=60 y=92 width=1160 height=560 item_height=60 spacing=10 locked_style=record_locked scrollbar=yes"},
+    {"Flowchart", "flowchart x=60 y=92 width=1160 height=560 unreached_style=flowchart_unreached ending_style=flowchart_ending choice_style=flowchart_choice scrollbar=yes confirm=\"Go back to this point? Progress since your last save will be lost.\""},
 };
 // (where the ready-made phone has them: its parts in its apps' place)
 const PartStart kPartPhone[]{
@@ -700,33 +770,33 @@ const PartStart kPartPhone[]{
 };
 // New part's groups, as the Story tab's New line has its lines.
 const std::pair<ToolsText, std::span<const PartStart>> kParts[]{
-    {"Basics", kPartBasics}, {"Values", kPartValues}, {"Textbox", kPartTextbox}, {"Lists", kPartLists}, {"Phone", kPartPhone}};
+    {"Basics", kPartBasics}, {"Values", kPartValues}, {"Textbox", kPartTextbox}, {"Lists", kPartLists}, {"Extras", kPartExtras}, {"Phone", kPartPhone}};
 
-// Each kind of part's own settings (and whether it's a list, with the settings of one).
+// Each kind of part's own settings, in the form's order (a list's items' size and spacing, its scrollbar
+// and how it glides come after them: the ones it takes, partTakes).
 struct PartKind {
     std::string_view kind, keys;
-    bool list = false;
 };
 
 constexpr PartKind kPartKinds[]{
-    {"container", "fit stack scroll scrollbar scrollbar_thickness glide glide_speed glide_distance edges fading_edges list position item_animation columns spacing item_width item_height spacing_across spacing_down app title icon count"},
-    {"text", "width_at_most lines"}, {"image", "bottom fit flip repeat scroll scroll_round"}, {"button", "action confirm click_animation key clickable drag drop"}, {"key", "action confirm"},
-    {"namebox", "bar bar_colour"}, {"indicator", "bob bob_speed pause_image"}, {"choices", "position locked_style picked_before_style", true},
-    {"history", "name_width close_at_end name_style text_style choice_style voice back button_style", true}, {"pages", "wide_tab_width mode auto quick", true},
-    {"slots", "mode delete confirm load_confirm delete_confirm title_style text_style empty_style", true},
-    {"face", "fit flip"}, {"control", "slot waiting"}, {"gallery", "action title_style locked_style", true}, {"page", "name_width name_style text_style", true},
+    {"container", "fit stack scroll scrollbar scrollbar_thickness glide glide_speed glide_distance edges fading_edges list position item_animation columns item_width item_height spacing spacing_across spacing_down app title icon count"},
+    {"text", "width_at_most lines"}, {"image", "bottom fit flip repeat scroll scroll_round"}, {"button", "action confirm click_animation keys clickable drag drop"},
+    {"namebox", "bar bar_colour"}, {"indicator", "bob bob_speed pause_image"}, {"choices", "position locked_style picked_before_style"},
+    {"history", "name_width close_at_end name_style text_style choice_style voice back button_style"}, {"pages", "wide_tab_width mode auto quick"},
+    {"slots", "mode delete confirm load_confirm delete_confirm title_style text_style empty_style"},
+    {"face", "fit flip"}, {"control", "slot waiting"}, {"gallery", "action title_style locked_style"}, {"page", "name_width name_style text_style"},
     {"input", "variable most_letters placeholder action confirm clickable"}, {"bar", "value full_at vertical track fill"},
     {"slider", "variable setting minimum maximum step clickable action track fill knob"}, {"movie", "fit loop volume"},
-    {"endings", "secret title_style text_style locked_style", true}, {"songs", "title_style text_style locked_style", true},
-    {"achievements", "secret title_style text_style locked_style", true}, {"tips", "action title_style locked_style unread_style", true},
-    {"flowchart", "confirm line chapter_style ending_style unreached_style choice_style", true},
+    {"endings", "secret title_style text_style locked_style"}, {"songs", "title_style text_style locked_style"},
+    {"achievements", "secret title_style text_style locked_style"}, {"tips", "action title_style locked_style unread_style"},
+    {"flowchart", "confirm line ending_style unreached_style choice_style"},
 };
 
 // The heading a kind of part's own settings are under (a button's: by what they're for).
 ToolsGroup partGroup(std::string_view kind, std::string_view key) {
     if (kind == "button") return key == "drag" || key == "drop" ? "Dragging and dropping"_group : "Clicking"_group;
     if (kind == "container") { // (its parts, a list's items, one of the phone's apps, then how it scrolls)
-        static constexpr std::string_view kList[]{"list", "position", "item_animation", "columns", "spacing", "item_width", "item_height", "spacing_across", "spacing_down"};
+        static constexpr std::string_view kList[]{"list", "position", "item_animation", "columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down"};
         static constexpr std::string_view kApp[]{"app", "title", "icon", "count"};
         if (key == "fit" || key == "stack") return "Parts"_group;
         if (std::ranges::contains(kList, key)) return "List"_group;
@@ -736,7 +806,7 @@ ToolsGroup partGroup(std::string_view kind, std::string_view key) {
     if (kind == "text") return "Words"_group;
     if ((kind == "slider" || kind == "bar") && (key == "track" || key == "fill" || key == "knob")) return "Colours"_group;
     static const std::pair<std::string_view, ToolsGroup> groups[]{
-        {"image", "Image"_group}, {"face", "Face"_group}, {"movie", "Playing"_group}, {"key", "Action"_group},
+        {"image", "Image"_group}, {"face", "Face"_group}, {"movie", "Playing"_group},
         {"namebox", "Bar"_group}, {"indicator", "Bobbing"_group}, {"choices", "Choices"_group}, {"history", "Lines"_group}, {"pages", "Tabs"_group},
         {"slots", "Saves"_group}, {"control", "Key"_group}, {"gallery", "Images"_group}, {"page", "Lines"_group}, {"input", "Typing"_group},
         {"bar", "Value"_group}, {"slider", "Value"_group}, {"endings", "List"_group}, {"songs", "List"_group}, {"achievements", "List"_group},
@@ -745,9 +815,9 @@ ToolsGroup partGroup(std::string_view kind, std::string_view key) {
     return it != std::end(groups) ? it->second : "Settings"_group;
 }
 
-constexpr std::string_view kListKeys[]{"columns", "spacing", "item_width", "item_height", "spacing_across", "spacing_down"}; // (a list's: its items' size and spacing)
-constexpr std::string_view kGlideKeys[]{"glide", "glide_speed", "glide_distance"};        // (one that scrolls: how it glides on after a drag)
-constexpr std::string_view kDraggable[]{"history", "gallery", "endings", "songs", "achievements", "tips", "flowchart"};
+constexpr std::string_view kListKeys[]{"columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down"}; // (a list's: its items' size and spacing)
+constexpr std::string_view kScrollbarKeys[]{"scrollbar", "scrollbar_thickness"};          // (one that scrolls: its scrollbar)
+constexpr std::string_view kGlideKeys[]{"glide", "glide_speed", "glide_distance"};        // (...and how it glides on after a drag)
 // A part's settings: its own, a list's, its style and look (as a style's), then when it shows.
 std::vector<PartOption> partOptions(std::string_view kind) {
     std::vector<PartOption> out;
@@ -757,16 +827,14 @@ std::vector<PartOption> partOptions(std::string_view kind) {
         if (known == std::end(kPartOptions)) return; // (one with no row: bottom=, which the image's box shows as a gradient)
         PartOption o = *known;
         o.group = partGroup(kind, key);
-        if (std::ranges::contains(kListKeys, key) && kind != "container") o.group = "Item size"_group;
-        if (std::ranges::contains(kGlideKeys, key) && kind != "container") o.group = "Scrolling"_group;
+        if (std::ranges::contains(kListKeys, key) && kind != "container" && partTakes(kind, "item_height")) o.group = "Item size"_group; // (else its gap: with its own)
+        if ((std::ranges::contains(kScrollbarKeys, key) || std::ranges::contains(kGlideKeys, key)) && kind != "container") o.group = "Scrolling"_group;
         if (o.group == last) o.group = {};
         else last = o.group;
         if (key == "fit" && kind == "image") o.choices = "stretch contain cover original"_choices;
         if (key == "fit" && kind == "container") o.label = "Fit"_text, o.box = Box::ContainerFit, o.choices = "box parts"_choices;
         if (key == "scroll" && kind == "container") o.label = "Scrolls"_text, o.box = Box::YesNo, o.choices = "no yes"_choices;
-        if (key == "action" && (kind == "gallery" || kind == "tips")) o.label = "Action on click"_text;
         if (key == "position" && kind == "container") o.choices = "top centre bottom"_choices, o.labels = "The top|The centre|The bottom, and its end as more comes"_labels;
-        if (key == "action" && kind == "key") o.label = "Action"_text;
         if (key == "confirm" && kind == "slots") o.label = "Confirm saving over a save"_text;
         if (key == "confirm" && kind == "flowchart") o.label = "Confirm going back"_text;
         if (key == "action" && kind == "input") o.label = "Action on Enter"_text;
@@ -776,27 +844,20 @@ std::vector<PartOption> partOptions(std::string_view kind) {
     };
     if (const auto k = std::ranges::find(kPartKinds, kind, &PartKind::kind); k != std::end(kPartKinds)) {
         for (const std::string_view key : wordsOf(k->keys)) option(key);
-        if (k->list)
-            for (const std::string_view key : kListKeys) option(key);
-        if (std::ranges::contains(kDraggable, kind))
-            for (const std::string_view key : kGlideKeys) option(key);
+        if (kind != "container") // (a container's are among its own, in its order)
+            for (const auto& keys : {std::span<const std::string_view>(kListKeys), std::span<const std::string_view>(kScrollbarKeys), std::span<const std::string_view>(kGlideKeys)})
+                for (const std::string_view key : keys)
+                    if (partTakes(kind, key)) option(key);
     }
-    if (kind == "key") return out; // (nothing to see)
-    // Its look: a style, and what it changes of it (its text, its box, and the rest).
+    // Its look: its style's alone (Library > Styles); a button, a box, an image or a text looks as its style's
+    // Chosen says while what Chosen when checks is true.
     out.push_back({.key = "style", .label = "Style"_text, .box = Box::Style, .hint = "Default"_hint, .group = "Look"_group});
-    // (a button, a box, an image or a text: chosen while what "When" checks is true, it looks as Chosen says)
     static constexpr std::string_view kChoosable[]{"button", "container", "image", "text"};
-    for (const Slot& s : std::span(kStyleSlots).subspan(2)) {
-        std::string_view group = s.group;
-        if (s.key == "chosen_colour" && std::ranges::contains(kChoosable, kind)) {
-            option("chosen");
-            out.back().group = "Chosen"_group;
-            group = {};
-        }
-        out.push_back({.key = s.key, .label = s.label.empty() ? s.name : s.label, .box = s.box, .choices = s.choices, .labels = s.labels,
-                       .hint = s.hint, .suggest = s.suggest, .group = ToolsGroup(group), .asStyle = true});
+    if (std::ranges::contains(kChoosable, kind)) {
+        option("chosen");
+        out.back().group = {};
     }
-    out.push_back({.key = "when", .label = "Shown when"_text, .box = Box::Condition, .hint = "Always"_hint, .is = 'c', .group = "Showing"_group});
+    out.push_back({.key = "when", .label = "Shown when"_text, .box = Box::Condition, .hint = "Always"_hint, .is = 'c'}); // (still its look: when it's there, and how it moves)
     out.push_back({.key = "animation", .label = "Animation"_text, .box = Box::Animation, .hint = "None"_hint});
     out.push_back({.key = "pointed_animation", .label = "Animation when pointed at"_text, .box = Box::Animation, .hint = "None"_hint});
     out.push_back({.key = "message_animation", .label = "Animation on a new message"_text, .box = Box::Animation, .hint = "None"_hint});
@@ -873,12 +934,10 @@ std::vector<StoryEditor::Field> optionFields(const StoryEditor& editor, const St
         else if (o.is == 'c') addCheckFields(out, key, o.label, hint, v, o.box, editor.variables());
         else if (o.box == Box::Image) addImageFields(out, key, std::string(o.label), o.hint, v, editor.variables());
         else out.push_back({.name = key, .value = o.choices.empty() ? (StoryEditor::kindOf(o.box).percent ? percentText(v) : v) : v.empty() ? std::string(wordsOf(o.choices).front()) : lower(v),
-                            .label = std::string(o.label), .box = o.box, .choices = std::string(o.choices), .hint = std::string(o.hint), .labels = std::string(o.labels), .suggest = std::string(o.suggest)});
+                            .label = std::string(o.label), .box = o.box, .choices = std::string(o.choices), .hint = std::string(o.hint), .labels = std::string(o.labels),
+                            .multi = o.box == Box::Key, .suggest = std::string(o.suggest), // (a button's keys: several, as a control's)
+                            .usual = o.choices.empty() ? std::string{} : std::string(wordsOf(o.choices).front())});
         if (first < out.size()) out[first].group = o.group;
-        if (o.asStyle) // (a part's look: what an empty box gives it is its style's)
-            for (std::size_t i = first; i < out.size(); ++i)
-                for (std::string* words : {&out[i].labels, &out[i].hint})
-                    if (const auto at = words->find("From its base style"); at != npos) words->replace(at, 19, "From its style"_text);
     }
     return out;
 }
@@ -924,16 +983,12 @@ std::string_view textLabel(std::string_view kind) {
     if (kind == "button") return "Text"_text;
     if (kind == "image") return "Image or colour"_text;
     if (kind == "movie") return "Movie"_text;
-    if (kind == "key") return "Key"_text;
     if (kind == "control") return "Control"_text;
     return {};
 }
 
 } // namespace
 
-// The Screens tab: the game's screens on the left (and the built-in ones), the one open in the
-// middle as the game draws it (a click chooses a part, dragging moves it, its corner resizes it),
-// and the chosen part's settings on the right (or the screen's own).
 // The Screens tab as it is this frame: the screen open (and the screens to pick from), its parts and the
 // one chosen, the screen as read, and where the lists, the screen and the form go. Its three columns are
 // drawn by drawScreenLists, drawScreenPreview and drawScreenForm.
@@ -1002,6 +1057,9 @@ struct Developer::ScreensFrame {
     }
 };
 
+// The Screens tab: the game's screens on the left (and the built-in ones), the one open in the
+// middle as the game draws it (a click chooses a part, dragging moves it, its corner resizes it),
+// and the chosen part's settings on the right (or the screen's own).
 void Developer::drawScreens(DeveloperUi& ui, const SDL_FRect& area) {
     DeveloperTools& d = tools;
     StoryEditor& editor = d.editor;
@@ -1010,7 +1068,7 @@ void Developer::drawScreens(DeveloperUi& ui, const SDL_FRect& area) {
     using Screen = StoryEditor::Screen;
 
     // The screens: the game's, then the built-in textbox if it hasn't made it its own (the choice menu
-    // and the notice are built in too, but only listed once they're the game's: + New screen has them).
+    // is built in too, but only listed once it's the game's: + New screen has it).
     std::vector<ScreensFrame::Entry> entries;
     entries.reserve(editor.screens().size());
     for (std::size_t i = 0; i < editor.screens().size(); ++i) entries.push_back({editor.screens()[i].name, i});
@@ -1181,13 +1239,16 @@ bool Developer::drawScreenLists(const ScreensFrame& f) {
                                                 float x = at.x + 10 * k;
                                                 const float mid = at.y + at.h / 2;
                                                 const SDL_Color shade = faint ? theme::dim : theme::text;
-                                                ui.textAround(title, x, mid, layout::listText, shade);
-                                                x += ui.width(title, layout::listText) + 8 * k;
+                                                const float end = at.x + at.w - layout::listPad * k; // (each cut to fit: the title leaves what's after it its room, up to half)
+                                                const std::string after = colour ? colourWords(parts[i].text, &engine.palette()) : named ? parts[i].kind : std::string{};
+                                                const float afterW = after.empty() ? 0.0f : (colour ? (layout::swatch + 8) * k : 0.0f) + ui.width(after, colour ? layout::listText : layout::smallText) + 8 * k;
+                                                x += ui.textFitted(title, x, mid, layout::listText, shade, std::max(end - x - afterW, (end - x) / 2)) + 8 * k;
                                                 if (colour) {
                                                     const auto grad = parseGradient(parts[i].text, &engine.palette());
-                                                    ui.textAround(colourWords(parts[i].text, &engine.palette()), ui.swatch(x, mid, *colour, false, grad ? std::optional(grad->second) : std::nullopt), mid, layout::listText, shade);
+                                                    const float sx = ui.swatch(x, mid, *colour, false, grad ? std::optional(grad->second) : std::nullopt);
+                                                    ui.textFitted(after, sx, mid, layout::listText, shade, end - sx);
                                                 }
-                                                else if (named) ui.textAround(parts[i].kind, x, mid, layout::smallText, theme::dim);
+                                                else if (named) ui.textFitted(after, x, mid, layout::smallText, theme::dim, end - x);
                                             }});
     switch (partEvent.kind) {
     case ListKind::Chosen:
@@ -1222,7 +1283,7 @@ bool Developer::drawScreenPreview(ScreensFrame& f) {
     DeveloperTools& d = tools;
     const float k = f.ui.k;
     using Part = StoryEditor::Part;
-    // --- The screen, with its heading over it (Try it, its sound), the tab's help under it, and New part
+    // --- The screen, with its heading over it, the tab's help under it, and New part
     // under that (drawNewPart).
     const SDL_FRect& middle = f.middle;
     if (d.addIntoOf != d.part) { // (another part chosen: New part goes in it if it's a container, else on the screen)
@@ -1231,7 +1292,7 @@ bool Developer::drawScreenPreview(ScreensFrame& f) {
         d.addInto = chosen != f.parts.end() && chosen->kind == "container"; // (a box: a container)
     }
     if (f.selected) {
-        f.intoName = f.ui.fitted(partTitle(*f.selected, &engine.palette()), layout::smallButtonText, middle.w / 2);
+        f.intoName = partTitle(*f.selected, &engine.palette()); // (its button cuts it to fit)
         f.newParts.push_back({.name = "Goes in"_tr, .labels = {"The screen"_tr, f.intoName}});
     }
     for (const auto& [name, starts] : kParts) {
@@ -1247,18 +1308,13 @@ bool Developer::drawScreenPreview(ScreensFrame& f) {
     f.mx = (d.mouseX - f.shown.x) / f.scale;
     f.my = (d.mouseY - f.shown.y) / f.scale;
     d.shownScreen = f.shown;
-    // Try it (runTryIt): the screen gets the mouse and keys as in the game. Esc stops.
-    const bool canTry = f.def && d.screenView && d.sample;
-    if (d.trying && !canTry) stopTrying();
-    if (d.trying && d.tryClosing && !d.screenView->leaving()) stopTrying(); // (the screen tried closed itself: its animation_on_close= is over)
-    if (d.trying) runTryIt(f);
     f.selectedElement = f.selected ? f.elementOf(f.selected->line) : std::nullopt;
     f.chosenLines.clear(); // (in the script's order)
     for (const Part& p : f.parts)
         if (f.isChosen(p.line)) f.chosenLines.push_back(p.line);
     chooseOnScreen(f);
     if (dragOnScreen(f) || screenKeys(f)) return true;
-    paintScreen(f, canTry);
+    paintScreen(f);
     return false;
 }
 
@@ -1295,10 +1351,10 @@ void Developer::chooseOnScreen(ScreensFrame& f) {
         });
     const bool adding = SDL_GetModState() & SDL_KMOD_SHIFT;
     std::optional<std::size_t>& hovered = f.hovered;
-    if (editable && !d.trying && ui.over(shown) && !d.drag && (!selected || adding))
+    if (editable && ui.over(shown) && !d.drag && (!selected || adding))
         for (std::size_t i = def->elements.size(); i-- > 0;) {
             const SDL_FRect b = d.screenView->partBounds(i);
-            if (def->elements[i].kind != ElementKind::Key && d.screenView->drawnPart(i) && pointInRect(mx, my, b)) {
+            if (d.screenView->drawnPart(i) && pointInRect(mx, my, b)) {
                 hovered = i;
                 break;
             }
@@ -1395,7 +1451,7 @@ bool Developer::dragOnScreen(ScreensFrame& f) {
         // The edges and middles to line up with: the screen's, and those of the parts that aren't moving.
         std::vector<float> xs{0.0f, engine.canvas().w / 2, engine.canvas().w}, ys{0.0f, engine.canvas().h / 2, engine.canvas().h};
         for (std::size_t i = 0; i < def->elements.size(); ++i) {
-            if (i == g.element || def->elements[i].kind == ElementKind::Key || !d.screenView->drawnPart(i) ||
+            if (i == g.element || !d.screenView->drawnPart(i) ||
                 std::ranges::any_of(g.moved, [&](const auto& m) { return m.first == i; }))
                 continue;
             const SDL_FRect b = d.screenView->partBounds(i);
@@ -1552,9 +1608,9 @@ bool Developer::screenKeys(ScreensFrame& f) {
     return false;
 }
 
-// The screen drawn (what's chosen on it outlined, the lines things line up with), and Try it and the
-// sound's button under it, with what the form has to say.
-void Developer::paintScreen(const ScreensFrame& f, bool canTry) {
+// The screen drawn (what's chosen on it outlined, the lines things line up with), under its heading,
+// with what the form has to say under it.
+void Developer::paintScreen(const ScreensFrame& f) {
     DeveloperTools& d = tools;
     DeveloperUi& ui = f.ui;
     SDL_Renderer* r = ui.r;
@@ -1573,12 +1629,12 @@ void Developer::paintScreen(const ScreensFrame& f, bool canTry) {
         paintCanvas([&] {
             std::optional<SwappedIn<std::unique_ptr<Game>>> sampleGame;
             if (d.sample) sampleGame.emplace(engine.game_, d.sample);
-            // The phone, on the app the chosen part is in (or the chosen app), on a chat for a part of one
-            // (not while it's tried: then where its buttons took it). Another part of an app that doesn't show
-            // so (as a "Chats" heading with a chat open) shows with a chat open, or none, instead.
+            // The phone, on the app the chosen part is in (or the chosen app), on a chat for a part of one.
+            // Another part of an app that doesn't show so (as a "Chats" heading with a chat open) shows with a
+            // chat open, or none, instead.
             auto phone = engine.phone_;
             std::optional<std::string> otherChat;
-            if (selectedElement && !d.trying) {
+            if (selectedElement) {
                 const auto& els = def->elements;
                 for (int at = static_cast<int>(*selectedElement); at >= 0; at = els[static_cast<std::size_t>(at)].parent)
                     if (const std::string app = els[static_cast<std::size_t>(at)].option("app"); !app.empty()) {
@@ -1606,8 +1662,6 @@ void Developer::paintScreen(const ScreensFrame& f, bool canTry) {
                 else if (phone.pinned) otherChat = phone.chat.empty() ? newest : std::string{};
             }
             const SwappedIn samplePhone(engine.phone_, phone);
-            std::optional<SwappedIn<Settings>> ownSettings;
-            if (d.trying) ownSettings.emplace(engine.settings_, d.trySettings);
             auto paint = [&] {
                 if (lower(entry.name) != "title") engine.game_->draw(engine.fonts_.get("default", 18)); // (the story under it)
                 d.screenView->draw(engine.renderer());
@@ -1619,18 +1673,13 @@ void Developer::paintScreen(const ScreensFrame& f, bool canTry) {
                 SDL_RenderClear(engine.renderer());
                 paint();
             }
-            for (const std::string& name : d.tryOverlays) // (Try it: the screens its buttons opened over it, and the ones closing)
-                if (ScreenView* v = previewView(name)) v->draw(engine.renderer());
-            for (const std::string& name : d.tryLeaving)
-                if (ScreenView* v = previewView(name)) v->draw(engine.renderer());
         })) {
         SDL_RenderTexture(r, d.canvas.get(), nullptr, &shown);
         const DeveloperUi::Clip clipped(ui, shown);
         if (hovered) draw::outline(r, f.onScreen(d.screenView->partBounds(*hovered)), kEdge);
         for (const std::size_t line : d.moreParts)
             if (const auto el = f.elementOf(line)) draw::outline(r, f.onScreen(d.screenView->partBounds(*el)), kAccent);
-        if (d.trying) draw::outline(r, shown, kGood);
-        else if (selectedElement) {
+        if (selectedElement) {
             draw::outline(r, f.onScreen(d.screenView->partBounds(*selectedElement)), d.screenView->drawnPart(*selectedElement) ? kAccent : kWarn);
             draw::rect(r, handle, kAccent);
         }
@@ -1640,227 +1689,9 @@ void Developer::paintScreen(const ScreensFrame& f, bool canTry) {
         d.screenTip = f.problemIn(screen ? screen->line : 0, screen ? screen->end : 0) ? "The screen shows once its mistakes are fixed."_tr : "The screen shows once the scripts' mistakes are fixed."_tr;
     }
     draw::outline(r, shown, kEdge);
-    PreviewHead head(ui, PreviewHead::over(shown, k)); // (as the Story tab's preview has it)
-    if (head.button("Try it"_tr, d.trying, canTry)) {
-        if (d.trying) {
-            stopTrying();
-        } else {
-            f.choose({});
-            d.trying = true;
-            d.tryOverlays.clear();
-            d.tryLeaving.clear();
-            d.tryClosing = false;
-            d.tryPending.clear();
-            if (d.screenView) d.screenView->reset(); // (it opens: its animation_on_open= plays, as in the game)
-            d.trySettings = engine.settings_;
-            d.sampleMade = false; // (the story under it is made again: heard, with its sound on)
-            d.failed = false;
-            d.status = d.triedStatus = "Trying it: its buttons work as in the game, and what they'd do there goes to the log. Esc stops."_tr;
-        }
-    }
-    // Its sound (only while no game is going on behind the tools: it would cut into that one's).
-    if (engine.waiting_ && head.button(d.previewSound ? "Sound on"_tr : "Sound off"_tr, d.previewSound)) {
-        d.previewSound = !d.previewSound;
-        d.sampleMade = false; // (made again, heard or not)
-        if (d.heard) d.heard->stopAll(0.2f);
-        d.heard = nullptr;
-    }
-    head.title("Preview"_tr);
+    PreviewHead(ui, PreviewHead::over(shown, k)).title("Preview"_tr);
     // Every word of help the tab has to say goes here, under the screen: what the form would say of what's chosen.
-    if (d.trying) d.screenTip = "Its buttons work as in the game, and what they'd do there goes to the log. Esc stops."_tr;
     if (!tip.empty()) ui.text(tip, shown.x, shown.y + shown.h + layout::gap * k, layout::noteText, theme::dim, shown.w);
-}
-
-// A screen tried stops: the story under it as it was, the screens it opened gone, its music stopped.
-void Developer::stopTrying() {
-    DeveloperTools& d = tools;
-    d.trying = false;
-    d.sampleMade = false; // (the story under it as it was)
-    d.tryScreen.clear();
-    d.tryOverlays.clear();
-    d.tryLeaving.clear();
-    d.tryClosing = false;
-    d.tryPending.clear();
-    if (d.heard) d.heard->stopAll(0.2f); // (its music, if it was heard)
-    d.heard = nullptr;
-    if (d.screenView) d.screenView->reset();
-    if (!d.triedStatus.empty() && d.status == d.triedStatus) d.status.clear(); // (what Try it said)
-    d.triedStatus.clear();
-}
-
-// Try it, this frame: the screen gets the mouse and keys as in the game (the mouse in its pixels), over
-// the story's first line, with settings of its own; what its buttons would do there is said instead (a
-// screen it opens is shown here, and variables it sets change). Esc stops.
-void Developer::runTryIt(const ScreensFrame& f) {
-    DeveloperTools& d = tools;
-    DeveloperUi& ui = f.ui;
-    const SDL_FRect& shown = f.shown;
-    const float mx = f.mx, my = f.my;
-    const auto& entry = f.entry;
-    auto underTried = [&]() -> ScreenView* { return !d.tryOverlays.empty() ? previewView(d.tryOverlays.back()) : d.screenView.get(); }; // (on top)
-    std::erase_if(d.tryLeaving, [&](const std::string& name) { // (the screens closed over it: drawn while their animation_on_close= plays)
-        const ScreenView* v = previewView(name);
-        if (v && v->leaving()) return false;
-        if (ScreenView* top = underTried(); top && ((v && v->endsCovered()) || top->hasLeft())) top->opened(); // (what was under comes back into view)
-        return true;
-    });
-    if (!d.tryPending.empty()) // (opening once the screen under it has faded out)
-        if (ScreenView* u = underTried(); !u || !u->leaving())
-            if (ScreenView* v = previewView(d.tryPending)) {
-                d.tryOverlays.push_back(std::exchange(d.tryPending, {}));
-                v->reset();
-                v->playWith(d.tryPendingWith.first, d.tryPendingWith.second);
-                tryScreenHook(v->def(), true);
-            }
-    if (d.tryScreen != entry.name) { // its action_on_open=, as the game runs it when it opens (the one tried before it: its action_on_close=)
-        runScreenHook(d.tryScreen, false);
-        runScreenHook(entry.name, true);
-        d.tryScreen = entry.name;
-    }
-    auto send = [&](SDL_Event e) { // (the screens opened over it first, the top one before the others, as in the game)
-        const SetFor asTried(engine.trying_, true);
-        const SwappedIn ownSettings(engine.settings_, d.trySettings);
-        const SwappedIn sampleGame(engine.game_, d.sample);
-        bool taken = false;
-        if (e.type == SDL_EVENT_MOUSE_BUTTON_UP) // (a button pressed is clicked when the mouse comes up: its screen takes it)
-            for (const std::string& name : d.tryOverlays)
-                if (ScreenView* v = previewView(name); v && v->pressing()) {
-                    v->handleEvent(e);
-                    taken = true;
-                    break;
-                }
-        const std::vector<std::string> over = d.tryOverlays; // (a copy: a button may open or close one)
-        for (const std::string& name : over | std::views::reverse) {
-            if (taken) break;
-            if (ScreenView* v = previewView(name); v && (v->handleEvent(e) || v->modal())) taken = true;
-        }
-        if (!taken && !d.tryClosing) d.screenView->handleEvent(e);
-    };
-    send(mouseEventAt(SDL_EVENT_MOUSE_MOTION, mx, my));
-    if (d.clicked && ui.over(shown)) {
-        d.clicked = false;
-        d.focus.clear();
-        send(mouseEventAt(SDL_EVENT_MOUSE_BUTTON_DOWN, mx, my, d.doubleClick));
-        d.tryHeld = true;
-    }
-    if (d.tryHeld && !d.held) {
-        d.tryHeld = false;
-        send(mouseEventAt(SDL_EVENT_MOUSE_BUTTON_UP, mx, my));
-    }
-    if (const float turns = ui.wheelOver(shown); turns != 0.0f) send(wheelEventAt(turns, mx, my));
-    if (d.focus.empty()) {
-        if (!d.typed.empty()) {
-            send(textEvent(d.typed.c_str()));
-            d.typed.clear();
-        }
-        std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) {
-            if (key.key == SDLK_ESCAPE) return stopTrying(), true;
-            if (key.mod & (SDL_KMOD_GUI | SDL_KMOD_CTRL)) return false; // (undo...)
-            send(keyEvent(key));
-            return true;
-        });
-    }
-    for (const std::string& name : d.tryOverlays) // (the screens opened over it: their buttons too)
-        if (ScreenView* v = previewView(name))
-            if (auto did = v->takePressed()) {
-                runTrying(did->actions, did->confirm, did->item);
-            }
-    if (auto did = d.screenView->takePressed()) { // (a button whose click animation is over)
-        runTrying(did->actions, did->confirm, did->item);
-    }
-    // (buttons chosen because of their chosen=: what their actions set holds in Try it too, as in the game)
-    for (const std::string& name : d.tryOverlays)
-        if (ScreenView* v = previewView(name))
-            if (const Commands kept = v->takeChosen(); !kept.empty()) runTrying(kept, {});
-    if (const Commands kept = d.screenView->takeChosen(); !kept.empty()) runTrying(kept, {});
-    // What its buttons (and its action_on_open=) did: the story's own commands done to the story under it (a
-    // variable set, music, which is heard with its sound on), another screen opened here, and the rest said.
-    std::vector<std::string> said;
-    auto closeTop = [&] { // (the top one opened over it closes, with what it does on closing and its animation_on_close=)
-        const std::string name = d.tryOverlays.back();
-        d.tryOverlays.pop_back();
-        if (ScreenView* v = previewView(name)) {
-            tryScreenHook(v->def(), false);
-            if (v->hideAnimation()) {
-                v->leave();
-                d.tryLeaving.push_back(name);
-            }
-        }
-    };
-    for (const Command& c : std::exchange(engine.tried_, {})) {
-        const auto* u = std::get_if<cmd::Ui>(&c);
-        const auto* jump = std::get_if<cmd::Jump>(&c);
-        if (!u && !jump && d.sample) {
-            d.sample->perform(c);
-            continue;
-        }
-        if (u && u->verb == "setting") { // (its own settings change: the buttons show it)
-            engine.changeSetting(d.trySettings, u->arg);
-            continue;
-        }
-        if (u && u->verb == "open" && !u->arg.contains("://") && !u->arg.starts_with("www."))
-            if (ScreenView* v = previewView(u->arg)) { // (opened over the one tried, as in the game: its action_on_open= runs, its animation_on_open= plays)
-                if (!d.tryOverlays.empty() && d.tryOverlays.back() == u->arg) { // (open already, on top: it closes, as in the game)
-                    closeTop();
-                    d.failed = false;
-                    d.status = d.triedStatus = "Trying '{}': '{}' closed again, as in the game. Esc stops."_tr(entry.name, u->arg);
-                    continue;
-                }
-                if (u->arg == d.tryScreen || std::ranges::contains(d.tryOverlays, u->arg)) { // (open under others: back to it, the ones over it closing, and it opens again)
-                    while (!d.tryOverlays.empty() && d.tryOverlays.back() != u->arg) closeTop();
-                    tryScreenHook(v->def(), true);
-                    d.failed = false;
-                    d.status = d.triedStatus = "Trying '{}': back to '{}', opened again, as in the game. Esc stops."_tr(entry.name, u->arg);
-                    continue;
-                }
-                std::erase(d.tryLeaving, u->arg);
-                ScreenView* under = !d.tryOverlays.empty() ? previewView(d.tryOverlays.back()) : d.screenView.get();
-                const std::pair with{ScreenView::animationIn(d.script.get(), u->opening), ScreenView::animationIn(d.script.get(), u->closing)}; // (with NAME, and close with NAME: this time)
-                v->playWith(with.first, with.second);
-                if (v->startsCovered() && under && under != v && under->endsCovered() && !under->hasLeft()) { // (the one under fades out first)
-                    under->leave();
-                    d.tryPending = u->arg;
-                    d.tryPendingWith = with;
-                } else if (!std::ranges::contains(d.tryOverlays, u->arg)) {
-                    d.tryOverlays.push_back(u->arg);
-                    v->reset();
-                    v->playWith(with.first, with.second);
-                    tryScreenHook(v->def(), true);
-                }
-                d.failed = false;
-                d.status = d.triedStatus = "Trying '{}': '{}' opened over it, as in the game. Esc stops."_tr(entry.name, u->arg);
-                continue;
-            }
-        if (u && (u->verb == "open app" || u->verb == "open chat" || u->verb == "open image" || u->verb == "keypad" || u->verb == "unlock" ||
-                  (u->verb == "back" && engine.phoneBack()))) { // (the phone's own steps: as in the game)
-            if (const ScreenDef* phone = d.script->screen("phone"); phone && u->verb == "open app") engine.openApp(*phone, lower(u->arg));
-            else if (phone && u->verb == "open chat") engine.openChat(*phone, u->arg);
-            else if (u->verb == "open image") engine.openImage(u->arg);
-            else if (u->verb == "keypad") engine.keypad(u->arg);
-            else if (u->verb == "unlock") engine.unlockPhone({});
-            continue;
-        }
-        if (u && (u->verb == "close" || u->verb == "answer")) { // (the top one opened closes, with its animation_on_close=; the one tried: Try it stops after its own)
-            if (!d.tryOverlays.empty()) {
-                closeTop();
-            } else if (d.screenView->hideAnimation() && !d.tryClosing) {
-                d.screenView->leave();
-                d.tryClosing = true;
-            } else {
-                said.emplace_back("close the screen"_tr);
-            }
-            continue;
-        }
-        if (u) said.push_back(u->arg.empty() ? u->verb : u->verb + " " + u->arg);
-        else if (jump) said.push_back(jump->call ? "call {}"_tr(jump->scene) : "jump to {}"_tr(jump->scene));
-        else said.emplace_back("go on with the story"_tr); // (no story under it to do it to)
-    }
-    if (!said.empty()) {
-        std::string all;
-        for (const std::string& one : said) all = all.empty() ? one : "{}, then {}"_tr(all, one);
-        d.failed = false;
-        d.status = d.triedStatus = "Trying it: in the game, that would {}."_tr(all);
-    }
 }
 
 void Developer::drawScreenForm(const ScreensFrame& f) {
@@ -1894,17 +1725,23 @@ void Developer::drawNewScreenForm(const ScreensFrame& f) {
             if (all) std::ranges::copy_if(kUsualMenus, std::back_inserter(names), [&](std::string_view n) { return !has(n); });
             else names.push_back(start.name);
             auto will = [&](std::string_view n) { return has(n) || std::ranges::contains(names, n); };
+            std::vector<std::string> controls; // (the game's, then those of the screens made now that come with one)
+            for (const Control& c : engine.script().controls) controls.push_back(c.name);
+            for (const auto& [screen, line] : kScreenControls)
+                if (const std::string control(firstWord(afterFirst(line))); std::ranges::contains(names, screen) && !std::ranges::contains(controls, control))
+                    controls.push_back(control);
             const float sy = engine.canvas().h / 720.0f;
             std::size_t made = 0;
             for (const std::string_view name : names) {
                 // (one there already: the new one is another, pause_2...)
                 const std::string base = name.empty() ? std::string("new_screen") : std::string(name);
                 const std::string as = uniqueName(base, has);
-                std::vector<std::string> lines = startScreen(name, as, will, [&](std::string_view w) { return !editor.find(w).empty(); });
-                if (!builtIn(name)) lines = placesFromPixels(lines, 1280.0f, 720.0f); // (written for 1280 x 720: places and shares fit any size)
+                std::vector<std::string> lines = startScreen(name, as, will, [&](std::string_view w) { return !editor.find(w).empty(); }, controls);
                 std::vector<std::string> needs = needsOf(editor, lines, name);
-                for (std::string& l : lines) l = scaled(l, sy);
                 for (std::string& l : needs) l = scaled(l, sy);
+                if (!builtIn(name)) // (written for 1280 x 720: places and shares fit any size; its texts placed by their sizes)
+                    lines = placesFromPixels(lines, 1280.0f, 720.0f, ownSizes(lines, needs, 1280.0f, 720.0f, sy));
+                for (std::string& l : lines) l = scaled(l, sy);
                 made = editor.addScreen(needs, lines);
             }
             d.picking = false;
@@ -1916,6 +1753,71 @@ void Developer::drawNewScreenForm(const ScreensFrame& f) {
         y += layout::buttonH * k + layout::gap * k;
     }
     ui.formDrawn(list, y);
+}
+
+// The size each text in `lines` without a height of its own will have (its words as its style draws them,
+// wrapped to its width; a {value}'s as one line), in the pixels `lines` are written in, by line: for
+// placesFromPixels. `needs`: what they bring (their styles), as the game will have them; `scale`: the game's
+// pixels for one of `lines`'. None when the screen doesn't read as one (the scripts' mistakes).
+std::map<std::size_t, SDL_FPoint> Developer::ownSizes(const std::vector<std::string>& lines, const std::vector<std::string>& needs, float width, float height, float scale) {
+    std::map<std::size_t, SDL_FPoint> out;
+    // (as the game will read them: at the end of main.vnscript, after what they need, the screen under a name of its own)
+    std::string more = "\n";
+    for (const std::string& line : needs) more += line + "\n";
+    std::vector<std::size_t> parts; // (the screen's part lines, in the order its parts are read)
+    const std::vector<std::string> placed = placesFromPixels(lines, width, height);
+    bool inScreen = false;
+    for (std::size_t i = 0; i < placed.size(); ++i) {
+        if (!partLine(placed[i])) continue;
+        if (indentOf(placed[i]) == 0) {
+            if (inScreen) break; // (one screen)
+            inScreen = lower(firstWord(placed[i])) == "screen";
+            if (inScreen) more += "screen vnext_sizes\n";
+            continue;
+        }
+        if (!inScreen) continue;
+        parts.push_back(i);
+        more += scaled(placed[i], scale) + "\n";
+    }
+    const Script script = Script::load(
+        "scripts/main.vnscript",
+        [&](const std::string& p) {
+            auto text = readTextFile(engine.gameRoot() + p);
+            if (text && lower(p) == "scripts/main.vnscript") *text += more;
+            return text;
+        },
+        defaultUi());
+    const auto it = script.screens.find("vnext_sizes");
+    if (it == script.screens.end() || it->second.elements.size() != parts.size()) return out;
+    for (std::size_t k = 0; k < parts.size(); ++k) {
+        const Element& el = it->second.elements[k];
+        const auto words = rawWords(trim(lines[parts[k]]));
+        auto option = [&](std::string_view key) -> std::optional<float> {
+            for (const std::string& word : words)
+                if (lower(word).starts_with(std::string(key) + "=")) return parseNumber(unquote(std::string_view(word).substr(key.size() + 1)));
+            return std::nullopt;
+        };
+        if (el.kind != ElementKind::Text || option("height")) continue;
+        // (its words without their tags and {values}: a value, as one line of letters)
+        std::string words_;
+        for (std::size_t at = 0; at < el.text.size();) {
+            const std::size_t open = el.text.find('{', at);
+            words_ += el.text.substr(at, open == std::string::npos ? std::string::npos : open - at);
+            if (open == std::string::npos) break;
+            const std::size_t close = el.text.find('}', open);
+            at = close == std::string::npos ? el.text.size() : close + 1;
+        }
+        if (trim(words_).empty()) words_ = "Ag";
+        const Style& s = el.style;
+        const float across = option("width").value_or(option("width_at_most").value_or(0.0f)) * scale;
+        TextBlock block;
+        block.set(engine.font(s.font, s.size), words_, across > 0.0f ? std::max(1.0f, across - 2 * s.padding) : 0.0f, s.lineSpacing);
+        SDL_FPoint size = block.size();
+        if (const auto most = option("lines"); most && *most >= 1.0f && static_cast<float>(block.lines()) > *most)
+            size.y = size.y * *most / static_cast<float>(block.lines());
+        out[parts[k]] = {(size.x + 2 * s.padding) / scale, (size.y + 2 * s.padding) / scale};
+    }
+    return out;
 }
 
 // New part, under the screen and its help, as the Story tab's New line is under its lines: Goes in (the
@@ -1934,7 +1836,7 @@ bool Developer::drawNewPart(ScreensFrame& f) {
     const std::size_t goesIn = selected ? 2 : 0; // (its two buttons first)
     const std::vector<std::size_t> chosen{d.addInto ? std::size_t{1} : std::size_t{0}};
     const auto clicked = ui.groupedButtons(f.newParts, f.newPartPlaces, f.middle.x, y + layout::headingH * k, selected ? std::span(chosen) : std::span<const std::size_t>{},
-                                           screen.has_value() && !d.trying);
+                                           screen.has_value());
     if (!clicked || !screen) return false;
     if (*clicked < goesIn) {
         d.addInto = *clicked == 1;
@@ -1952,8 +1854,10 @@ bool Developer::drawNewPart(ScreensFrame& f) {
     const Part* into = d.addInto ? selected : nullptr;
     std::string line(start->line);
     const auto images = editor.names(StoryEditor::Pick::Images), movies = editor.names(StoryEditor::Pick::Movies); // (the first, or none to pick)
+    const auto& variables = editor.variables(); // (the game's own)
     line = replaced(line, "IMAGE", images.empty() ? "" : images.front());
     line = replaced(line, "MOVIE", movies.empty() ? "" : movies.front());
+    line = variables.empty() ? replaced(line, " value=VARIABLE", "") : replaced(line, "VARIABLE", variables.front());
     line = std::string(trim(scaled("    " + line, engine.canvas().h / 720.0f)));
     // (written for 1280 x 720: as places and shares, on the screen or at the top left of the part it goes in)
     std::vector<std::string> lines{"screen new", "    " + line};
@@ -1966,9 +1870,9 @@ bool Developer::drawNewPart(ScreensFrame& f) {
                 at += (at.empty() ? "" : " ") + (word.starts_with("x=") ? std::string("x=0") : word.starts_with("y=") ? std::string("y=0") : word);
             lines = {"screen new", std::format("    container x={} y={} width={} height={}", b.x * sx, b.y * sy, b.w * sx, b.h * sy), "        " + at};
         }
-    line = std::string(trim(placesFromPixels(lines, 1280.0f, 720.0f).back()));
     std::vector<std::string> needs = needsOf(editor, {"screen new", "    " + line}, "new"); // (the colours and styles it uses that the game lacks)
     for (std::string& l : needs) l = scaled(l, engine.canvas().h / 720.0f);
+    line = std::string(trim(placesFromPixels(lines, 1280.0f, 720.0f, ownSizes(lines, needs, 1280.0f, 720.0f, 1.0f)).back()));
     d.picking = false;
     f.choose(editor.addPart(*screen, into, line, needs));
     return true;
@@ -1984,7 +1888,7 @@ void Developer::drawBuiltInForm(const ScreensFrame& f) {
     const SDL_FRect& right = f.right;
     float y = right.y;
     const float titleH = layout::titleH * k;
-    ui.formTitle(entry.name, right.x, y);
+    ui.formTitle(entry.name, right.x, y, kAccent, right.w);
     y += titleH;
     d.screenTip = entry.name == "textbox" ? "The player's textbox: the speaker's name, the line, the arrow and, with a phone, its button"_tr : "The player's choice menu"_tr;
     if (ui.button({right.x, y, std::min(right.w, ui.buttonWidth("Make it the game's own"_tr, layout::lineText, layout::widerButtonW)), layout::bigButtonH * k}, "Make it the game's own"_tr)) { // (a copy in the game's screens, used instead)
@@ -2023,17 +1927,15 @@ void Developer::drawLineUpForm(const ScreensFrame& f) {
             if (const auto el = f.elementOf(line); el && d.screenView->drawnPart(*el)) items.push_back({line, *el, d.screenView->partBounds(*el)});
     static const std::array<std::string_view, 6> kLineUp{"Left"_text, "Centre"_text, "Right"_text, "Top"_text, "Middle"_text, "Bottom"_text}; // (told apart by their English)
     static const std::array<std::string_view, 2> kSpread{"Across"_text, "Down"_text};
-    const float labelW = std::round(right.w * layout::labelPart), bh = layout::mediumButtonH * k;
+    const float labelW = labelColumn(ui, std::round(right.w * layout::labelPart), right.w, {}, {"Line up"_tr, "Spread evenly"_tr}), bh = layout::mediumButtonH * k;
     std::optional<std::string_view> clicked;
     for (const auto& [label, words, need] : {std::tuple{std::string_view("Line up"_tr), std::span<const std::string_view>(kLineUp), std::size_t{2}},
                                              {std::string_view("Spread evenly"_tr), std::span<const std::string_view>(kSpread), std::size_t{3}}}) {
-        ui.textAround(label, right.x, y + bh / 2, layout::labelText, theme::dim, labelW - 8 * k);
-        const std::vector<bool> with(words.size() == 6 ? std::vector<bool>{false, true, true, false, true, true} : std::vector<bool>{}); // (across together, down together)
-        const auto places = ui.flow({words.begin(), words.end()}, right.w - labelW, bh, layout::barButtonGap * k, layout::smallButtonText, with);
-        for (std::size_t i = 0; i < words.size(); ++i)
-            if (ui.button({right.x + labelW + places[i].x, y + places[i].y, places[i].w, places[i].h}, tr(words[i]), false, items.size() >= need, layout::smallButtonText))
-                clicked = words[i];
-        y += places.back().y + bh + 10 * k;
+        ui.textFitted(label, right.x, y + bh / 2, layout::labelText, theme::dim, labelW - 8 * k); // (each a row: its buttons on one line)
+        std::vector<std::string_view> shown;
+        for (const std::string_view word : words) shown.push_back(tr(word));
+        if (const auto i = ui.buttons(right.x + labelW, y, right.w - labelW, bh, shown, std::vector<bool>(words.size(), items.size() >= need), layout::smallButtonText)) clicked = words[*i];
+        y += bh + 10 * k;
     }
     d.screenTip = "Drag one of them to move them all; the arrow keys nudge them."_tr;
     if (!clicked) return;
@@ -2084,16 +1986,12 @@ void Developer::drawPartForm(const ScreensFrame& f) {
     const float k = ui.k;
     const SDL_FRect& right = f.right;
     float y = right.y;
-    const float labelH = layout::labelAboveH * k, boxH = layout::boxH * k, rowGap = layout::rowGap * k, titleH = layout::titleH * k;
-    auto field = [&](std::string_view label, const std::string& id, const std::string& value, float x, float w, std::string_view hint = {}) {
-        ui.text(tr(label), x, y, layout::smallText, theme::dim);
-        return ui.field(id, {x, y + labelH, w, boxH}, value, layout::boxText, hint);
-    };
+    const float titleH = layout::titleH * k;
     const bool header = !selected;
     const Part p = header ? editor.part(*screen, screen->line) : *selected;
+    const float toggleW = header ? 0.0f : asTextButton(ui, right.x + right.w, y) + layout::gap * k;
     ui.formTitle(header ? "Screen: {}"_tr(p.text) : p.option("name").empty() ? std::string(tr(upperFirst(p.kind))) : std::format("{}: {}", tr(upperFirst(p.kind)), p.option("name")),
-                 right.x, y);
-    if (!header) asTextButton(ui, right.x + right.w, y);
+                 right.x, y, kAccent, right.w - toggleW);
     y += titleH;
     const std::string id = std::format("part:{}:{}", screen->line, p.line);
     auto change = [&](const Part& changed, std::string_view what) { editor.setPart(*screen, changed, std::format("{}:{}:{}", id, what, d.focusCount)); };
@@ -2117,7 +2015,7 @@ void Developer::drawPartForm(const ScreensFrame& f) {
     ui.scrollForm(formBox, 40 * k);
     y -= d.formScroll;
     const DeveloperUi::Clip clipped(ui, formBox, true);
-    const float labelW = std::round(right.w * layout::partLabelPart);
+    const float least = std::round(right.w * layout::partLabelPart); // (the labels' column: wider when they need it, the same for all the form's rows)
     if (const ScriptError* problem = d.problemAt(screen->file, p.line)) y += ui.text(problem->message, right.x, y, layout::noteText, kBad, right.w).y + 8 * k;
     // A change from the form: typed (one step for undo while one box is typed into) or picked.
     auto apply = [&](const std::optional<FormEdit>& edit, const std::vector<StoryEditor::Field>& fields, auto&& changed) {
@@ -2129,29 +2027,51 @@ void Developer::drawPartForm(const ScreensFrame& f) {
     };
     if (header) {
         const auto fields = optionFields(editor, p, kScreenOptions);
-        apply(drawForm(ui, id, fields, right.x, right.w, labelW, y), fields, [&](const auto& now) { return withOptions(editor, p, now, kScreenOptions); });
+        apply(drawForm(ui, id, fields, right.x, right.w, labelColumn(ui, least, right.w, {fields}), y), fields, [&](const auto& now) { return withOptions(editor, p, now, kScreenOptions); });
         y += 8 * k;
         y += ui.text("Click a part on the screen (or in the list) to choose it: drag it to move it, or its corner to resize it (with Shift: keeping its shape), and the arrow keys nudge it (Shift: 10 pixels). Esc lets it go."_tr,
                      right.x, y, layout::noteText, theme::dim, right.w).y;
     } else {
-        // Its name: what the Parts list calls it (the game doesn't show it).
+        // Its name (what the Parts list calls it: the game doesn't show it), its text (or the word after its
+        // kind) and its settings, their labels in one column.
         const std::vector<StoryEditor::Field> name{{.name = "name", .value = p.option("name"), .label = "Name", .box = Box::Name, .hint = "None"}};
+        const std::string_view textName = textLabel(p.kind);
+        std::vector<StoryEditor::Field> text;
+        if (!textName.empty() && p.kind == "image") { // (an image or a colour; or one for yes and one for no)
+            std::string imageText = p.text; // (bottom=: a colour fading down to another, as one value: navy-black)
+            if (const std::string fadesTo = p.option("bottom"); !fadesTo.empty() && parseColour(imageText, &engine.palette()) && !imageText.contains('-')) imageText += "-" + fadesTo;
+            addImageFields(text, "text", std::string(textName), "", imageText, editor.variables());
+        } else if (!textName.empty()) {
+            const Box box = p.kind == "movie" ? Box::Movie : p.kind == "control" ? Box::Control : Box::None;
+            text.push_back({.name = "text", .value = p.text, .label = std::string(textName), .box = box, .rich = p.kind == "text" || p.kind == "button"});
+        }
+        const auto el = f.elementOf(p.line);
+        const auto options = partOptions(p.kind);
+        auto fields = optionFields(editor, p, options);
+        // Where it is: x, y, width and height (empty: the top left corner, and its own size, shown as it is now).
+        std::vector<StoryEditor::Field> place;
+        for (std::size_t i = 0; i < 4; ++i) {
+            static constexpr std::array names{"x", "y", "width", "height"};
+            static const std::array<std::string_view, 4> labels{"X"_text, "Y"_text, "Width"_text, "Height"_text};
+            std::string hint = i == 0 ? "-1" : i == 1 ? "1" : "None";
+            if (i >= 2 && el && d.screenView) { // (its own size now, as a share of its box)
+                const Element& elDef = def->elements[*el];
+                const SDL_FRect elBox = elDef.parent >= 0 ? d.screenView->partRect(static_cast<std::size_t>(elDef.parent)) : SDL_FRect{0.0f, 0.0f, engine.canvas().w, engine.canvas().h};
+                const SDL_FRect autoSize = d.screenView->partBounds(*el);
+                const float of = i == 2 ? elBox.w : elBox.h;
+                if (of > 0.0f) hint = unitText((i == 2 ? autoSize.w : autoSize.h) / of);
+            }
+            place.push_back({.name = names[i], .value = p.option(names[i]), .label = std::string(labels[i]), .box = i == 0 ? Box::Across : i == 1 ? Box::Down : Box::Number,
+                             .hint = hint, .group = i == 0 ? std::string("Place and size"_text) : std::string{}});
+        }
+        const float labelW = labelColumn(ui, least, right.w, {name, text, place, fields});
         if (const auto edit = drawForm(ui, id, name, right.x, right.w, labelW, y)) {
             Part changed = p;
             changed.set("name", partName(edit->value));
             change(changed, "name");
         }
-        // Its text (or the word after its kind), as a box with what it can be to pick from.
-        if (const std::string_view label = textLabel(p.kind); !label.empty()) {
-            const Box box = p.kind == "movie" ? Box::Movie : p.kind == "key" ? Box::Key : p.kind == "control" ? Box::Control : Box::None;
-            std::vector<StoryEditor::Field> text;
-            if (p.kind == "image") { // (an image or a colour; or one for yes and one for no)
-                std::string imageText = p.text; // (bottom=: a colour fading down to another, as one value: navy-black)
-                if (const std::string fadesTo = p.option("bottom"); !fadesTo.empty() && parseColour(imageText, &engine.palette()) && !imageText.contains('-')) imageText += "-" + fadesTo;
-                addImageFields(text, "text", std::string(label), "", imageText, editor.variables());
-            } else {
-                text.push_back({.name = "text", .value = p.text, .label = std::string(label), .box = box, .rich = p.kind == "text" || p.kind == "button"});
-            }
+        // Its text, as a box with what it can be to pick from.
+        if (!textName.empty()) {
             if (const auto edit = drawForm(ui, id, text, right.x, right.w, labelW, y)) {
                 Part changed = p;
                 changed.text = edit->value;
@@ -2165,33 +2085,12 @@ void Developer::drawPartForm(const ScreensFrame& f) {
                 change(changed, "text");
             }
         }
-        // Where it is: x, y, width and height (empty: the top left corner, and its own size, shown as it is now).
-        ui.text("Place and size"_tr, right.x, y, layout::groupText, kAccent);
-        y += layout::groupStep * k;
-        const float quarter = (right.w - 3 * 6 * k) / 4;
-        const auto el = f.elementOf(p.line);
-        for (int i = 0; i < 4; ++i) {
-            static constexpr std::array names{"x", "y", "width", "height"};
-            static const std::array<std::string_view, 4> labels{"X"_text, "Y"_text, "Width"_text, "Height"_text};
-            const std::string option = names[static_cast<std::size_t>(i)];
-            std::string hint = i == 0 ? "-1" : i == 1 ? "1" : "";
-            if (i >= 2 && el && d.screenView) { // (its own size now, as a share of its box)
-                const Element& elDef = def->elements[*el];
-                const SDL_FRect elBox = elDef.parent >= 0 ? d.screenView->partRect(static_cast<std::size_t>(elDef.parent)) : SDL_FRect{0.0f, 0.0f, engine.canvas().w, engine.canvas().h};
-                const SDL_FRect autoSize = d.screenView->partBounds(*el);
-                const float of = i == 2 ? elBox.w : elBox.h;
-                if (of > 0.0f) hint = unitText((i == 2 ? autoSize.w : autoSize.h) / of);
-            }
-            if (const auto value = field(labels[static_cast<std::size_t>(i)], id + ":" + option, p.option(option), right.x + static_cast<float>(i) * (quarter + 6 * k), quarter, hint)) {
-                Part changed = p;
-                changed.set(option, std::string(trim(*value)));
-                change(changed, option);
-            }
+        if (const auto edit = drawForm(ui, id, place, right.x, right.w, labelW, y)) {
+            Part changed = p;
+            changed.set(edit->name, std::string(trim(edit->value)));
+            change(changed, edit->name);
         }
-        y += labelH + boxH + rowGap;
-        const auto options = partOptions(p.kind);
-        auto fields = optionFields(editor, p, options);
-        if (el) showStyleValues(fields, def->elements[*el].style, engine.palette()); // (an empty look box: what its style gives it)
+        y += layout::groupGap * k;
         apply(drawForm(ui, id, fields, right.x, right.w, labelW, y), fields, [&](const auto& now) { return withOptions(editor, p, now, options); });
     }
     ui.formDrawn(formBox, y);

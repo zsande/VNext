@@ -1,6 +1,6 @@
 <h1 align="center"><img src=".github/banner.png" alt="VNext" width="800"></h1>
 
-**VNext is a free visual novel engine with the editor built right in, and your characters can even text and call the player.** You write your story as scenes and lines in simple forms, see each moment in a live preview, design your menus by dragging things around, and translate your game, all in the same app. No programming is needed, though everything is also saved as plain, readable script files if you'd rather type.
+**VNext is a free visual novel engine with the editor built right in, and your characters can even text and call the player.** You write your story as scenes and lines in simple forms, design your menus by dragging things around, and translate your game, all in the same app. No programming is needed, though everything is also saved as plain, readable script files if you'd rather type.
 
 **[Download VNext](https://github.com/zsande/VNext/releases/latest)** for Windows, macOS or Linux. It's free, also for games you sell.
 
@@ -10,16 +10,16 @@
 
 Open VNext in developer mode and you get an editor that fits any window size, with a tab for each part of the work:
 
-- **Story**: scenes and their lines as forms, with a live preview of what players see at each line, and "Play from this line".
+- **Story**: scenes and their lines as forms, and "Play from this line" to see the game from any of them.
 - **Map**: every scene as a box, with arrows where the story branches and jumps.
-- **Screens**: the title screen, menus and textbox, designed by dragging their parts around, with "Try it" to click through them.
+- **Screens**: the title screen, menus and textbox, designed by dragging their parts around on a picture of the game.
 - **Library**: images, sounds, movies and fonts, and the styles, animations (on a timeline) and gallery entries a game uses.
 - **Settings** and **Translate**: the game's options, and its translations, with a spreadsheet for translators.
 
 <p align="center">
-  <img src=".github/editor-story.png" width="48%" alt="The Story tab: a scene's lines, the chosen line's form and a live preview of Haru in a park">
-  <img src=".github/editor-chat.png" width="48%" alt="The Story tab on a chat: the phone line's form, and a preview with the chat on Kaede's phone">
-  <img src=".github/editor-screens.png" width="48%" alt="The Screens tab: the phone's parts, a preview with an app button chosen, and the button's settings">
+  <img src=".github/editor-story.png" width="48%" alt="The Story tab: a scene's lines, and the form of the chosen one, showing Haru at the centre of the park">
+  <img src=".github/editor-chat.png" width="48%" alt="The Story tab on a chat: its phone lines, and the form of Haru's reaction">
+  <img src=".github/editor-screens.png" width="48%" alt="The Screens tab: the phone's parts, the phone with an app button chosen, and the button's settings">
   <img src=".github/editor-map.png" width="48%" alt="The Map tab: eight scenes as boxes, with arrows from start to two endings">
 </p>
 

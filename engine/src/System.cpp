@@ -45,6 +45,24 @@ std::size_t offset(std::string_view s, std::size_t codepoints) {
 
 } // namespace utf8
 
+std::string shortened(std::string_view text, const std::function<bool(std::string_view)>& fits) {
+    if (text.empty() || fits(text)) return std::string(text);
+    std::vector<std::size_t> cuts; // (where each letter starts: it can be cut there)
+    for (std::size_t i = 0; i < text.size(); ++i)
+        if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) cuts.push_back(i);
+    auto cut = [&](std::size_t at) { // (no space or comma left hanging before the dots)
+        while (at > 0 && std::string_view(" \t\n,:;(").contains(text[at - 1])) --at;
+        return std::string(text.substr(0, at)) + "...";
+    };
+    std::size_t fit = 0, over = cuts.size(); // (the most letters that fit, found by halves: all of them don't)
+    while (over - fit > 1) {
+        const std::size_t mid = (fit + over) / 2;
+        if (fits(cut(cuts[mid]))) fit = mid;
+        else over = mid;
+    }
+    return cut(cuts[fit]);
+}
+
 // A capital letter's small one, by code point, for the alphabets where that's one rule each: Latin
 // with its accents (Á, Ő, Ÿ...), Greek and Cyrillic. Others stay as they are.
 char32_t lowerOf(char32_t c) {
@@ -181,7 +199,7 @@ namespace {
 const Palette& colourNames() {
     static const Palette names{
         {"white", {255, 255, 255, 255}},   {"black", {0, 0, 0, 255}},         {"grey", {128, 128, 128, 255}},
-        {"grey", {128, 128, 128, 255}},    {"silver", {192, 192, 200, 255}},  {"red", {230, 60, 60, 255}},
+        {"silver", {192, 192, 200, 255}},  {"red", {230, 60, 60, 255}},
         {"darkred", {140, 20, 30, 255}},   {"orange", {255, 150, 50, 255}},   {"gold", {255, 211, 110, 255}},
         {"yellow", {255, 230, 80, 255}},   {"lime", {180, 240, 120, 255}},    {"green", {70, 180, 90, 255}},
         {"darkgreen", {20, 90, 40, 255}},  {"teal", {40, 160, 160, 255}},     {"cyan", {90, 220, 230, 255}},
@@ -252,17 +270,23 @@ std::array<float, 3> hsvOf(SDL_Color c) {
 std::string colourName(SDL_Color c, const Palette* palette) {
     if (c.a == 0) return "transparent";
     auto same = [&](SDL_Color o) { return o.r == c.r && o.g == c.g && o.b == c.b; };
-    const std::string amount = c.a == 255 ? std::string{} : std::format(", {}%", (c.a * 100 + 127) / 255);
+    const std::string percent = std::format(", {}%", (c.a * 100 + 127) / 255), amount = c.a == 255 ? std::string{} : percent;
+    // The game's colour that it is; else a built-in one with its red, green and blue; else the game's with them
+    // and another opacity (its own said).
     if (palette)
         for (const auto& [name, colour] : *palette)
-            if (same(colour)) return name + (colour.a == c.a ? "" : amount);
+            if (same(colour) && colour.a == c.a) return name;
+    for (const auto& [name, colour] : colourNames())
+        if (colour.a != 0 && same(colour)) return name + amount;
+    if (palette)
+        for (const auto& [name, colour] : *palette)
+            if (same(colour)) return name + percent;
     // Hue, saturation and value: which built-in colour it's most like (a grey's hue means nothing).
     const auto [h, s, v] = hsvOf(c);
     std::string nearest;
     float best = std::numeric_limits<float>::max();
     for (const auto& [name, colour] : colourNames()) {
         if (colour.a == 0 || name == "grey") continue;
-        if (same(colour)) return name + amount;
         const auto [h2, s2, v2] = hsvOf(colour);
         float dh = std::fabs(h - h2);
         if (dh > 180.0f) dh = 360.0f - dh;
@@ -1101,24 +1125,24 @@ const SettingControl* findSettingControl(std::string_view name) {
     auto volume = [](int Settings::*field, bool test) {
         return SettingControl{.value = [=](const Settings& s) { return static_cast<float>(s.*field) / 100.0f; },
                               .setValue = [=](Settings& s, float v) { s.*field = percent(v); },
-                              .text = [=](const Settings& s, const GameSettings&) { return std::format("{}%", s.*field); },
+                              .number = [=](const Settings& s) { return static_cast<double>(s.*field); }, // (a percentage)
                               .testSound = test};
     };
     static const std::map<std::string, SettingControl, std::less<>> controls{
         {"text_speed",
-         // 10..150 characters per second in steps of 5; the far right end is "instant"
+         // 10..150 letters a second in steps of 5; the far right end is at once (0)
          {.value = [](const Settings& s) { return s.textSpeed == 0 ? 1.0f : static_cast<float>(s.textSpeed - 10) / 140.0f * 0.95f; },
           .setValue = [](Settings& s, float v) { s.textSpeed = v >= 0.975f ? 0 : 10 + 5 * static_cast<int>(std::lround(std::min(v / 0.95f, 1.0f) * 28.0f)); },
-          .text = [](const Settings& s, const GameSettings&) { return std::to_string(s.textSpeed); }}}, // (0: instant)
+          .number = [](const Settings& s) { return static_cast<double>(s.textSpeed); }}},
         {"auto_delay",
          {.value = [](const Settings& s) { return static_cast<float>(s.autoDelay - 300) / 4700.0f; },
           .setValue = [](Settings& s, float v) { s.autoDelay = 300 + 100 * static_cast<int>(std::lround(std::clamp(v, 0.0f, 1.0f) * 47.0f)); },
-          .text = [](const Settings& s, const GameSettings&) { return std::format("{}.{}", s.autoDelay / 1000, s.autoDelay % 1000 / 100); }}},
+          .number = [](const Settings& s) { return s.autoDelay / 1000.0; }}}, // (in seconds)
         {"textbox_opacity", volume(&Settings::textboxOpacity, false)},
         {"text_size",
          {.value = [](const Settings& s) { return static_cast<float>(s.textSize - 75) / 75.0f; }, // 75% to 150% in steps of 5
           .setValue = [](Settings& s, float v) { s.textSize = 75 + 5 * static_cast<int>(std::lround(std::clamp(v, 0.0f, 1.0f) * 15.0f)); },
-          .text = [](const Settings& s, const GameSettings&) { return std::format("{}%", s.textSize); }}},
+          .number = [](const Settings& s) { return static_cast<double>(s.textSize); }}}, // (a percentage)
         {"master_volume", volume(&Settings::masterVolume, true)},
         {"music_volume", volume(&Settings::musicVolume, false)},
         {"sound_volume", volume(&Settings::soundVolume, true)},

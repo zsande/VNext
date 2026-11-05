@@ -5,20 +5,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <charconv>
-#include <climits>
-#include <cmath>
-#include <limits>
 #include <cstdlib>
 #include <expected>
 #include <optional>
-#include <random>
 #include <ranges>
-#include <set>
-#include <span>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -38,12 +30,35 @@ std::string written(const std::string& text) {
 
 constexpr std::string_view kAddedNote = "# Texts added since the file was made."; // (over the texts --translate adds to a file)
 
-// Whether a screen shows what keys do (a Controls screen): then the player's names for the mouse
+// Whether a screen shows what keys do (a control part): then the player's names for the mouse
 // buttons, controller buttons and gestures show too, so a translation file lists them.
 bool showsKeyNames(const Script& script) {
     return std::ranges::any_of(script.screens, [](const auto& screen) {
         return std::ranges::any_of(screen.second.elements, [](const Element& el) { return el.kind == ElementKind::Control; });
     });
+}
+
+// The words the game's time shows (setting time), as the game fills them in: its weekdays, months, dates, parts of
+// the day (shown in place of a clock, with days and parts of the day), AM and PM, and what the story waiting for
+// the player's clock says.
+std::vector<std::string> timeWords(const Script& script) {
+    const GameSettings& g = script.gameSettings;
+    std::vector<std::string> out;
+    if (g.time == TimeKind::None) return out;
+    const bool real = g.time == TimeKind::Real, dates = real || g.timeStartDate >= 0;
+    if (dates || g.timeStartWeekday >= 0) out.insert(out.end(), kWeekdays.begin(), kWeekdays.end());
+    if (dates) {
+        out.insert(out.end(), kMonths.begin(), kMonths.end());
+        out.emplace_back("{weekday} {day} {month}");
+    } else if (g.timeStartWeekday < 0) {
+        out.emplace_back("Day {day}");
+    }
+    if (g.time == TimeKind::Days)
+        for (const auto& [part, start] : g.dayParts) out.push_back(upperFirst(part));
+    else if (g.clock12)
+        out.insert(out.end(), {"AM", "PM"});
+    if (real) out.emplace_back("The story goes on at {time}.");
+    return out;
 }
 
 // Every text the game shows (what a translation file lists): the scripts' own, and the key names
@@ -55,6 +70,7 @@ std::unordered_set<std::string> shownTexts(Script& script) {
     });
     if (showsKeyNames(script))
         for (const auto& [key, word] : kKeyWords) shown.insert(std::string(word));
+    for (std::string& word : timeWords(script)) shown.insert(std::move(word));
     return shown;
 }
 
@@ -249,6 +265,8 @@ TranslationFile translationFile(Script& script, std::string_view id, const std::
     if (showsKeyNames(script))
         for (const auto& [key, word] : kKeyWords)
             if (seen.insert(std::string(word)).second && !have.texts.contains(std::string(word))) add(std::string(word), "Key names", "");
+    for (const std::string& word : timeWords(script)) // ({day}, {weekday}...: filled in as it shows; keep them in the translation)
+        if (seen.insert(word).second && !have.texts.contains(word)) add(word, "Time", word.contains('{') ? "keep each {name}: filled in as it shows" : "");
 
     if (existing) {
         out.text = prunedTranslation(script, id, *existing, out.removed);

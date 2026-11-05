@@ -5,13 +5,11 @@
 #include <array>
 #include <cctype>
 #include <charconv>
-#include <climits>
 #include <cmath>
 #include <limits>
 #include <cstdlib>
 #include <expected>
 #include <optional>
-#include <random>
 #include <ranges>
 #include <set>
 #include <span>
@@ -116,11 +114,65 @@ std::expected<std::vector<ScriptWord>, std::string> splitWords(std::string_view 
     return out;
 }
 
+int daysFromDate(int year, int month, int day) { // (the proleptic Gregorian calendar's days, from 1970)
+    year -= month <= 2 ? 1 : 0;
+    const int era = (year >= 0 ? year : year - 399) / 400;
+    const int ofEra = year - era * 400;
+    const int ofYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+    return era * 146097 + ofEra * 365 + ofEra / 4 - ofEra / 100 + ofYear - 719468;
+}
+
+std::array<int, 3> dateFromDays(int days) {
+    days += 719468;
+    const int era = (days >= 0 ? days : days - 146096) / 146097;
+    const int ofEra = days - era * 146097;
+    const int year = (ofEra - ofEra / 1460 + ofEra / 36524 - ofEra / 146096) / 365;
+    const int ofYear = ofEra - (365 * year + year / 4 - year / 100);
+    const int m = (5 * ofYear + 2) / 153;
+    const int month = m < 10 ? m + 3 : m - 9;
+    return {year + era * 400 + (month <= 2 ? 1 : 0), month, ofYear - (153 * m + 2) / 5 + 1};
+}
+
 // ---------------------------------------------------------------------------
 // Scripts
 // ---------------------------------------------------------------------------
 
 namespace {
+
+// A time of day as written (18:30, 6:30pm, 6:30 pm, 6pm, or an hour on its own: 8 is 8:00): minutes from midnight.
+std::optional<int> clockMinutes(std::string_view text) {
+    std::string t = lower(trim(text));
+    std::optional<int> half; // (12-hour: 0 am, 720 pm)
+    if (t.ends_with("am") || t.ends_with("pm")) {
+        half = t.ends_with("pm") ? 720 : 0;
+        t = std::string(trim(std::string_view(t).substr(0, t.size() - 2)));
+    }
+    const auto colon = t.find(':');
+    int hours = 0, minutes = 0;
+    const std::string_view h = std::string_view(t).substr(0, colon), m = colon == std::string::npos ? std::string_view("0") : std::string_view(t).substr(colon + 1);
+    if (h.empty() || h.size() > 2 || (colon != std::string::npos && m.size() != 2)) return std::nullopt;
+    if (std::from_chars(h.data(), h.data() + h.size(), hours).ec != std::errc{} || std::from_chars(m.data(), m.data() + m.size(), minutes).ec != std::errc{}) return std::nullopt;
+    if (minutes > 59 || (half ? hours < 1 || hours > 12 : hours > 23)) return std::nullopt;
+    return (half ? hours % 12 + *half / 60 : hours) * 60 + minutes;
+}
+
+// The pieces of `text` between `by`s, each trimmed (empty ones left out).
+std::vector<std::string_view> piecesOf(std::string_view text, char by = ' ') {
+    std::vector<std::string_view> out;
+    for (std::size_t at = 0; at <= text.size();) {
+        const std::size_t end = std::min(text.find(by, at), text.size());
+        if (const std::string_view piece = trim(text.substr(at, end - at)); !piece.empty()) out.push_back(piece);
+        at = end + 1;
+    }
+    return out;
+}
+
+// A weekday's name (0 Monday), any case.
+std::optional<int> weekdayNamed(std::string_view word) {
+    for (std::size_t i = 0; i < kWeekdays.size(); ++i)
+        if (lower(word) == lower(kWeekdays[i])) return static_cast<int>(i);
+    return std::nullopt;
+}
 
 // ---------------------------------------------------------------------------
 // Lines and words
@@ -232,15 +284,15 @@ struct CommandWord {
 constexpr auto kCommands = std::to_array<CommandWord>({
     // The story's own: blocks, waiting, questions, its structure.
     {"scene", true, false}, {"if", true, false}, {"else", true, false}, {"choice", true, false},
-    {"return", true, false}, {"wait", true, false}, {"ask", true, false}, {"textbox", true, false}, {"new page", true, false}, {"together", true, false},
-    {"movie", true, false}, {"chapter", true, false}, {"flowchart", true, false}, {"ending", true, false},
-    {"phone", true, false}, {"chat", true, false},
+    {"wait", true, false}, {"together", true, false},
+    {"movie", true, false},
+    {"phone", true, false}, {"chat", true, false}, {"time", true, false},
     // Both.
     {"background", true, true}, {"show", true, true}, {"hide", true, true},
     {"effect", true, true}, {"weather", true, true}, {"camera", true, true}, {"music", true, true}, {"sound", true, true},
-    {"voice", true, true}, {"stop", true, true}, {"jump", true, true}, {"call", true, true}, {"end", true, true},
-    {"set", true, true}, {"add", true, true}, {"subtract", true, true}, {"toggle", true, true}, {"gallery", true, true},
-    {"achievement", true, true}, {"tip", true, true}, {"notice", true, true}, {"open app", false, true}, {"open chat", false, true},
+    {"voice", true, true}, {"stop", true, true}, {"jump", true, true},
+    {"set", true, true}, {"add", true, true}, {"subtract", true, true}, {"toggle", true, true},
+    {"open app", false, true}, {"open chat", false, true},
     {"open image", false, true}, {"open", true, true},
     {"quick save", true, true},
     {"fullscreen", true, true}, {"screenshot", true, true}, {"quit", true, true},
@@ -251,7 +303,9 @@ constexpr auto kCommands = std::to_array<CommandWord>({
     {"next line", false, true}, {"rollback", false, true}, {"reload", false, true}, {"yes", false, true}, {"no", false, true},
     {"next page", false, true}, {"previous page", false, true}, {"delete save", false, true}, {"next image", false, true},
     {"previous image", false, true}, {"setting", false, true}, {"reset settings", false, true}, {"reset controls", false, true},
-    {"reset progress", false, true}, {"back", false, true},
+    {"reset progress", false, true}, {"back", false, true}, {"move up", false, true}, {"move down", false, true}, {"move left", false, true},
+    {"move right", false, true}, {"press", false, true}, {"choose", false, true}, {"scroll up", false, true}, {"scroll down", false, true},
+    {"scroll to the top", false, true}, {"scroll to the end", false, true}, {"put back", false, true},
 });
 constexpr auto kDefinitions = std::to_array<std::string_view>({"character", "colour", "place", "font", "atlas", "sub-image", "setting", "style",
                                                                 "control", "gallery", "ending", "song", "achievement", "tip", "animation", "screen",
@@ -285,49 +339,59 @@ bool hasAppPart(const Line& screen, std::string_view name) {
     });
 }
 
-// "ending NAME", "achievement NAME" and "tip NAME" with nothing after the name are the story reaching
-// one; with a title after it, they list one.
-bool isRecordMark(std::string_view text, std::string_view head) {
-    return (head == "ending" || head == "achievement" || head == "tip") && afterWords(text, 2).empty();
-}
-
+// A kind of part: its settings are these (a list's: the ones of its items' size and spacing it uses, one
+// whose items go one way with spacing= alone, and glide=, glide_speed=, glide_distance= when it's dragged
+// to scroll), besides any part's (place, size, look).
 struct KindSpec {
     std::string_view name;
     ElementKind kind;
     std::string_view style; // style used when the element names none
-    std::array<std::string_view, 24> options;
-    bool list = false;      // a list or grid of items: also columns= item_width= item_height= spacing= spacing_across= spacing_down=
+    std::array<std::string_view, 28> options;
 };
-constexpr auto kListOptions = std::to_array<std::string_view>({"columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down", "glide", "glide_speed", "glide_distance"});
 constexpr std::array kKinds{
     KindSpec{"image", ElementKind::Image, "", {"fit", "flip", "repeat", "chosen", "scroll", "scroll_round", "bottom"}}, // (an image, a colour, or one fading to bottom=)
     KindSpec{"text", ElementKind::Text, "text", {"chosen", "width_at_most", "lines"}},
-    KindSpec{"button", ElementKind::Button, "button", {"action", "confirm", "key", "clickable", "chosen", "drag", "drop", "click_animation"}},
-    KindSpec{"key", ElementKind::Key, "", {"action", "confirm"}},
+    KindSpec{"button", ElementKind::Button, "button", {"action", "confirm", "keys", "clickable", "chosen", "drag", "drop", "click_animation"}},
     KindSpec{"namebox", ElementKind::Namebox, "namebox", {"bar", "bar_colour"}},
     KindSpec{"dialogue", ElementKind::Dialogue, "dialogue", {}},
     KindSpec{"indicator", ElementKind::Indicator, "indicator", {"bob", "bob_speed", "pause_image"}},
-    KindSpec{"choices", ElementKind::Choices, "choice", {"position", "locked_style", "picked_before_style"}, true},
-    KindSpec{"history", ElementKind::History, "history",
-             {"name_width", "close_at_end", "name_style", "text_style", "choice_style", "voice", "back", "button_style"}, true},
-    KindSpec{"pages", ElementKind::Pages, "tab", {"wide_tab_width", "mode", "auto", "quick"}, true},
-    KindSpec{"slots", ElementKind::Slots, "slot", {"mode", "delete", "title_style", "text_style", "empty_style", "confirm", "load_confirm", "delete_confirm"}, true},
-    KindSpec{"notice", ElementKind::Notice, "notice", {}},
+    KindSpec{"choices", ElementKind::Choices, "choice",
+             {"position", "locked_style", "picked_before_style", "columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down"}},
+    KindSpec{"history", ElementKind::History, "history", // (its lines one under another: only the gap between them)
+             {"name_width", "close_at_end", "name_style", "text_style", "choice_style", "voice", "back", "button_style", "spacing", "scrollbar", "scrollbar_thickness",
+              "glide", "glide_speed", "glide_distance"}},
+    KindSpec{"pages", ElementKind::Pages, "tab", {"wide_tab_width", "mode", "auto", "quick", "item_width", "item_height", "spacing"}}, // (its tabs in a row)
+    KindSpec{"slots", ElementKind::Slots, "slot",
+             {"mode", "delete", "title_style", "text_style", "empty_style", "confirm", "load_confirm", "delete_confirm", "columns", "item_width", "item_height", "spacing",
+              "spacing_across", "spacing_down"}},
     KindSpec{"face", ElementKind::Face, "face", {"fit", "flip"}}, // flip=yes mirrors every face (and face_flip=yes ones back)
     KindSpec{"control", ElementKind::Control, "setting", {"slot", "waiting"}},
-    KindSpec{"gallery", ElementKind::Gallery, "gallery", {"action", "title_style", "locked_style"}, true},
-    KindSpec{"page", ElementKind::Page, "page", {"name_width", "name_style", "text_style"}, true},
+    KindSpec{"gallery", ElementKind::Gallery, "gallery",
+             {"action", "title_style", "locked_style", "columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down", "scrollbar", "scrollbar_thickness",
+              "glide", "glide_speed", "glide_distance"}},
+    KindSpec{"page", ElementKind::Page, "page", {"name_width", "name_style", "text_style", "spacing"}}, // (its lines one under another)
     KindSpec{"input", ElementKind::Input, "input", {"variable", "most_letters", "placeholder", "action", "confirm", "clickable"}},
     KindSpec{"bar", ElementKind::Bar, "bar", {"value", "full_at", "vertical", "track", "fill"}},
     KindSpec{"slider", ElementKind::Slider, "slider", {"variable", "setting", "minimum", "maximum", "step", "track", "fill", "knob", "clickable", "action"}},
     KindSpec{"movie", ElementKind::Movie, "", {"fit", "loop", "volume"}},
-    KindSpec{"endings", ElementKind::Endings, "record", {"title_style", "text_style", "locked_style", "secret"}, true},
-    KindSpec{"songs", ElementKind::Songs, "record", {"title_style", "text_style", "locked_style"}, true},
-    KindSpec{"achievements", ElementKind::Achievements, "record", {"title_style", "text_style", "locked_style", "secret"}, true},
-    KindSpec{"tips", ElementKind::Tips, "record", {"action", "title_style", "locked_style", "unread_style"}, true},
-    KindSpec{"flowchart", ElementKind::Flowchart, "flowchart", {"line", "chapter_style", "ending_style", "unreached_style", "choice_style", "confirm"}, true},
-    KindSpec{"container", ElementKind::Container, "", {"chosen", "fit", "scroll", "scrollbar", "scrollbar_thickness", "glide", "glide_speed", "glide_distance", "edges", "fading_edges",
-                                                        "stack", "list", "position", "item_animation", "app", "title", "icon", "count"}, true},
+    KindSpec{"endings", ElementKind::Endings, "record",
+             {"title_style", "text_style", "locked_style", "secret", "columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down", "scrollbar",
+              "scrollbar_thickness", "glide", "glide_speed", "glide_distance"}},
+    KindSpec{"songs", ElementKind::Songs, "record",
+             {"title_style", "text_style", "locked_style", "columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down", "scrollbar", "scrollbar_thickness",
+              "glide", "glide_speed", "glide_distance"}},
+    KindSpec{"achievements", ElementKind::Achievements, "record",
+             {"title_style", "text_style", "locked_style", "secret", "columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down", "scrollbar",
+              "scrollbar_thickness", "glide", "glide_speed", "glide_distance"}},
+    KindSpec{"tips", ElementKind::Tips, "record",
+             {"action", "title_style", "locked_style", "unread_style", "columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down", "scrollbar",
+              "scrollbar_thickness", "glide", "glide_speed", "glide_distance"}},
+    KindSpec{"flowchart", ElementKind::Flowchart, "flowchart", // (its points as a tree: no columns)
+             {"line", "ending_style", "unreached_style", "choice_style", "confirm", "item_width", "item_height", "spacing", "spacing_across", "spacing_down", "scrollbar",
+              "scrollbar_thickness", "glide", "glide_speed", "glide_distance"}},
+    KindSpec{"container", ElementKind::Container, "",
+             {"chosen", "fit", "scroll", "scrollbar", "scrollbar_thickness", "glide", "glide_speed", "glide_distance", "edges", "fading_edges", "stack", "list", "position",
+              "item_animation", "columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down", "app", "title", "icon", "count"}},
 };
 constexpr auto kColourOptions = std::to_array<std::string_view>({"bottom", "bar_colour", "track", "fill", "knob", "line"});
 constexpr auto kFormulaOptions = std::to_array<std::string_view>({"value", "minimum", "maximum", "full_at", "most_letters", "step"});
@@ -345,11 +409,12 @@ constexpr std::pair<std::string_view, Ease> kEases[]{{"linear", Ease::Linear}, {
                                                      {"inout", Ease::InOut},   {"bounce", Ease::Bounce}, {"spring", Ease::Spring},
                                                      {"overshoot", Ease::Overshoot}};
 constexpr std::pair<std::string_view, TextAppears> kTextAppears[]{{"letter", TextAppears::Letter}, {"word", TextAppears::Word}, {"line", TextAppears::Line}};
-constexpr std::pair<std::string_view, NewMessages> kNewMessages[]{{"button", NewMessages::Button}, {"open", NewMessages::Open}, {"notice", NewMessages::Notice}};
+constexpr std::pair<std::string_view, NewMessages> kNewMessages[]{{"button", NewMessages::Button}, {"open", NewMessages::Open}};
 constexpr std::pair<std::string_view, ChatMessages> kChatMessages[]{{"typed", ChatMessages::Typed}, {"click", ChatMessages::Click}};
+constexpr std::pair<std::string_view, TimeKind> kTimeKinds[]{{"none", TimeKind::None}, {"story", TimeKind::Story}, {"real", TimeKind::Real}, {"days", TimeKind::Days}};
 constexpr std::pair<std::string_view, MouthMoves> kMouthMoves[]{{"yes", MouthMoves::Yes}, {"voice", MouthMoves::Voice}, {"no", MouthMoves::No}};
 constexpr std::pair<std::string_view, int> kScalings[]{{"fit", 0}, {"integer", 1}, {"stretch", 2}, {"fill", 3}};
-constexpr std::pair<std::string_view, int> kMouths[]{{"always", 0}, {"yes", 0}, {"voice", 1}, {"never", 2}, {"no", 2}};
+constexpr std::pair<std::string_view, int> kMouths[]{{"yes", 0}, {"voice", 1}, {"no", 2}};
 
 std::optional<Align> toAlign(std::string_view s) {
     if (s == "left" || s == "top" || s == "start") return Align::Start;
@@ -459,13 +524,25 @@ private:
         return std::move(*e);
     }
 
-    // A text's {values} and tags: {tip NAME} one that's listed, {colour NAME} a colour or a value holding one.
+    // A text's {values} and tags: {tip NAME} one that's listed, {colour NAME} a colour or a value holding one,
+    // {speed N} whole letters a second, {pause N} seconds, {appears HOW} letter, word or line.
     void checkTextOf(const Line& line, std::string_view text) {
         if (auto problem = checkText(text); !problem.empty()) return error(line, problem);
         readValues(line, text);
         const Lookup none = [](std::string_view) { return Value{0}; };
         (void)expand(text, none, [&](std::string_view tag, std::string_view name, std::size_t) {
             if (tag == "colour" && !name.empty() && !parseColour(name, &s_.palette)) read(line, lower(name));
+            if (tag == "speed") {
+                const auto n = parseNumber(name);
+                if (!n || *n < 0.0f || *n != std::floor(*n))
+                    error(line, name.empty() ? "{speed} needs how many letters a second (0: at once)."_tr()
+                                             : "{{speed}} needs a whole number of letters a second (0: at once), not '{}'."_tr(name));
+            }
+            if (tag == "pause" && !name.empty())
+                if (const auto n = parseNumber(name); !n || *n < 0.0f) error(line, "{{pause}} needs a number of seconds (none: until a click), not '{}'."_tr(name));
+            if (tag == "appears" && lower(name) != "letter" && lower(name) != "word" && lower(name) != "line")
+                error(line, name.empty() ? "{appears} needs how the words appear: letter, word or line."_tr()
+                                         : "{{appears}} needs letter, word or line, not '{}'."_tr(name));
             if (tag != "tip") return;
             if (name.empty()) error(line, "{tip} needs the name of a tip."_tr());
             else if (!s_.record(RecordKind::Tip, name))
@@ -500,8 +577,8 @@ private:
     }
     void wrote(std::string name) { written_.push_back(std::move(name)); }
 
-    // Each name read is something: a variable (one the scripts set, add to, subtract from, toggle, ask for or
-    // start with, or a slider's or input's), a task's (task.NAME), a value the engine gives (its built-in ones,
+    // Each name read is something: a variable (one the scripts set, add to, subtract from, toggle or
+    // start with, or a slider's or input's), a value the engine gives (its built-in ones,
     // the player's settings, answer and dropped), a record's (persistent.ending.NAME...), or, in a part inside a
     // list, its items' ({chat.name}).
     void checkNames() {
@@ -582,7 +659,7 @@ private:
     std::optional<Cursor> words(const Line& line, std::string_view text) {
         auto w = splitWords(text);
         if (!w) {
-            error(line, std::format("In '{}': {}.", text, w.error()));
+            error(line, "In '{}': {}."_tr(text, w.error()));
             return std::nullopt;
         }
         return Cursor(std::move(*w));
@@ -651,7 +728,7 @@ private:
                 callBlock(line);
             } else if (head == "together" && (exact || hasBlock) && afterWords(line.text, 1).empty()) {
                 together(line);
-            } else if (std::ranges::contains(kDefinitions, head) && !asText_.contains(&line) && !isRecordMark(line.text, head)) {
+            } else if (std::ranges::contains(kDefinitions, head) && !asText_.contains(&line)) {
                 if (phase_ == Phase::Definitions) defs_.push_back(&line);
             } else {
                 if (phase_ == Phase::Story && !(chat_ && chatStatement(line))) statement(line);
@@ -694,7 +771,7 @@ private:
         return i;
     }
 
-    // choice [prompt] [settings] with one indented option per line; each option's own lines run when
+    // choice [settings] with one indented option per line; each option's own lines run when
     // it's picked.
     void menu(const Line& line) {
         if (phase_ == Phase::Definitions) {
@@ -782,7 +859,7 @@ private:
     }
 
     // together, with lines indented under it: they all show at once, each in its own textbox (a
-    // character's textbox=, or the textbox now), and the story waits for the last.
+    // character's textbox=, or the usual one), and the story waits for the last.
     void together(const Line& line) {
         if (phase_ == Phase::Definitions) return block(line.children);
         const std::size_t first = s_.code.size();
@@ -832,18 +909,6 @@ private:
             if (length == word.size() && lower(text.substr(start, length)) == word) return start;
         return std::string_view::npos;
     }
-    // "Mika, Kaede and Haru": the names.
-    [[nodiscard]] static std::vector<std::string> nameList(std::string_view text) {
-        std::string list(text);
-        for (std::size_t at = 0; (at = lower(list).find(" and ")) != std::string::npos;) list.replace(at, 5, ",");
-        std::vector<std::string> out;
-        for (auto&& part : std::views::split(std::string_view(list), ',')) {
-            std::string name = unquote(trim(std::string_view(part.begin(), part.end())));
-            if (!name.empty()) out.push_back(std::move(name));
-        }
-        return out;
-    }
-
     // While a chat scene's lines are read: its chat.
     struct ChatContext {
         std::string with;      // the person's name as shown
@@ -860,7 +925,7 @@ private:
         std::string name(trim(afterWords(line.text, 1)));
         if (name.ends_with(':')) name.pop_back();
         name = unquote(name);
-        if (name.empty()) return error(line, "Whose chat it is is missing."_tr());
+        if (name.empty()) return error(line, "Who the chat is with is missing."_tr());
         const Who who = whoOf(name, false);
         const cmd::Chat c{.with = shownName(who)};
         if (!screenLines_.contains("phone")) error(line, "A chat needs a screen called 'phone'."_tr());
@@ -1047,7 +1112,7 @@ private:
             rest = std::string(trim(std::string_view(rest).substr(0, at)));
         }
         const Who who = whoOf(rest, false);
-        if (who.empty()) return error(line, "Who the call is with is missing."_tr());
+        if (who.empty()) return error(line, "Who the call is from is missing."_tr());
         c.character = who.character;
         c.sender = who.sender;
         if (chat_) error(line, "A call can't be inside a chat."_tr());
@@ -1136,6 +1201,7 @@ private:
         std::string name = lower(afterWords(line.text, 1));
         if (name.ends_with(':')) name.pop_back();
         if (!isName(name)) return error(line, "'{}' can't be a scene name (one word of letters, numbers, _ and -)."_tr(name));
+        emit(cmd::End{}, line, true); // (the scene before ends here: it never runs on into this one)
         if (auto [it, fresh] = s_.scenes.emplace(name, s_.code.size()); !fresh)
             error(line, "There are two scenes called '{}'."_tr(name));
         else if (name == "start" && line.file != builtinFiles_)
@@ -1244,14 +1310,6 @@ private:
             if (!name) return std::nullopt;
             return finished(cmd::Screen{.name = *name, .show = verb == "show"});
         }
-        if (verb == "hide" && c.take("textbox")) { // hide textbox [NAME]: its kept line goes (all of them without one)
-            cmd::Textbox t{.hide = true};
-            if (const auto name = c.next()) {
-                t.screen = lower(*name);
-                if (!screenLines_.contains(t.screen)) return fail(line, "There's no screen called '{}'."_tr(t.screen));
-            }
-            return finished(t);
-        }
         if (verb == "hide" && c.take("ui")) {
             if (story) return fail(line, "'hide ui' only works in buttons and keys."_tr());
             return finished(cmd::Ui{.verb = "hide ui"});
@@ -1301,25 +1359,14 @@ private:
             if (none && e.seconds > 0.0f) return fail(line, "'effect none' doesn't last for a time."_tr());
             return e;
         }
-        if (verb == "jump" || verb == "call") {
+        if (verb == "jump") {
             if (c.at("screen")) return fail(line, "'{}' goes to a scene, not a screen."_tr(verb));
             const auto scene = c.next();
-            if (!scene || !isName(*scene)) return fail(line, "'{}' needs a scene name."_tr(verb));
-            return finished(cmd::Jump{.scene = lower(*scene), .call = verb == "call"});
+            if (!scene) return fail(line, "Which scene to go to is missing."_tr());
+            if (!isName(*scene)) return fail(line, "'{}' needs a scene name."_tr(verb));
+            return finished(cmd::Jump{.scene = lower(*scene)});
         }
-        if (verb == "return") return finished(cmd::Return{});
-        if (verb == "end") return finished(cmd::End{});
         if (verb == "set" || verb == "add" || verb == "subtract" || verb == "toggle") return change(line, verb, rest);
-        if (verb == "gallery" || verb == "ending" || verb == "achievement" || verb == "tip") { // gallery IMAGE / ending NAME / ...
-            const RecordKind kind = verb == "gallery" ? RecordKind::Gallery : verb == "ending" ? RecordKind::Ending
-                                  : verb == "achievement" ? RecordKind::Achievement : RecordKind::Tip;
-            const auto name = c.next();
-            if (!name) return fail(line, "'{}' needs a name."_tr(verb));
-            if (!s_.record(kind, *name))
-                return fail(line, "There's no {} called '{}'."_tr(
-                                              kind == RecordKind::Gallery ? "gallery image" : kRecordKinds[static_cast<std::size_t>(kind)], *name));
-            return finished(cmd::Record{.kind = kind, .name = *name});
-        }
         if (verb == "music" || verb == "sound" || verb == "voice") return play(line, verb, c);
         if (verb == "chat") return fail(line, "'{}' needs its lines indented under it."_tr(verb)); // (with its lines: block() reads them)
         if (verb == "phone") return phone(line, rest);
@@ -1343,24 +1390,9 @@ private:
             if (!n) return fail(line, "'wait' takes a number of seconds, or nothing."_tr());
             return finished(cmd::Wait{.seconds = std::max(0.0f, *n)});
         }
-        if (verb == "ask") return ask(line, c);
+        if (verb == "time") return timeLine(line, c);
         if (verb == "weather") return weather(line, c);
         if (verb == "camera") return camera(line, c, story);
-        if (verb == "textbox") { // textbox NAME (or just "textbox": back to the usual one)
-            cmd::Textbox t{.screen = lower(c.next().value_or("textbox"))};
-            if (!screenLines_.contains(t.screen)) return fail(line, "There's no screen called '{}' to use as the textbox."_tr(t.screen));
-            return finished(t);
-        }
-        if (verb == "new page") return finished(cmd::Textbox{.newPage = true});
-        if (verb == "chapter" || verb == "flowchart") { // chapter TITLE / flowchart TITLE (the rest of the line; quotes are optional)
-            std::string title = unquote(trim(rest));
-            if (title.empty())
-                return fail(line, verb == "chapter" ? "The chapter's title is missing."_tr()
-                                                    : "The flowchart's name for this point is missing."_tr());
-            checkTextOf(line, title);
-            if (verb == "flowchart") return cmd::Mark{.title = std::move(title)};
-            return cmd::Chapter{.title = std::move(title)};
-        }
         if (verb == "movie") { // movie NAME [loop] [skip=no] [volume 80%]
             cmd::Movie m{.file = c.next().value_or("")};
             if (m.file.empty()) return fail(line, "Which movie to play is missing."_tr());
@@ -1383,9 +1415,8 @@ private:
 
         // Menu and engine commands.
         cmd::Ui ui{.verb = verb};
-        if (verb == "notice" || verb == "answer") { // the rest of the line (quotes are optional)
+        if (verb == "answer") { // the rest of the line (quotes are optional)
             ui.arg = unquote(rest, true);
-            if (verb == "notice" && ui.arg.empty()) return fail(line, "The notice's words are missing."_tr());
             checkTextOf(line, ui.arg);
             return ui;
         }
@@ -1441,6 +1472,12 @@ private:
                                                                                                                   : "Who to call is missing."_tr());
             return ui;
         }
+        if (verb == "choose") { // choose N: the choice's option N (the first is 1)
+            const auto n = c.done() ? std::nullopt : parseNumber(*c.next());
+            if (!n || *n < 1.0f || *n != std::floor(*n)) return fail(line, "Which option to choose is missing: its number, 1 for the first."_tr());
+            ui.arg = std::format("{}", static_cast<int>(*n));
+            return finished(ui);
+        }
         if (verb == "keypad") { // keypad 0 to 9, or keypad back: the phone's lock screen's keypad
             const auto key = c.next();
             if (!key || !(lower(*key) == "back" || (key->size() == 1 && (*key)[0] >= '0' && (*key)[0] <= '9')))
@@ -1464,19 +1501,24 @@ private:
         return fail(line, "'phone' only starts a call: phone call WHO, with what's said indented under it."_tr());
     }
 
-    // A player setting's value as a number: a number, yes / no, or (scaling, mouths) its word.
+    // A player setting's value as a number: a number, yes / no, or (scaling, mouths) its word; auto_delay's seconds
+    // as milliseconds.
     std::optional<int> settingNumber(const Line& line, const std::string& setting, std::string_view key, std::string_view value) {
         if (setting == "mouths") return oneOf<int>(line, key, value, kMouths);
+        if (setting == "auto_delay") {
+            const auto seconds = number(line, value, key);
+            return seconds ? std::optional(static_cast<int>(std::lround(*seconds * 1000.0f))) : std::nullopt;
+        }
         if (const auto b = parseBool(value)) return *b ? 1 : 0;
         if (setting == "scaling" && !parseNumber(value)) return oneOf<int>(line, key, value, kScalings);
         if (const auto x = number(line, value, key)) return value.ends_with('%') ? static_cast<int>(std::lround(*x * 100.0f)) : static_cast<int>(*x); // (80%: 80)
         return std::nullopt;
     }
 
-    // show NAME [expression] [at POSITION] [as TAG] [x= y= zoom= ...] [animation=NAME] [with ANIMATION] [and wait]
+    // show NAME [expression] [at POSITION] [x= y= zoom= ...] [animation=NAME] [with ANIMATION] [and wait]
     std::optional<Command> show(const Line& line, Cursor& c, bool story) {
         cmd::Show show;
-        auto keyword = [&] { return c.at("at") || c.at("to") || c.at("as") || c.at("with") || c.at("and") || c.peek().text.find('=') != std::string::npos; };
+        auto keyword = [&] { return c.at("at") || c.at("to") || c.at("with") || c.at("and") || c.peek().text.find('=') != std::string::npos; };
         if (const CharacterDef* def = takeCharacter(c)) {
             show.character = show.tag = def->key;
             if (!c.done() && !keyword()) show.expression = *c.next();
@@ -1489,10 +1531,6 @@ private:
         while (!c.done()) {
             if (c.take("at") || c.take("to")) {
                 if (!place(line, c, show.props)) return std::nullopt;
-            } else if (c.take("as")) {
-                const auto tag = c.next();
-                if (!tag) return fail(line, "'as' needs a name after it."_tr());
-                show.tag = lower(*tag);
             } else if (const Took t = withAnimation(line, c, show.with); t != Took::No) {
                 if (t == Took::Bad) return std::nullopt;
             } else if (const Took w = andWait(line, c, show.wait, story); w != Took::No) {
@@ -1594,6 +1632,7 @@ private:
     std::optional<Command> change(const Line& line, const std::string& verb, std::string_view rest) {
         cmd::Set set{.op = verb == "add" ? '+' : verb == "subtract" ? '-' : verb == "toggle" ? '!' : '='};
         std::string_view value;
+        const std::string spaced = " " + std::string(rest); // (add and subtract: a value left out, "add to x", still has the word)
         if (verb == "set") {
             std::size_t i = 0;
             while (i < rest.size() && !std::isspace(static_cast<unsigned char>(rest[i])) && rest[i] != '=' && rest[i] != '+' && rest[i] != '-') ++i;
@@ -1606,23 +1645,34 @@ private:
                 value.remove_prefix(1);
             } else if (lower(firstWord(value)) == "to") {
                 value = afterWords(value, 1);
-            } else {
+            } else if (!set.variable.empty() && value.empty()) {
+                return fail(line, "What to set {} to is missing."_tr(set.variable));
+            } else if (!set.variable.empty()) {
                 return fail(line, "'set' needs a name, 'to' and a value."_tr());
             }
         } else if (verb == "toggle") {
             set.variable = lower(rest);
         } else {
             const std::string_view word = verb == "add" ? " to " : " from ";
-            const auto at = lower(rest).rfind(word);
-            if (at == std::string::npos)
-                return fail(line, verb == "add" ? "'add' needs a value, 'to' and a name."_tr()
-                                                : "'subtract' needs a value, 'from' and a name."_tr());
-            value = rest.substr(0, at);
-            set.variable = lower(trim(rest.substr(at + word.size())));
+            if (const auto at = lower(spaced).rfind(word); at != std::string::npos) {
+                value = trim(std::string_view(spaced).substr(0, at));
+                set.variable = lower(trim(std::string_view(spaced).substr(at + word.size())));
+            }
         }
+        if (set.variable.empty())
+            return fail(line, verb == "add"        ? "Which variable to add to is missing."_tr()
+                              : verb == "subtract" ? "Which variable to subtract from is missing."_tr()
+                              : verb == "toggle"   ? "Which variable to toggle is missing."_tr()
+                                                   : "Which variable to set is missing."_tr());
         if (!isVariable(set.variable))
             return fail(line, "'{}' can't be a variable name (one word of letters, numbers and _)."_tr(
                                           set.variable));
+        for (std::size_t k = 0; k < kRecordKinds.size(); ++k) // (a record's, persistent.ending.NAME: one the game lists)
+            if (const std::string head = std::format("persistent.{}.", kRecordKinds[k]); set.variable.starts_with(head)) {
+                const auto kind = static_cast<RecordKind>(k);
+                if (!s_.record(kind, set.variable.substr(head.size())))
+                    return fail(line, "There's no {} called '{}'."_tr(kind == RecordKind::Gallery ? "gallery image" : kRecordKinds[k], set.variable.substr(head.size())));
+            }
         wrote(set.variable);
         if (set.op != '!') {
             set.value = formula(line, value);
@@ -1631,19 +1681,29 @@ private:
         return set;
     }
 
-    // music FILE [once] | sound FILE [loop] [as CHANNEL] | voice FILE [text_follows=yes|no], then [fade 2] [volume 50%]
+    // music FILE [once] | sound FILE [loop] [as CHANNEL] | voice FILE [text_follows=yes|no], then [fade 2] [volume 50%]; music
+    // and sound: [fade_out 1] (what played before fades out)
     std::optional<Command> play(const Line& line, std::string_view verb, Cursor& c) {
         cmd::Play p{.track = verb == "music" ? cmd::Play::Track::Music : verb == "voice" ? cmd::Play::Track::Voice : cmd::Play::Track::Sound,
                     .loop = verb == "music"};
         const auto file = c.next();
         if (!file)
-            return fail(line, "Which file to play is missing."_tr());
+            return fail(line, verb == "music" ? "Which song to play is missing."_tr() : verb == "voice" ? "Which voice file to play is missing."_tr()
+                                                                                       : "Which sound to play is missing."_tr());
+        static constexpr auto kWords = std::to_array<std::string_view>({"fade", "fade_out", "volume", "once", "loop", "as"});
+        if (std::ranges::contains(kWords, lower(*file)) || file->contains('=')) // (the file left out, and what comes after it in its place)
+            return fail(line, verb == "music" ? "Which song to play is missing."_tr() : verb == "voice" ? "Which voice file to play is missing."_tr()
+                                                                                       : "Which sound to play is missing."_tr());
         if (lower(*file) == "stop") return fail(line, "'stop' isn't a file to play."_tr());
         p.file = *file;
         readValues(line, p.file);
+        float fadeOut = 0.0f;
         while (!c.done()) {
             if (const Took t = amount(line, c, "fade", p.fade); t != Took::No) {
                 if (t == Took::Bad) return std::nullopt;
+            } else if (const Took o = verb == "voice" ? Took::No : amount(line, c, "fade_out", fadeOut); o != Took::No) {
+                if (o == Took::Bad) return std::nullopt;
+                p.fadeOut = fadeOut;
             } else if (const Took v = amount(line, c, "volume", p.volume); v != Took::No) {
                 if (v == Took::Bad) return std::nullopt;
             } else if (verb == "music" && c.take("once")) {
@@ -1717,29 +1777,61 @@ private:
                 return fail(line, "'{}' doesn't belong in a camera line."_tr(c.peek().text));
             }
         }
-        if (!cam.animation && !cam.with) return fail(line, "A camera line needs an animation."_tr());
+        if (!cam.animation && !cam.with) return fail(line, "Which animation to play is missing."_tr());
         return cam;
     }
 
-    // ask NAME "Prompt" [default=TEXT] [most_letters=N]
-    std::optional<Command> ask(const Line& line, Cursor& c) {
-        cmd::Ask a;
-        const auto name = c.next();
-        if (!name || !isVariable(lower(*name))) return fail(line, "'ask' needs a variable name and a question."_tr());
-        a.variable = lower(*name);
-        wrote(a.variable);
+    // time WHEN [day=N] (WHEN: a weekday, and a time of day or a part of the day; none: the same time) | time passes [N minutes|hours|days]
+    std::optional<Command> timeLine(const Line& line, Cursor& c) {
+        const GameSettings& g = s_.gameSettings;
+        if (g.time == TimeKind::None) return fail(line, "A time line needs the game's time: choose one in Settings > Time."_tr());
+        std::string parts; // (the game's, as the errors list them)
+        for (const auto& [name, start] : g.dayParts) parts += (parts.empty() ? "" : ", ") + name;
+        // What it can go on to, as the game's time has it: a clock time (not with days and parts of the day), a part of
+        // the day, a weekday (real time's calendar, or a date or a weekday it starts at), a day number.
+        const bool clocked = g.time != TimeKind::Days, weekdays = g.time == TimeKind::Real || g.timeStartDate >= 0 || g.timeStartWeekday >= 0;
+        const std::string when = std::format("{}{}{} {}", clocked ? "a time of day ({}), "_tr(g.clock12 ? "6:30 pm" : "18:30") : std::string{},
+                                             "a part of the day ({})"_tr(parts), weekdays ? std::string(", a weekday"_tr()) : std::string{}, "or a day number"_tr());
+        cmd::Time t;
+        if (c.take("passes")) { // (how long: minutes, hours or days; nothing: to the next part of the day)
+            t.passes = true;
+            if (c.done()) return t;
+            const auto n = c.number();
+            int unit = 0;
+            for (const auto& [word, minutes] : {std::pair{"minute", 1}, {"minutes", 1}, {"hour", 60}, {"hours", 60}, {"day", 1440}, {"days", 1440}})
+                if (!unit && c.take(word)) unit = minutes;
+            if (!n || *n <= 0.0f || !unit || !c.done())
+                return fail(line, clocked ? "How long is a number of minutes, hours or days: 30 minutes, 2 hours, 1 day (or nothing: to the next part of the day)."_tr()
+                                        : "How long is a number of days: 1 day, 2 days (or nothing: to the next part of the day)."_tr());
+            t.passing = std::max(1, static_cast<int>(std::lround(*n * static_cast<float>(unit))));
+            return t;
+        }
         while (!c.done()) {
-            if (auto opt = c.option()) {
-                if (opt->first == "default") a.fallback = opt->second;
-                else if (opt->first == "most_letters" && parseNumber(opt->second)) a.mostLetters = std::max(1, static_cast<int>(*parseNumber(opt->second)));
-                else return fail(line, "'ask' has no setting '{}'."_tr(opt->first));
+            if (c.atOption("day")) { // day=N: that day of the story (the first is 1)
+                const auto n = parseNumber(c.option()->second);
+                if (!n || *n < 1.0f || *n != std::floor(*n)) return fail(line, "The day number is 1 or more: 1 is the first day."_tr());
+                t.day = static_cast<int>(*n);
+                continue;
+            }
+            const std::string word = *c.next();
+            std::string clock = word; // (6:30 pm: the am or pm as a word of its own)
+            if (c.at("am") || c.at("pm")) clock += *c.next();
+            if (const auto weekday = weekdayNamed(word); weekday && t.weekday < 0) {
+                t.weekday = *weekday;
+            } else if (const auto minutes = clockMinutes(clock); minutes && t.minutes < 0 && t.part.empty()) {
+                t.minutes = *minutes;
+            } else if (const auto part = std::ranges::find(g.dayParts, lower(word), &std::pair<std::string, int>::first);
+                       part != g.dayParts.end() && t.minutes < 0 && t.part.empty()) {
+                t.part = part->first;
             } else {
-                a.prompt += (a.prompt.empty() ? "" : " ") + *c.next();
+                return fail(line, "'{}' isn't {}, or it's said twice."_tr(word, when));
             }
         }
-        if (a.prompt.empty()) return fail(line, "The question to ask is missing."_tr());
-        checkTextOf(line, a.prompt);
-        return a;
+        if (t.weekday < 0 && t.day == 0 && t.minutes < 0 && t.part.empty())
+            return fail(line, "When it goes on to is missing: {}."_tr(when));
+        if (t.weekday >= 0 && !weekdays)
+            return fail(line, "A weekday needs one to start from: Settings > Time > Starts at (a date or a weekday)."_tr());
+        return t;
     }
 
     // Button, key and hook actions: commands separated by ';'.
@@ -1790,9 +1882,46 @@ private:
                     const bool lenient = capitalised(line->text) && line->children.empty();
                     if (!attempt(lenient, [&] { define(*line, kind); })) asText_.insert(line);
                 }
+        startTime();
         for (const auto& [key, line] : animationSettings_) // (setting animation_on_show and animation_on_hide: animations the scripts have)
             if (const std::string& name = key == "animation_on_show" ? s_.gameSettings.animationOnShow : s_.gameSettings.animationOnHide; !name.empty() && !s_.animations.contains(name))
                 error(*line, "There's no animation called '{}'."_tr(name));
+    }
+
+    // setting time_start: a date (2025-07-14) or a weekday, then a time of day or a part of the day; none said: the first
+    // part of the day for days and parts, else 8:00. Real time doesn't read it.
+    void startTime() {
+        GameSettings& g = s_.gameSettings;
+        g.timeStartMinutes = g.time == TimeKind::Days ? g.dayParts.front().second : 480;
+        if (!timeStart_.second || g.time == TimeKind::Real) return; // (real time: the computer's clock and calendar, never a start)
+        const Line& line = *timeStart_.second;
+        const auto w = piecesOf(timeStart_.first);
+        bool clock = false;
+        for (std::size_t i = 0; i < w.size(); ++i) {
+            const std::string word = lower(w[i]);
+            int year = 0, month = 0, day = 0;
+            const auto dashes = piecesOf(word, '-');
+            const auto part = std::ranges::find(g.dayParts, word, &std::pair<std::string, int>::first);
+            std::string at = word; // (6:30 pm)
+            if (i + 1 < w.size() && (lower(w[i + 1]) == "am" || lower(w[i + 1]) == "pm")) at += lower(w[++i]);
+            if (dashes.size() == 3 && std::from_chars(dashes[0].data(), dashes[0].data() + dashes[0].size(), year).ec == std::errc{} &&
+                std::from_chars(dashes[1].data(), dashes[1].data() + dashes[1].size(), month).ec == std::errc{} &&
+                std::from_chars(dashes[2].data(), dashes[2].data() + dashes[2].size(), day).ec == std::errc{} && month >= 1 && month <= 12 && day >= 1 &&
+                dateFromDays(daysFromDate(year, month, day))[2] == day) { // (31 June isn't a day)
+                g.timeStartDate = daysFromDate(year, month, day);
+                g.timeStartWeekday = weekdayOf(g.timeStartDate);
+            } else if (const auto weekday = weekdayNamed(word); weekday && g.timeStartDate < 0) {
+                g.timeStartWeekday = *weekday;
+            } else if (const auto minutes = clockMinutes(at); minutes && !clock) {
+                g.timeStartMinutes = *minutes;
+                clock = true;
+            } else if (part != g.dayParts.end() && !clock) {
+                g.timeStartMinutes = part->second;
+                clock = true;
+            } else {
+                return error(line, "Starts at is a date (2025-07-14) or a weekday, then a time of day (8:00) or a part of the day: not '{}'."_tr(w[i]));
+            }
+        }
     }
 
     void define(const Line& line, std::string_view kind) {
@@ -2136,7 +2265,7 @@ private:
                 return error(line, "Controls have no setting '{}'."_tr(key));
             }
         }
-        if (control.action.empty()) return error(line, "A control needs 'action='."_tr());
+        if (control.action.empty()) return error(line, "The control's action is missing."_tr());
         std::erase_if(controlLines_, [&](const ControlLine& other) { return other.name == control.name; }); // the last one wins
         controlLines_.push_back(std::move(control));
     }
@@ -2245,6 +2374,8 @@ private:
     void record(const Line& line, RecordKind kind, Cursor& c) {
         const auto name = c.next();
         if (!name || (kind != RecordKind::Gallery && !isName(*name))) return error(line, "'{}' needs a name."_tr(kRecordKinds[static_cast<std::size_t>(kind)]));
+        if ((kind == RecordKind::Ending || kind == RecordKind::Achievement || kind == RecordKind::Tip) && name->contains('-')) // (what keeps it: persistent.ending.NAME)
+            return error(line, "'{}' can't be its name (one word of letters, numbers and _)."_tr(*name));
         Script::Record r{.name = *name, .title = c.next().value_or(*name)};
         if (r.title.empty()) r.title = *name; // (a title left empty, "": the name)
         while (!c.done()) {
@@ -2271,7 +2402,6 @@ private:
             Number{"skip_time", &GameSettings::skipTime, 0.0f, 10.0f},     Number{"auto_letter_delay", &GameSettings::autoLetterDelay, 0.0f, 10.0f},
             Number{"character_height", &GameSettings::characterHeight, 0.05f, 10.0f}, Number{"move_time", &GameSettings::moveTime, 0.0f, 60.0f},
 
-            Number{"notice_time", &GameSettings::noticeTime, 0.1f, 600.0f},
             Number{"music_crossfade", &GameSettings::musicCrossfade, 0.0f, 60.0f},
             Number{"glide_speed", &GameSettings::glideSpeed, 0.0f, 10.0f},      Number{"glide_distance", &GameSettings::glideDistance, 0.05f, 10.0f},
             Number{"scrollbar_thickness", &GameSettings::scrollbarThickness, 1.0f, 64.0f}, Number{"fading_edges", &GameSettings::fadingEdges, 0.0f, 1000.0f},
@@ -2292,7 +2422,8 @@ private:
         };
         static const std::map<std::string_view, bool GameSettings::*> flags{
             {"autosave", &GameSettings::autosave}, {"text_follows_voices", &GameSettings::textFollowsVoices}, {"developer", &GameSettings::developer}, {"glide", &GameSettings::glide},
-            {"blink", &GameSettings::blink}, {"resizable", &GameSettings::resizable}, {"phone_history", &GameSettings::phoneHistory}};
+            {"blink", &GameSettings::blink}, {"resizable", &GameSettings::resizable}, {"phone_history", &GameSettings::phoneHistory},
+            {"phone_follows_time", &GameSettings::phoneFollowsTime}, {"backgrounds_follow_time", &GameSettings::backgroundsFollowTime}};
         static const std::map<std::string_view, SDL_Color GameSettings::*> colours{
             {"narration_colour", &GameSettings::narrationColour},
             {"letterbox_colour", &GameSettings::letterboxColour}};
@@ -2348,10 +2479,33 @@ private:
             if (const auto on = boolean(line, value, key)) s_.startValues.insert_or_assign(key, *on ? 1 : 0);
         } else if (key == "phone_battery") { // (how full: 0 to 100)
             if (const auto full = number(line, value, key)) s_.startValues.insert_or_assign(key, std::clamp(static_cast<int>(std::lround(*full)), 0, 100));
-        } else if (key == "new_messages") { // button (the Phone button counts it), open (the phone opens) or notice: what tells players a message has come
+        } else if (key == "new_messages") { // button (the Phone button counts it) or open (the phone opens): what tells players a message has come
             set(c.newMessages, oneOf<NewMessages>(line, key, value, kNewMessages));
         } else if (key == "chat_messages") { // typed or click: how a chat scene's messages come
             set(c.chatMessages, oneOf<ChatMessages>(line, key, value, kChatMessages));
+        } else if (key == "time") { // none, story, real or days: the story's time
+            set(c.time, oneOf<TimeKind>(line, key, value, kTimeKinds));
+        } else if (key == "time_start") { // a date or a weekday, then a time or a part of the day (read once the parts are)
+            std::string all;
+            for (const std::string& word : v) all += (all.empty() ? "" : " ") + word;
+            timeStart_ = {all, &line};
+        } else if (key == "time_parts") { // "morning 6:00, afternoon 12:00, ...": each part of the day and when it starts
+            std::vector<std::pair<std::string, int>> parts;
+            std::string all;
+            for (const std::string& word : v) all += (all.empty() ? "" : " ") + word;
+            for (const std::string_view part : piecesOf(all, ',')) {
+                const auto said = piecesOf(part);
+                const auto starts = said.size() >= 2 ? clockMinutes(part.substr(said.front().size())) : std::nullopt;
+                if (!starts || !isName(said.front()) || std::ranges::contains(parts, lower(said.front()), &std::pair<std::string, int>::first))
+                    return error(line, "time_parts lists each part of the day with when it starts, commas between them: morning 6:00, evening 18:00."_tr());
+                parts.emplace_back(lower(said.front()), *starts);
+            }
+            if (parts.empty()) return error(line, "time_parts lists each part of the day with when it starts, commas between them: morning 6:00, evening 18:00."_tr());
+            std::ranges::sort(parts, {}, &std::pair<std::string, int>::second);
+            c.dayParts = std::move(parts);
+        } else if (key == "clock") { // 24 or 12: how times show (18:30, or 6:30 PM)
+            if (value == "24" || value == "12") c.clock12 = value == "12";
+            else error(line, "'clock' can be 24 or 12, not '{}'."_tr(value));
         } else if (key == "animation_on_show" || key == "animation_on_hide") { // what show and hide lines play when they name none (checked once the animations are read)
             (key == "animation_on_show" ? c.animationOnShow : c.animationOnHide) = lower(value) == "none" ? std::string{} : lower(value);
             std::erase_if(animationSettings_, [&](const auto& kept) { return kept.first == key; });
@@ -2462,7 +2616,6 @@ private:
         for (const auto& [name, line] : screenLines_) {
             ScreenDef def{.name = name};
             auto c = words(*line, afterWords(line->text, 2));
-            std::optional<bool> keyboard;
             while (c && !c->done()) {
                 const auto opt = c->option();
                 if (!opt) {
@@ -2474,7 +2627,6 @@ private:
                     if (const std::string v = lower(value); v == "waits" || v == "goes_on") def.storyWaits = v == "waits";
                     else error(*line, "'{}' can be {}, not '{}'."_tr(key, "waits or goes_on", value));
                 }
-                else if (key == "arrow_keys") keyboard = boolean(*line, value, key);
                 else if (key == "action_on_open") def.actionOnOpen = actions(*line, value);
                 else if (key == "close_after") def.closeAfter = std::max(0.0f, number(*line, value, key).value_or(0.0f));
                 else if (key == "action_on_close") def.actionOnClose = actions(*line, value);
@@ -2483,15 +2635,12 @@ private:
                         (key == "animation_on_open" ? def.animationOnOpen : def.animationOnClose) = std::make_shared<const Animation>(a->second);
                     else error(*line, "There's no animation called '{}'."_tr(value));
                 }
-                else if (key == "keep") def.keep = boolean(*line, value, key).value_or(false);
-                else if (key == "text_speed") def.textSpeed = std::max(0.05f, number(*line, value, key).value_or(1.0f));
                 else if (key == "stop_music_on_open") def.stopOnOpen.music = boolean(*line, value, key).value_or(false);
                 else if (key == "stop_music_on_close") def.stopOnClose.music = boolean(*line, value, key).value_or(false);
                 else if (key == "stop_voice_on_open") def.stopOnOpen.voice = boolean(*line, value, key).value_or(false);
                 else if (key == "stop_voice_on_close") def.stopOnClose.voice = boolean(*line, value, key).value_or(false);
                 else error(*line, "Screens have no setting '{}'."_tr(key));
             }
-            def.arrowKeys = keyboard.value_or(def.storyWaits);
             elements(def, line->children, -1);
             s_.screens.insert_or_assign(name, std::move(def));
         }
@@ -2543,9 +2692,7 @@ private:
             }
         el.style = style(styleName, line).value_or(Style{});
 
-        auto allowed = [&](std::string_view key) {
-            return std::ranges::contains(spec->options, key) || (spec->list && std::ranges::contains(kListOptions, key));
-        };
+        auto allowed = [&](std::string_view key) { return std::ranges::contains(spec->options, key); };
         for (const auto& [k, v] : props) {
             if (k == "style" || k == "name") continue; // (name=: what the editor calls it)
             if (k == "animation" || k == "pointed_animation" || k == "message_animation" || (allowed(k) && (k == "click_animation" || k == "item_animation"))) { // (any part's; a button's when it's clicked; a list's items')
@@ -2565,9 +2712,12 @@ private:
                 el.confirm = v;
             } else if (allowed(k) && (std::ranges::contains(kFormulaOptions, k) || (k == "count" && el.kind == ElementKind::Container))) {
                 if (auto e = formula(line, v)) el.exprs.insert_or_assign(k, std::move(*e));
-            } else if (allowed(k) && k == "key") {
-                el.key = parseKeyChord(v);
-                if (!el.key) error(line, "'{}' isn't a key name."_tr(v));
+            } else if (allowed(k) && k == "keys") { // (as a control's: several, by spaces or commas)
+                std::string list(v);
+                std::ranges::replace(list, ',', ' ');
+                for (const std::string& word : rawWords(list))
+                    if (const auto chord = parseKeyChord(word)) el.keys.push_back(*chord);
+                    else error(line, "'{}' isn't a key name."_tr(word));
             } else if (allowed(k) && (k == "clickable" || k == "chosen")) {
                 (k == "clickable" ? el.clickable : el.chosen) = formula(line, v);
             } else if (allowed(k) && k.ends_with("_style")) {
@@ -2577,7 +2727,7 @@ private:
                 if (auto col = colour(line, v)) el.colours.insert_or_assign(k, *col);
             } else if (allowed(k)) {
                 el.props.insert_or_assign(k, k == "variable" ? lower(v) : v);
-            } else if (!styleProp(el.style, k, v, line)) {
+            } else { // (its look: its style's alone, style=)
                 error(line, "'{}' has no setting '{}'."_tr(kind, k));
             }
         }
@@ -2587,11 +2737,6 @@ private:
         for (const auto& [key, value] : el.props) readValues(line, value); // (an app's title, an input's placeholder...)
 
         switch (el.kind) {
-        case ElementKind::Key:
-            el.key = parseKeyChord(el.text);
-            if (!el.key) error(line, "'{}' isn't a key name."_tr(el.text));
-            if (el.actions.empty()) error(line, "A key needs 'action='."_tr());
-            break;
         case ElementKind::Image: // (an image by name, a colour, or a box of its style's background; one fading down with bottom=)
             if (el.text.empty() && !el.colours.contains("bottom") && el.style.background.a == 0) error(line, "Which image to show is missing."_tr());
             break;
@@ -2606,13 +2751,13 @@ private:
                 if (!el.option("variable").empty()) error(line, "A slider changes a variable ('variable=') or a player setting ('setting='), not both."_tr());
                 break;
             }
-            if (el.kind == ElementKind::Slider && el.option("variable").empty()) error(line, "A slider needs 'variable=' (the variable it changes) or 'setting=' (the player setting)."_tr());
+            if (el.kind == ElementKind::Slider && el.option("variable").empty()) error(line, "Which variable or player setting the slider changes is missing."_tr());
             if (!el.option("variable").empty() && !isVariable(el.option("variable")))
                 error(line, "'{}' can't be a variable name."_tr(el.option("variable")));
             else if (!el.option("variable").empty()) wrote(el.option("variable"));
             break;
         case ElementKind::Bar:
-            if (!el.exprs.contains("value")) error(line, "A bar needs 'value='."_tr());
+            if (!el.exprs.contains("value")) error(line, "Which value the bar shows is missing."_tr());
             break;
         case ElementKind::Container: { // (list=, stack=, position=, app=: each one of its words)
             if (const std::string list = lower(el.option("list")); !list.empty()) {
@@ -2683,6 +2828,7 @@ private:
     std::vector<const Line*> defs_;
     std::set<const Line*> asText_; // capitalised lines that didn't work as definitions
     std::vector<std::pair<std::string, const Line*>> animationSettings_; // setting animation_on_show / animation_on_hide, and where
+    std::pair<std::string, const Line*> timeStart_{}; // setting time_start, and where
     // Places for "show NAME at PLACE": these, and the game's "place" lines, as the stage has them (as
     // stageCoordinate gives them: 0 at the left edge, 1 at the right; left is -0.6 in a place line).
     std::map<std::string, float, std::less<>> places_{
@@ -2704,6 +2850,11 @@ private:
 };
 
 } // namespace
+
+bool partTakes(std::string_view kind, std::string_view key) {
+    const auto spec = std::ranges::find(kKinds, kind, &KindSpec::name);
+    return spec != kKinds.end() && std::ranges::contains(spec->options, key);
+}
 
 // ---------------------------------------------------------------------------
 // Script
@@ -2789,30 +2940,33 @@ std::string Script::where(const Instruction& ins) const {
 // ---------------------------------------------------------------------------
 // The built-in screens
 // ---------------------------------------------------------------------------
-// The player's built-in screens: just what a story needs to play (its lines, its choices and its
-// notices). A game's own screens and controls replace these, and add the rest (a title screen, menus...).
+// The player's built-in screens: just what a story needs to play (its lines and its choices). A
+// game's own screens and controls replace these, and add the rest (a title screen, menus...).
 
 std::string_view defaultUi() {
     return R"vnext(
 control next_line keys="space mouse_left return kp_enter pad_a" action="next line"
 
-style choice size=24 align=centre align_vertically=centre background=#16192ae1 border=#ffffff2d pointed_background=#545caaf0 pointed_border=#96aaff chosen_background=#545caaf0 chosen_border=#96aaff unclickable_colour=#9696a5
-style notice size=20 background=#141626fa border=#96aaff padding=14
+style choice size=24 align=centre align_vertically=centre background=#2b2563 border=#5b51b8 pointed_background=#3b3392 chosen_background=#4d41c4 unclickable_colour=#9696a5 shadow=no
+
+style textbox_panel border=#5b51b8 opacity_follows=yes shadow=no
+style namebox size=28 background=#2b2563 padding=20 colour=speaker opacity_follows=yes shadow=no
+style dialogue size=28 text_size_follows=yes shadow=no
+style indicator colour=#ada2ff shadow=no
+style textbox_phone size=20 align=centre align_vertically=centre background=#2b2563 border=#5b51b8 pointed_background=#3b3392 shadow=no
+style textbox_unread size=15 colour=#0c0a22 align=centre align_vertically=centre shadow=no
 
 screen textbox story=goes_on
-    image #141626fa x=0 y=-0.8642 width=0.9375 height=0.2639 border=#ffffff2d opacity_follows=yes
-    namebox x=-0.9 y=-0.3947 height=0.0639 bar=3 size=28 background=#222644f5 padding=20 colour=speaker opacity_follows=yes
-    dialogue x=0 y=-0.4667 width=0.8875 size=28 text_size_follows=yes
-    indicator x=0.8938 y=-0.8305 width=0.0141 height=0.0167 colour=#96aaff
-    button "Phone" x=0.8889 y=-0.3947 width=0.1 height=0.0639 size=20 align=centre align_vertically=centre background=#16192ae1 border=#ffffff2d pointed_background=#545caaf0 pointed_border=#96aaff action="open phone" when=phone_button
-    image #7fc8ff x=0.9138 y=-0.3236 width=0.0219 height=0.0389 when="phone_button and phone_unread is more than 0"
-    text "{phone_unread}" x=0.9138 y=-0.3236 width=0.0219 height=0.0389 size=15 colour=#0d0f1a align=centre align_vertically=centre shadow=no when="phone_button and phone_unread is more than 0"
+    image #141230fa x=0 y=-0.8642 width=0.9375 height=0.2639 style=textbox_panel
+    namebox x=-0.9 y=-0.3947 height=0.0639 bar=3
+    dialogue x=0 y=-0.4667 width=0.8875
+    indicator x=0.8938 y=-0.8305 width=0.0141 height=0.0167
+    button "Phone" x=0.8889 y=-0.3947 width=0.1 height=0.0639 style=textbox_phone action="open phone" when=phone_button
+    image #ada2ff x=0.9138 y=-0.3236 width=0.0219 height=0.0389 when="phone_button and phone_unread is more than 0"
+    text "{phone_unread}" x=0.9138 y=-0.3236 width=0.0219 height=0.0389 style=textbox_unread when="phone_button and phone_unread is more than 0"
 
-screen choice story=goes_on arrow_keys=yes
+screen choice story=goes_on
     choices x=0 y=0.7333 width=0.5625 height=0.5833 item_height=0.075 spacing_across=0.0109 spacing_down=0.0194
-
-screen notice story=goes_on
-    notice x=0.8889 y=0.8889 width=0.4375
 )vnext";
 }
 

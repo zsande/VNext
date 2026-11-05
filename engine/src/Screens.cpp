@@ -734,28 +734,17 @@ bool isInput(const SDL_Event& e) {
     }
 }
 
-// `text` in at most `most` lines `width` wide: as it is, or as much of it as fits with ... after it.
+// `text` in at most `most` lines `width` wide, or on one line: as it is, or shortened() to fit.
 std::string cutToLines(const Font& font, const std::string& text, float width, float spacing, std::size_t most) {
     TextBlock probe;
-    probe.set(font, text, width, spacing);
-    if (probe.lines() <= most) return text;
-    std::size_t lo = 0, hi = utf8::length(text);
-    while (lo < hi) { // (the most letters that fit, ... and all)
-        const std::size_t mid = (lo + hi + 1) / 2;
-        probe.set(font, std::string(trim(std::string_view(text).substr(0, utf8::offset(text, mid)))) + "...", width, spacing);
-        if (probe.lines() <= most) lo = mid;
-        else hi = mid - 1;
-    }
-    return std::string(trim(std::string_view(text).substr(0, utf8::offset(text, lo)))) + "...";
+    return shortened(text, [&](std::string_view t) {
+        probe.set(font, t, width, spacing);
+        return probe.lines() <= most;
+    });
 }
 
 std::string ellipsise(const Font& font, const std::string& text, float width) {
-    if (font.measure(text) <= width) return text;
-    for (std::size_t n = utf8::length(text); n > 0; --n) {
-        std::string cut = text.substr(0, utf8::offset(text, n - 1)) + "...";
-        if (font.measure(cut) <= width) return cut;
-    }
-    return "...";
+    return shortened(text, [&](std::string_view t) { return font.measure(t) <= width; });
 }
 
 std::string formatTime(SDL_Time time) {
@@ -813,9 +802,14 @@ ScreenView::Grid ScreenView::grid(const Element& el, Grid d) const {
     g.gapX = share(el, "spacing_across", true, std::isnan(gap) ? d.gapX : gap * box.w);
     g.gapY = share(el, "spacing_down", false, std::isnan(gap) ? d.gapY : gap * box.h);
     const auto columns = static_cast<float>(g.columns);
-    g.itemW = share(el, "item_width", true, d.itemW > 0 ? d.itemW : (rectOf(indexOf(el)).w - g.gapX * (columns - 1)) / columns);
+    const float room = el.kind == ElementKind::Container ? 0.0f : barRoom(indexOf(el)); // (a list's items clear of its scrollbar; a container's parts are where they're put)
+    g.itemW = share(el, "item_width", true, d.itemW > 0 ? d.itemW : (rectOf(indexOf(el)).w - room - g.gapX * (columns - 1)) / columns);
     g.itemH = share(el, "item_height", false, d.itemH);
     return g;
+}
+
+ScreenView::Grid ScreenView::recordsGrid(const Element& el) const {
+    return grid(el, el.kind == ElementKind::Gallery ? Grid{.columns = 3, .itemH = 202.0f, .gapX = 24.0f, .gapY = 24.0f} : Grid{.itemH = 64.0f, .gapX = 8.0f, .gapY = 8.0f});
 }
 
 float ScreenView::share(const Element& el, std::string_view key, bool across, float fallback) const {
@@ -963,6 +957,16 @@ void ScreenView::layout() {
     }
 }
 
+bool ScreenView::shows(std::span<const std::string_view> names) const {
+    auto any = [&](const std::vector<std::string>& used) { return std::ranges::any_of(used, [&](const std::string& n) { return std::ranges::contains(names, n); }); };
+    for (const Element& el : def_->elements) {
+        if (any(namesIn(el.text))) return true;
+        for (const std::optional<Expr>* e : {&el.visible, &el.clickable, &el.chosen})
+            if (*e && any((*e)->names())) return true;
+    }
+    return false;
+}
+
 std::optional<std::size_t> ScreenView::scrollableAt(float x, float y) {
     std::optional<std::size_t> found;
     for (std::size_t i = 0; i < def_->elements.size(); ++i) {
@@ -979,7 +983,7 @@ void ScreenView::glideStep(std::size_t index) {
     const float t = now(), dt = std::clamp(t - st.glideAt, 0.0f, 0.1f);
     st.glideAt = t;
     st.scroll += st.glideY * dt;
-    (el.kind == ElementKind::Flowchart ? st.panX : st.scrollX) += st.glideX * dt;
+    st.scrollX += st.glideX * dt;
     const float keep = std::exp(-dt * 2.5f / std::max(0.05f, el.number("glide_distance", engine_.gameSettings().glideDistance))); // (glide_distance=200%: slowing half as fast, twice as far; none: the game's)
     st.glideX = std::abs(st.glideX) < 10.0f ? 0.0f : st.glideX * keep;
     st.glideY = std::abs(st.glideY) < 10.0f ? 0.0f : st.glideY * keep;
@@ -1004,6 +1008,12 @@ SDL_FRect ScreenView::barOf(std::size_t index, bool across) const {
     return {box.x + box.w - t - in, box.y + in, t, std::max(0.0f, box.h - t - (side ? t + in : 0.0f))};
 }
 
+float ScreenView::barRoom(std::size_t index) const {
+    const Element& el = def_->elements[index];
+    if (lower(el.option("scrollbar", "no")) != "yes") return 0.0f;
+    return 2.0f * std::max(1.0f, el.number("scrollbar_thickness", engine_.gameSettings().scrollbarThickness)); // (the bar, and half of it each side)
+}
+
 SDL_FRect ScreenView::thumbOf(std::size_t index, bool across) const {
     const SDL_FRect bar = barOf(index, across), box = rectOf(index);
     const ElementState& st = state_[index];
@@ -1013,11 +1023,12 @@ SDL_FRect ScreenView::thumbOf(std::size_t index, bool across) const {
         return {bar.x + (bar.w - w) * st.scrollX / (st.reachX - box.w), bar.y, w, bar.h};
     }
     if (st.reach <= box.h || box.h <= 0.0f) return bar;
-    const float h = std::max(20.0f, bar.h * box.h / st.reach);
-    return {bar.x, bar.y + (bar.h - h) * st.scroll / (st.reach - box.h), bar.w, h};
+    const float h = std::max(20.0f, bar.h * box.h / st.reach), share = st.scroll / (st.reach - box.h);
+    const bool fromEnd = def_->elements[index].dragDirection() > 0.0f; // (a history: scrolled up from its latest line)
+    return {bar.x, bar.y + (bar.h - h) * (fromEnd ? 1.0f - share : share), bar.w, h};
 }
 
-// A container's scrollbars (scrollbar=yes), each way its parts reach past it: a track in its border
+// A part's scrollbars (scrollbar=yes), each way what's in it reaches past it: a track in its border
 // colour (none: white), faint, with the thumb in its text colour.
 void ScreenView::drawScrollbar(SDL_Renderer* r, std::size_t index, float alpha) {
     const Element& el = def_->elements[index];
@@ -1031,6 +1042,7 @@ void ScreenView::drawScrollbar(SDL_Renderer* r, std::size_t index, float alpha) 
     }
 }
 
+// Scrolls the containers `t` is in so it shows.
 void ScreenView::reveal(const Target& t) {
     if (t.spot.element >= def_->elements.size()) return;
     for (int p = def_->elements[t.spot.element].parent; p >= 0; p = def_->elements[static_cast<std::size_t>(p)].parent) {
@@ -1080,9 +1092,6 @@ bool ScreenView::startAside(SDL_Renderer* r, float& scale) {
     return true;
 }
 
-// A button without a width (or a height) is as big as the image it shows now, or (with none) its
-// words and its padding, and placed by that size. It's clicked within its usual size as well, so a
-// smaller pointed-at or pressed image can't let the pointer slip out of it.
 // A part without a width (or a height) is as big as what it shows, and placed by that size: a button's
 // image or words (sizeButton), an image's pixels, a text's words with its padding.
 void ScreenView::sizeOwn(std::size_t index) {
@@ -1090,20 +1099,6 @@ void ScreenView::sizeOwn(std::size_t index) {
     if (el.kind == ElementKind::Button) return sizeButton(index);
     ElementState& st = state_[index];
     st.ownWords = false;
-    if (el.kind == ElementKind::Notice) { // (a box as big as its words, rows wrapping at width=: placed by its place, as a text without a size is)
-        const Style& s = styleOf(index);
-        const SDL_FRect box = boxOf(index);
-        RichText shown = rich(toString(engine_.lookup()("notice")));
-        st.text.set(styleFont(s), shown.text, el.shareWidth ? std::max(1.0f, *el.shareWidth * box.w - 2 * s.padding) : 0.0f, s.lineSpacing);
-        st.text.setSpans(std::move(shown.spans));
-        if (st.text.text().empty()) return;
-        const SDL_FPoint words = st.text.size();
-        SDL_FRect& at = rectOf(index);
-        at.w = std::round(words.x + 2 * s.padding);
-        at.x = std::round(box.x + placeEdge(el.placeX.value_or(-1.0f), at.w, box.w));
-        if (!el.shareHeight) at.h = std::round(words.y + 2 * s.padding), at.y = std::round(box.y + placeEdge(-el.placeY.value_or(1.0f), at.h, box.h));
-        return;
-    }
     if ((el.shareWidth && el.shareHeight) || (el.kind != ElementKind::Image && el.kind != ElementKind::Text)) return;
     SDL_FPoint size{0.0f, 0.0f};
     if (el.kind == ElementKind::Image) { // (as big as its image; with a width but no height, or the other way, its shape kept)
@@ -1129,6 +1124,9 @@ void ScreenView::sizeOwn(std::size_t index) {
     if (!el.shareHeight) rectOf(index).h = std::round(size.y), rectOf(index).y = std::round(box.y + placeEdge(-el.placeY.value_or(1.0f), rectOf(index).h, box.h));
 }
 
+// A button without a width (or a height) is as big as the image it shows now, or (with none) its
+// words and its padding, and placed by that size. It's clicked within its usual size as well, so a
+// smaller pointed-at or pressed image can't let the pointer slip out of it.
 void ScreenView::sizeButton(std::size_t index) {
     const Element& el = def_->elements[index];
     ElementState& st = state_[index];
@@ -1212,7 +1210,7 @@ void ScreenView::reset() {
         st.pointedPlayedAt.reset();
         st.movie.reset(); // movies start again
         st.movieName.clear();
-        st.panX = 0.0f;
+        st.scrollX = 0.0f;
         st.centred = false;
     }
     opening_.reset(); // (its own animations again, until the one opening it says otherwise)
@@ -1287,7 +1285,7 @@ bool ScreenView::endsCovered() const {
 
 bool ScreenView::pointedAt(std::size_t index) const {
     if (leftSince_) return false;
-    if (focus_ && focus_->element == index) return true; // (a part that takes clicks: pointed at, or the keys' or a controller's)
+    if (focus_ && focus_->element == index) return true; // (a part that takes clicks: pointed at, with the mouse or a control's move actions)
     return seenMotion_ == engine_.pointerMoves() && SDL_PointInRectFloat(&mouse_, &rectOf(index));
 }
 
@@ -1359,11 +1357,6 @@ float ScreenView::number(const Element& el, std::string_view key, float fallback
     if (const auto it = el.exprs.find(key); it != el.exprs.end())
         return static_cast<float>(toNumber(it->second.eval(lookup_)));
     return fallback;
-}
-
-std::string ScreenView::inputTarget(const Element& el) {
-    const std::string var = el.option("variable");
-    return var.empty() ? engine_.game().request().variable : var;
 }
 
 std::string ScreenView::interpolate(std::string_view text) {
@@ -1807,12 +1800,9 @@ void ScreenView::drawElement(SDL_Renderer* r, std::size_t index, float alpha) {
             if (st.ownWords) in.w = 0.0f; // (as big as its words: they're drawn as they are, not wrapped to their own width)
             text(r, st.text, label.text, in, looks, textColour(looks, look), ta * left, TextBlock::kAll, std::move(label.spans));
         }
-        if (on) targets_.push_back({{index}, hit, def_->arrowKeys});
+        if (on) targets_.push_back({{index}, hit, true});
         break;
     }
-
-    case ElementKind::Key:
-        break;
 
     case ElementKind::Namebox:
         drawNamebox(r, index, alpha);
@@ -1860,14 +1850,13 @@ void ScreenView::drawElement(SDL_Renderer* r, std::size_t index, float alpha) {
         drawFlowchart(r, index, alpha);
         break;
 
-
     case ElementKind::Control: { // one key slot of a control; click it, then press the new key
         const std::size_t slot = Engine::slotOf(el);
         const bool waiting = engine_.rebinding(el.text, slot);
         const Look look = waiting ? Look::Selected : focused(index, 0) ? Look::Hover : Look::Idle;
         box(r, rectOf(index), s, look, a);
         text(r, st.text, waiting ? el.option("waiting") : engine_.keyLabel(el.text, slot), rectOf(index), s, textColour(s, look), ta);
-        targets_.push_back({{index}, rectOf(index), def_->arrowKeys});
+        targets_.push_back({{index}, rectOf(index), true});
         break;
     }
     case ElementKind::History:
@@ -1892,15 +1881,6 @@ void ScreenView::drawElement(SDL_Renderer* r, std::size_t index, float alpha) {
         drawSlider(r, index, alpha);
         break;
 
-    case ElementKind::Notice: { // in a box as big as its words (sizeOwn: its rows wrap at width=, if it has one); a message's opens it on the phone
-        if (st.text.text().empty()) break;
-        const SDL_FRect& at = rectOf(index);
-        box(r, at, s, Look::Idle, a);
-        st.text.drawIn(r, {at.x + s.padding, at.y + s.padding, at.w - 2 * s.padding, 0.0f}, factor(s.align), 0.0f, withAlpha(s.colour, ta),
-                       TextBlock::kAll, s.shadow);
-        targets_.push_back({{index}, at, false});
-        break;
-    }
     case ElementKind::Movie:
         drawMovie(r, index, alpha);
         break;
@@ -1980,11 +1960,12 @@ void ScreenView::drawChoices(SDL_Renderer* r, std::size_t index, float alpha) {
 
 // The gallery's images, the endings, songs, achievements or tips, in the order they're listed,
 // in a grid that scrolls. Images show their image and title; the others their title, and under
-// it an achievement's description (or a locked ending's hint). Ones the player doesn't have show
-// text.locked (images) or text.unknown, except achievements that aren't secret. Images, songs
-// and tips the player has can be clicked: an image opens big (action=), a song plays (the one
-// playing looks chosen), a tip is the one read ({tip_text}; it looks chosen, and ones not read
-// yet use unread_style).
+// it an achievement's description (or a locked ending's hint). Ones the player doesn't have use
+// locked_style: an ending or a secret achievement shows secret= for its title, an achievement that
+// isn't secret shows as it is, and the rest have nothing on them. Songs the player has can be clicked,
+// and their images and tips when that does something (see takesClicks): a song plays (the one playing
+// looks chosen), an image opens big (action=), a tip is the one read ({tip_text}; it looks chosen, and
+// ones not read yet use unread_style).
 void ScreenView::drawRecords(SDL_Renderer* r, std::size_t index, float alpha) {
     const Element& el = def_->elements[index];
     const Style& s = styleOf(index);
@@ -1999,7 +1980,11 @@ void ScreenView::drawRecords(SDL_Renderer* r, std::size_t index, float alpha) {
     const Style& textStyle = el.substyle("text_style");
     const Style& lockedStyle = el.substyle("locked_style");
     const bool images = kind == RecordKind::Gallery, song = kind == RecordKind::Song, tip = kind == RecordKind::Tip;
-    const Grid g = grid(el, images ? Grid{.columns = 3, .itemH = 202.0f, .gapX = 24.0f, .gapY = 24.0f} : Grid{.itemH = 64.0f, .gapX = 8.0f, .gapY = 8.0f});
+    // An image or a tip clicked is picked, for this screen to show or for the part's action=: with neither, a
+    // click would do nothing, so it takes none (and isn't pointed at). A song clicked plays.
+    static constexpr std::string_view kImageValues[]{"gallery_image", "gallery_title", "gallery_movie"}, kTipValues[]{"tip", "tip_title", "tip_text"};
+    const bool takesClicks = song || ((images || tip) && (!el.actions.empty() || shows(images ? std::span(kImageValues) : std::span(kTipValues))));
+    const Grid g = recordsGrid(el);
     settle(index, g.height(list.size()) - rectOf(index).h);
     st.items.resize(list.size());
     st.extra.resize(list.size());
@@ -2011,7 +1996,7 @@ void ScreenView::drawRecords(SDL_Renderer* r, std::size_t index, float alpha) {
         const SDL_FRect rr = g.cell(rectOf(index), i, st.scroll);
         if (!overlaps(rr, rectOf(index))) continue;
         const bool have = engine_.has(kind, i);
-        const bool clickable = have && (images || song || tip);
+        const bool clickable = have && takesClicks;
         const bool current = have && ((song && !playing.empty() && playing == engine_.assets().sound(rec.name)) || (tip && engine_.tip() == i));
         const Look look = current ? Look::Selected : clickable && focused(index, static_cast<int>(i)) ? Look::Hover : Look::Idle;
         const bool fresh = tip && engine_.newTip(i);
@@ -2057,9 +2042,10 @@ void ScreenView::drawRecords(SDL_Renderer* r, std::size_t index, float alpha) {
             st.extra[i].draw(r, rr.x + pad, y + st.items[i].size().y + 2.0f, withAlpha(have ? textStyle.colour : lockedStyle.colour, alpha * textStyle.opacity),
                              TextBlock::kAll, textStyle.shadow);
     }
+    drawScrollbar(r, index, alpha);
 }
 
-// The flowchart: every point reached (chapters, choices, endings, "flowchart" lines) as a tree, each
+// The flowchart: every point reached (choices and endings) as a tree, each
 // under the place the player first came from, with the option picked there above it. A choice's
 // options not tried yet hang under it as stubs: locked ones say what they need, and ones that
 // opened since (their condition is true now) get a mark. Clicking a place goes back to it; a stub
@@ -2104,11 +2090,10 @@ void ScreenView::drawFlowchart(SDL_Renderer* r, std::size_t index, float alpha) 
         const auto pc = engine_.pointCommand(n.id);
         const Command* c = pc ? &script.code[*pc].command : nullptr;
         const Lookup lookup = lookupAt(n);
-        if (const auto* ch = c ? std::get_if<cmd::Chapter>(c) : nullptr) item.title = fillValues(ch->title, lookup);
-        else if (const auto* m = c ? std::get_if<cmd::Mark>(c) : nullptr) item.title = fillValues(m->title, lookup);
-        else if (const auto* rec = c ? std::get_if<cmd::Record>(c) : nullptr) {
-            const auto& list = script.records(rec->kind);
-            if (const Script::Record* e = script.record(rec->kind, rec->name)) item.title = std::format("{}. {}", e - list.data() + 1, e->title);
+        constexpr std::string_view ending = "persistent.ending."; // (an ending reached: set persistent.ending.NAME = yes)
+        if (const auto* set = c ? std::get_if<cmd::Set>(c) : nullptr; set && set->variable.starts_with(ending)) {
+            const auto& list = script.records(RecordKind::Ending);
+            if (const Script::Record* e = script.record(RecordKind::Ending, std::string_view(set->variable).substr(ending.size()))) item.title = std::format("{}. {}", e - list.data() + 1, e->title);
         } else if (const auto* menu = c ? std::get_if<cmd::Menu>(c) : nullptr) {
             for (const cmd::Choice& choice : menu->choices) item.title += (item.title.empty() ? "" : " / ") + fillValues(choice.text, lookup); // (its options)
             // Its options not tried yet: stubs under it.
@@ -2169,17 +2154,19 @@ void ScreenView::drawFlowchart(SDL_Renderer* r, std::size_t index, float alpha) 
         if (it == at.end()) it = at.find(nodes.front().id);
         if (it != at.end()) {
             const Item& item = items[static_cast<std::size_t>(it->second)];
-            st.panX = rectOf(index).w * 0.5f - (item.x * (nodeW + gapX) + nodeW * 0.5f) - margin;
+            st.scrollX = item.x * (nodeW + gapX) + nodeW * 0.5f + margin - rectOf(index).w * 0.5f;
             st.scroll = static_cast<float>(item.depth) * (nodeH + gapY) + nodeH * 0.5f - rectOf(index).h * 0.5f + margin;
         }
     }
-    const float spareX = rectOf(index).w - width - 2 * margin;
+    const float spareX = rectOf(index).w - width - 2 * margin; // (room to spare: in the middle)
     settle(index, height + 2 * margin - rectOf(index).h);
-    const float wantPan = st.panX;
-    st.panX = spareX >= 0.0f ? spareX * 0.5f : std::clamp(st.panX, spareX, 0.0f);
-    if (st.panX != wantPan) st.glideX = 0.0f;
+    st.reachX = width + 2 * margin;
+    const float wantX = st.scrollX;
+    st.scrollX = spareX >= 0.0f ? 0.0f : std::clamp(st.scrollX, 0.0f, -spareX);
+    if (st.scrollX != wantX) st.glideX = 0.0f;
+    const float shiftX = spareX >= 0.0f ? spareX * 0.5f : -st.scrollX;
     auto boxAt = [&](const Item& item) {
-        return SDL_FRect{rectOf(index).x + margin + st.panX + item.x * (nodeW + gapX), rectOf(index).y + margin - st.scroll + static_cast<float>(item.depth) * (nodeH + gapY),
+        return SDL_FRect{rectOf(index).x + margin + shiftX + item.x * (nodeW + gapX), rectOf(index).y + margin - st.scroll + static_cast<float>(item.depth) * (nodeH + gapY),
                          nodeW, nodeH};
     };
 
@@ -2214,14 +2201,19 @@ void ScreenView::drawFlowchart(SDL_Renderer* r, std::size_t index, float alpha) 
         if (!overlaps(b, rectOf(index))) continue;
         const bool stub = item.node < 0;
         const Flowchart::Node* n = stub ? nullptr : &nodes[static_cast<std::size_t>(item.node)];
-        const Style& bs = stub ? el.substyle("unreached_style") : n->kind == Flowchart::Kind::Chapter ? el.substyle("chapter_style")
-                                                         : n->kind == Flowchart::Kind::Ending  ? el.substyle("ending_style")
-                                                                                           : s;
+        const Style& bs = stub ? el.substyle("unreached_style") : n->kind == Flowchart::Kind::Ending ? el.substyle("ending_style") : s;
         const Look look = n && n->id == current ? Look::Selected : focused(index, static_cast<int>(j)) ? Look::Hover : Look::Idle;
         box(r, b, bs, look, boxAlpha(bs, alpha));
         std::string label = item.title;
         if (item.locked && !item.note.empty()) label = item.title + "  (" + item.note + ")";
         RichText rt = rich(label);
+        // (in the lines its box has room for: a long one, a choice's many options, would spill over the points around it)
+        Font& font = styleFont(bs);
+        const float lineH = std::max(1.0f, font.lineHeight() * bs.lineSpacing);
+        const auto most = static_cast<std::size_t>(std::max(1.0f, std::floor((b.h - 2 * bs.padding) / lineH)));
+        rt.text = cutToLines(font, rt.text, std::max(0.0f, b.w - 2 * bs.padding), bs.lineSpacing, most);
+        const std::size_t length = utf8::length(rt.text);
+        for (TextSpan& span : rt.spans) span.begin = std::min(span.begin, length), span.end = std::min(span.end, length);
         text(r, st.items[j], rt.text, b, bs, textColour(bs, look), alpha * bs.opacity, TextBlock::kAll, std::move(rt.spans));
         if (item.fresh) { // newly open: a small diamond in the corner
             const float cx = b.x + b.w - 9.0f, cy = b.y + 9.0f, k = 5.0f;
@@ -2230,6 +2222,7 @@ void ScreenView::drawFlowchart(SDL_Renderer* r, std::size_t index, float alpha) 
         st.ids[j] = stub ? nodes[static_cast<std::size_t>(items[static_cast<std::size_t>(item.parent)].node)].id : n->id;
         if (inside(b, rectOf(index))) targets_.push_back({{index, static_cast<int>(j)}, b, true});
     }
+    drawScrollbar(r, index, alpha);
 }
 
 namespace {
@@ -2455,9 +2448,7 @@ std::vector<ScreenView::ListItem> ScreenView::listItems(const Element& list, std
             const MessageItem* last = c.last ? &messages[*c.last] : nullptr;
             std::string newest;
             if (c.typing) newest = typingDots(now());
-            else if (last && !last->deleted && proper(last->kind)) {
-                newest = last->text.empty() && last->kind != MessageItem::Kind::Text ? std::string{} : last->text;
-            }
+            else if (last && !last->deleted && proper(last->kind)) newest = last->text;
             Variables v{{"chat.name", c.name}, {"chat.text", std::move(newest)}, {"chat.time", last ? last->time : std::string{}},
                         {"chat.unread", c.unread}, {"chat.typing", flag(c.typing)}, {"chat.open", flag(c.name == engine_.openChat())}};
             someone(v, "chat", c.name, c.character, {}, c.colour);
@@ -2619,24 +2610,28 @@ float ScreenView::widest(std::size_t index) const {
     return most * (p >= 0 ? rectOf(static_cast<std::size_t>(p)).w : engine_.canvas().w);
 }
 
+std::size_t ScreenView::asDrawn(std::size_t part) const {
+    return firstOf_.empty() ? part : part < firstOf_.size() ? firstOf_[part] : SIZE_MAX;
+}
+
 // The script's part `part` as it's drawn now (in a list: its first item's), for the developer tools.
 bool ScreenView::drawnPart(std::size_t part) const {
-    const std::size_t i = firstOf_.empty() ? part : part < firstOf_.size() ? firstOf_[part] : SIZE_MAX;
+    const std::size_t i = asDrawn(part);
     return i != SIZE_MAX && drawn(i);
 }
 
 SDL_FRect ScreenView::partBounds(std::size_t part) {
-    const std::size_t i = firstOf_.empty() ? part : part < firstOf_.size() ? firstOf_[part] : SIZE_MAX;
+    const std::size_t i = asDrawn(part);
     return i < state_.size() ? bounds(i) : SDL_FRect{};
 }
 
 SDL_FRect ScreenView::partRect(std::size_t part) const {
-    const std::size_t i = firstOf_.empty() ? part : part < firstOf_.size() ? firstOf_[part] : SIZE_MAX;
+    const std::size_t i = asDrawn(part);
     return i < state_.size() ? rectOf(i) : SDL_FRect{};
 }
 
 SDL_FRect ScreenView::partBox(std::size_t part) const {
-    const std::size_t i = firstOf_.empty() ? part : part < firstOf_.size() ? firstOf_[part] : SIZE_MAX;
+    const std::size_t i = asDrawn(part);
     return i < state_.size() ? boxOf(i) : SDL_FRect{0.0f, 0.0f, engine_.canvas().w, engine_.canvas().h};
 }
 
@@ -2701,7 +2696,8 @@ void ScreenView::drawHistory(SDL_Renderer* r, std::size_t index, float alpha) {
     const Style& buttonStyle = el.substyle("button_style");
     constexpr float kButton = 30.0f, kButtonGap = 8.0f;
     const float buttonsW = (voices ? kButton + kButtonGap : 0.0f) + (backs ? kButton + kButtonGap : 0.0f);
-    const float textX = rectOf(index).x + nameW + 30.0f, textW = rectOf(index).w - nameW - 30.0f - buttonsW;
+    const float room = barRoom(index); // (its lines and buttons clear of its scrollbar)
+    const float textX = rectOf(index).x + nameW + 30.0f, textW = rectOf(index).w - nameW - 30.0f - buttonsW - room;
 
     st.items.resize(entries.size());
     st.extra.resize(entries.size());
@@ -2724,7 +2720,7 @@ void ScreenView::drawHistory(SDL_Renderer* r, std::size_t index, float alpha) {
             st.items[i].drawIn(r, {rectOf(index).x, y, nameW, 0}, 1.0f, 0.0f, withAlpha(entries[i].colour, alpha * nameStyle.opacity),
                                TextBlock::kAll, nameStyle.shadow);
             st.extra[i].draw(r, textX, y, withAlpha(ts.colour, alpha * ts.opacity), TextBlock::kAll, ts.shadow);
-            float bx = rectOf(index).x + rectOf(index).w - kButton;
+            float bx = rectOf(index).x + rectOf(index).w - room - kButton;
             const float by = y + std::max(0.0f, (std::min(h, 40.0f) - kButton) * 0.5f);
             auto button = [&](Button which) {
                 const SDL_FRect b{bx, by, kButton, kButton};
@@ -2748,6 +2744,7 @@ void ScreenView::drawHistory(SDL_Renderer* r, std::size_t index, float alpha) {
         }
         y += h + gap;
     }
+    drawScrollbar(r, index, alpha);
 }
 
 // The lines on the page (textbox page), from the top; the newest is the one being typed. When
@@ -2814,7 +2811,6 @@ void ScreenView::drawPages(SDL_Renderer* r, std::size_t index, float alpha) {
         x += rr.w + g.gapX;
     }
 }
-
 
 void ScreenView::drawSlots(SDL_Renderer* r, std::size_t index, float alpha) {
     const Element& el = def_->elements[index];
@@ -2972,9 +2968,6 @@ void ScreenView::activate(const Target& t, std::optional<float> mouseX) {
         if (t.spot.button == Button::Back) engine_.historyBack(item);
         else if (t.spot.button == Button::Voice) engine_.historyVoice(item);
         break;
-    case ElementKind::Notice:
-        engine_.openNotice();
-        break;
     case ElementKind::Slots:
         if (t.spot.button == Button::Delete) engine_.slotDelete(item, el.option("delete_confirm"));
         else engine_.slotPressed(item, el.option("confirm"), el.option("load_confirm"));
@@ -3009,9 +3002,9 @@ void ScreenView::navigate(int dx, int dy) {
     const Target* best = nullptr;
     float bestScore = 0.0f;
     for (const auto& t : targets_) {
-        if (!t.keyboard || &t == current) continue;
+        if (!t.reachable || &t == current) continue;
         if (!current) {
-            best = &t; // nothing focused yet: start at the first control
+            best = &t; // nothing pointed at yet: start at the first part that takes clicks
             break;
         }
         const SDL_FPoint a = centre(current->rect), b = centre(t.rect);
@@ -3030,6 +3023,56 @@ void ScreenView::navigate(int dx, int dy) {
     }
 }
 
+void ScreenView::adjustSlider(std::size_t element, int delta) {
+    const Element& el = def_->elements[element];
+    if (!enabled(el)) return;
+    if (const SettingControl* c = findSettingControl(el.option("setting"))) { // a player setting: a twentieth at a time
+        c->setValue(engine_.settings(), std::clamp(c->value(engine_.settings()) + static_cast<float>(delta) * 0.05f, 0.0f, 1.0f));
+        engine_.settingsChanged(c->testSound);
+        return;
+    }
+    const float lo = number(el, "minimum", 0.0f), hi = number(el, "maximum", 100.0f), step = std::max(1.0f, number(el, "step", 1.0f));
+    const float value = static_cast<float>(toNumber(engine_.game().variable(el.option("variable"))));
+    const int next = static_cast<int>(std::clamp(value + step * static_cast<float>(delta), std::min(lo, hi), std::max(lo, hi)));
+    engine_.game().setVariable(el.option("variable"), next);
+    if (!el.actions.empty()) run(el);
+}
+
+void ScreenView::move(int dx, int dy) {
+    if (const Target* t = focusedTarget(); t && dx != 0 && t->spot.element < def_->elements.size() && def_->elements[t->spot.element].kind == ElementKind::Slider)
+        return adjustSlider(t->spot.element, dx);
+    navigate(dx, dy);
+}
+
+void ScreenView::pressPointed() {
+    if (const Target* t = focusedTarget()) {
+        const Target hit = *t; // (activate() may change the targets)
+        activate(hit, std::nullopt);
+    }
+}
+
+void ScreenView::scrollBy(std::string_view how) {
+    const bool up = how == "up", down = how == "down", top = how == "to the top";
+    for (std::size_t i = 0; i < def_->elements.size(); ++i) // its history: up goes back to older lines
+        if (def_->elements[i].kind == ElementKind::History && live(i)) {
+            float& scroll = state_[i].scroll;
+            scroll = up ? scroll + 60.0f : down ? scroll - 60.0f : top ? 1e9f : 0.0f;
+            return;
+        }
+    std::optional<std::size_t> box; // else the container that scrolls with the part pointed at in it, or the first one
+    if (const Target* t = focusedTarget(); t && t->spot.element < def_->elements.size())
+        for (int p = def_->elements[t->spot.element].parent; p >= 0 && !box; p = def_->elements[static_cast<std::size_t>(p)].parent)
+            if (isBox(def_->elements[static_cast<std::size_t>(p)].kind) && def_->elements[static_cast<std::size_t>(p)].scrolls()) box = static_cast<std::size_t>(p);
+    for (std::size_t i = 0; i < def_->elements.size() && !box; ++i)
+        if (isBox(def_->elements[i].kind) && def_->elements[i].scrolls() && live(i)) box = i;
+    if (!box) return;
+    ElementState& st = state_[*box];
+    st.glideX = st.glideY = 0.0f;
+    st.scroll = up ? st.scroll - 60.0f : down ? st.scroll + 60.0f : top ? 0.0f : 1e9f; // (kept within it as it's laid out)
+}
+
+void ScreenView::putBack() { held_.reset(); }
+
 bool ScreenView::scrollWidgets(const SDL_Event& e) {
     const bool wheel = e.type == SDL_EVENT_MOUSE_WHEEL;
     for (std::size_t i = 0; i < def_->elements.size(); ++i) {
@@ -3043,21 +3086,10 @@ bool ScreenView::scrollWidgets(const SDL_Event& e) {
                 scroll += e.wheel.y * 60.0f;
                 return true;
             }
-            if (e.type == SDL_EVENT_KEY_DOWN) {
-                switch (e.key.key) {
-                case SDLK_UP: scroll += 60.0f; return true;
-                case SDLK_DOWN: scroll -= 60.0f; return true;
-                case SDLK_PAGEUP: scroll += rectOf(i).h * 0.8f; return true;
-                case SDLK_PAGEDOWN: scroll -= rectOf(i).h * 0.8f; return true;
-                case SDLK_HOME: scroll = 1e9f; return true;
-                case SDLK_END: scroll = 0.0f; return true;
-                default: break;
-                }
-            }
             break;
         case ElementKind::Flowchart: // up and down; sideways with Shift
             if (!wheel) break;
-            if (e.wheel.x != 0.0f || (SDL_GetModState() & SDL_KMOD_SHIFT)) state_[i].panX += (e.wheel.x != 0.0f ? -e.wheel.x : e.wheel.y) * 60.0f;
+            if (e.wheel.x != 0.0f || (SDL_GetModState() & SDL_KMOD_SHIFT)) state_[i].scrollX += (e.wheel.x != 0.0f ? e.wheel.x : -e.wheel.y) * 60.0f;
             else scroll -= e.wheel.y * 60.0f;
             return true;
         case ElementKind::Gallery:
@@ -3066,7 +3098,7 @@ bool ScreenView::scrollWidgets(const SDL_Event& e) {
         case ElementKind::Achievements:
         case ElementKind::Tips: { // a row at a time
             if (!wheel) break;
-            const Grid g = grid(el, {.itemH = el.kind == ElementKind::Gallery ? 202.0f : 64.0f, .gapY = 8.0f});
+            const Grid g = recordsGrid(el);
             scroll -= e.wheel.y * (g.itemH + g.gapY);
             return true;
         }
@@ -3075,13 +3107,6 @@ bool ScreenView::scrollWidgets(const SDL_Event& e) {
             if (!wheel) break;
             engine_.slots().turn(e.wheel.y < 0 ? +1 : -1);
             return true;
-        case ElementKind::Choices: // 1-9 pick a choice
-            if (e.type == SDL_EVENT_KEY_DOWN && engine_.game().showingChoices() && e.key.key >= SDLK_1 && e.key.key <= SDLK_9 &&
-                e.key.key - SDLK_1 < engine_.game().choices().size()) {
-                engine_.game().choose(e.key.key - SDLK_1);
-                return true;
-            }
-            break;
         default:
             break;
         }
@@ -3105,7 +3130,7 @@ bool ScreenView::catches(const SDL_Event& e) {
     else return false;
     for (std::size_t i = 0; i < def_->elements.size(); ++i) {
         const Element& el = def_->elements[i];
-        if (!drawn(i) || el.kind == ElementKind::Key || el.kind == ElementKind::Control) continue;
+        if (!drawn(i) || el.kind == ElementKind::Control) continue;
         if (el.kind == ElementKind::Container && el.style.background.a == 0 && el.style.border.a == 0) continue; // (a box with nothing of its own to show)
         if (pointInRect(at.x, at.y, bounds(i))) return true;
     }
@@ -3119,37 +3144,12 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
         seenMotion_ = engine_.pointerMoves();
     }
     if (leftSince_) return def_->storyWaits && isInput(e); // (closing: it only plays its animation_on_close=)
-    // Hotkeys: `key` elements, and buttons with key= (as if clicked: a click animation plays first).
+    // Buttons' keys= (as if clicked: a click animation plays first).
     for (std::size_t i = 0; i < def_->elements.size(); ++i) {
         const Element& el = def_->elements[i];
-        if (!el.key || !el.key->matches(e) || !live(i) || (el.kind == ElementKind::Button && !enabled(el))) continue;
-        if (el.kind == ElementKind::Button) activate({{i}, rectOf(i), false}, std::nullopt);
-        else run(el);
+        if (std::ranges::none_of(el.keys, [&](const KeyChord& k) { return k.matches(e); }) || !live(i) || !enabled(el)) continue;
+        activate({{i}, rectOf(i), false}, std::nullopt);
         return true;
-    }
-
-    // Controllers move around menus like the arrow keys: the d-pad, A to press, B to go back (Esc),
-    // the shoulder buttons a page up or down.
-    if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
-        SDL_Keycode key = 0;
-        switch (e.gbutton.button) {
-        case SDL_GAMEPAD_BUTTON_DPAD_UP: key = SDLK_UP; break;
-        case SDL_GAMEPAD_BUTTON_DPAD_DOWN: key = SDLK_DOWN; break;
-        case SDL_GAMEPAD_BUTTON_DPAD_LEFT: key = SDLK_LEFT; break;
-        case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: key = SDLK_RIGHT; break;
-        case SDL_GAMEPAD_BUTTON_SOUTH: key = SDLK_RETURN; break;
-        case SDL_GAMEPAD_BUTTON_EAST: key = SDLK_ESCAPE; break;
-        case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: key = SDLK_PAGEUP; break;
-        case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: key = SDLK_PAGEDOWN; break;
-        default: break;
-        }
-        if (key != 0) {
-            SDL_Event press{};
-            press.type = SDL_EVENT_KEY_DOWN;
-            press.key.key = key;
-            press.key.down = true;
-            if (handleEvent(press)) return true;
-        }
     }
 
     if (dragging_) {
@@ -3175,7 +3175,8 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
             if (scrollBarDrag_) {
                 const SDL_FRect bar = barOf(*scrollDrag_, scrollBarAcross_), thumb = thumbOf(*scrollDrag_, scrollBarAcross_), box = rectOf(*scrollDrag_);
                 if (scrollBarAcross_ && bar.w > thumb.w) st.scrollX = scrollWasX_ + dx * (st.reachX - box.w) / (bar.w - thumb.w);
-                else if (!scrollBarAcross_ && bar.h > thumb.h) st.scroll = scrollWas_ + dy * (st.reach - box.h) / (bar.h - thumb.h);
+                else if (!scrollBarAcross_ && bar.h > thumb.h) // (a history's thumb is at the bottom at its latest line: down goes back to it)
+                    st.scroll = scrollWas_ - def_->elements[*scrollDrag_].dragDirection() * dy * (st.reach - box.h) / (bar.h - thumb.h);
                 return true;
             }
             if (!scrollDragMoved_ && std::hypot(dx, dy) > 6.0f) {
@@ -3191,7 +3192,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
             if (scrollDragMoved_) {
                 const Element& el = def_->elements[*scrollDrag_];
                 st.scroll = scrollWas_ + dy * el.dragDirection();
-                (el.kind == ElementKind::Flowchart ? st.panX : st.scrollX) = el.kind == ElementKind::Flowchart ? scrollWasX_ + dx : scrollWasX_ - dx;
+                st.scrollX = scrollWasX_ - dx;
                 dragTrail_.emplace_back(now(), SDL_FPoint{e.motion.x, e.motion.y});
                 if (dragTrail_.size() > 8) dragTrail_.erase(dragTrail_.begin());
                 return true;
@@ -3208,7 +3209,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
                 const float dt = std::max(0.005f, then - from->first);
                 const float speed = std::max(0.0f, el.number("glide_speed", engine_.gameSettings().glideSpeed)); // (glide_speed=150%: faster than it was let go; none: the game's)
                 ElementState& st = state_[box];
-                st.glideX = std::clamp((at.x - from->second.x) / dt, -5000.0f, 5000.0f) * speed * (el.kind == ElementKind::Flowchart ? 1.0f : -1.0f);
+                st.glideX = -std::clamp((at.x - from->second.x) / dt, -5000.0f, 5000.0f) * speed; // (sideways: what's in it follows the mouse)
                 st.glideY = std::clamp((at.y - from->second.y) / dt, -5000.0f, 5000.0f) * speed * el.dragDirection();
                 st.glideAt = now();
             }
@@ -3266,7 +3267,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
                 scrollDrag_ = box;
                 scrollFrom_ = {e.button.x, e.button.y};
                 scrollWas_ = state_[*box].scroll;
-                scrollWasX_ = def_->elements[*box].kind == ElementKind::Flowchart ? state_[*box].panX : state_[*box].scrollX;
+                scrollWasX_ = state_[*box].scrollX;
                 state_[*box].glideX = state_[*box].glideY = 0.0f; // (a touch stops it gliding)
                 dragTrail_.assign(1, {now(), scrollFrom_});
                 scrollDragMoved_ = false;
@@ -3277,7 +3278,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
                 if (scrollBarDrag_) return true;
             }
             if (const Target* t = targetAt(e.button.x, e.button.y)) {
-                const Target hit = *t; // activate() may redraw-free mutate targets_ indirectly
+                const Target hit = *t; // (activate() may change the targets)
                 setFocus(hit);
                 mouse_ = {e.button.x, e.button.y};
                 const Element& el = def_->elements[hit.spot.element];
@@ -3300,40 +3301,6 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
         }
         break;
 
-    case SDL_EVENT_KEY_DOWN:
-        if (held_ && e.key.key == SDLK_ESCAPE) { // puts it back
-            held_.reset();
-            return true;
-        }
-        if (!def_->arrowKeys) break;
-        switch (e.key.key) {
-        case SDLK_LEFT:
-        case SDLK_RIGHT: {
-            const int d = e.key.key == SDLK_LEFT ? -1 : +1;
-            const Target* t = focusedTarget();
-            const std::size_t at = t ? t->spot.element : 0;
-            if (t && def_->elements[at].kind == ElementKind::Slider) adjustSlider(at, d);
-            else navigate(d, 0);
-            return true;
-        }
-        case SDLK_UP:
-        case SDLK_DOWN:
-            navigate(0, e.key.key == SDLK_UP ? -1 : +1);
-            return true;
-        case SDLK_RETURN:
-        case SDLK_KP_ENTER:
-        case SDLK_SPACE:
-            if (const Target* t = focusedTarget()) {
-                const Target hit = *t;
-                activate(hit, std::nullopt);
-                return true;
-            }
-            break;
-        default:
-            break;
-        }
-        break;
-
     default:
         break;
     }
@@ -3346,7 +3313,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
 
 void ScreenView::drawInput(SDL_Renderer* r, std::size_t index, float alpha) {
     const Element& el = def_->elements[index];
-    const std::string var = inputTarget(el);
+    const std::string var = el.option("variable");
     if (var.empty()) return;
     const Style& s = styleOf(index);
     ElementState& st = state_[index];
@@ -3354,7 +3321,7 @@ void ScreenView::drawInput(SDL_Renderer* r, std::size_t index, float alpha) {
     const Look look = on ? Look::Hover : Look::Disabled;
     box(r, rectOf(index), s, look, boxAlpha(s, alpha));
 
-    const std::string value = toString(engine_.game().variable(var));
+    const std::string value = engine_.game().typedValue(var);
     const bool empty = value.empty();
     const std::string shown = empty ? el.option("placeholder") : value;
     const SDL_Color colour = empty ? withAlpha(textColour(s, look), 0.5f) : textColour(s, look);
@@ -3376,7 +3343,7 @@ void ScreenView::drawInput(SDL_Renderer* r, std::size_t index, float alpha) {
 std::optional<std::size_t> ScreenView::typedInto() {
     auto takes = [&](std::size_t i) {
         const Element& el = def_->elements[i];
-        return el.kind == ElementKind::Input && live(i) && enabled(el) && !inputTarget(el).empty();
+        return el.kind == ElementKind::Input && live(i) && enabled(el) && !el.option("variable").empty();
     };
     if (typing_ && *typing_ < def_->elements.size() && takes(*typing_)) return typing_;
     for (std::size_t i = 0; i < def_->elements.size(); ++i)
@@ -3388,10 +3355,9 @@ bool ScreenView::handleInput(const SDL_Event& e) {
     if (e.type != SDL_EVENT_TEXT_INPUT && e.type != SDL_EVENT_KEY_DOWN) return false;
     if (const auto i = typedInto()) {
         const Element& el = def_->elements[*i];
-        const std::string var = inputTarget(el);
-        std::string value = toString(engine_.game().variable(var));
-        const int asked = engine_.game().request().mostLetters;
-        const int max = static_cast<int>(number(el, "most_letters", el.option("variable").empty() && asked > 0 ? static_cast<float>(asked) : 64.0f));
+        const std::string var = el.option("variable");
+        std::string value = engine_.game().typedValue(var);
+        const int max = static_cast<int>(number(el, "most_letters", 64.0f));
         if (e.type == SDL_EVENT_TEXT_INPUT) {
             std::string typed = e.text.text ? e.text.text : "";
             std::erase_if(typed, [](char c) { return c == '\n' || c == '\r' || c == '{' || c == '}'; });
@@ -3458,21 +3424,6 @@ void ScreenView::drawSlider(SDL_Renderer* r, std::size_t index, float alpha) {
 SDL_FRect ScreenView::sliderBox(std::size_t element) const {
     const auto it = std::ranges::find(targets_, Spot{element}, &Target::spot);
     return it != targets_.end() ? it->rect : rectOf(element);
-}
-
-void ScreenView::adjustSlider(std::size_t element, int delta) {
-    const Element& el = def_->elements[element];
-    if (!enabled(el)) return;
-    if (const SettingControl* c = findSettingControl(el.option("setting"))) { // a player setting: a twentieth at a time
-        c->setValue(engine_.settings(), std::clamp(c->value(engine_.settings()) + static_cast<float>(delta) * 0.05f, 0.0f, 1.0f));
-        engine_.settingsChanged(c->testSound);
-        return;
-    }
-    const float lo = number(el, "minimum", 0.0f), hi = number(el, "maximum", 100.0f), step = std::max(1.0f, number(el, "step", 1.0f));
-    const float value = static_cast<float>(toNumber(engine_.game().variable(el.option("variable"))));
-    const int next = static_cast<int>(std::clamp(value + step * static_cast<float>(delta), std::min(lo, hi), std::max(lo, hi)));
-    engine_.game().setVariable(el.option("variable"), next);
-    if (!el.actions.empty()) run(el);
 }
 
 } // namespace vn

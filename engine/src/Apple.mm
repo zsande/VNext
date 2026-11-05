@@ -154,7 +154,8 @@ std::unique_ptr<SystemMovie> SystemMovie::open(const std::string& path, const st
     @autoreleasepool {
         NSString* file = text(path);
         if (data) { // (from a pack: a copy on disk to read, made once)
-            const std::string name = std::format("vnext-movie-{:016x}{}", std::hash<std::string>{}(*data), path.substr(path.rfind('.')));
+            const auto dot = path.rfind('.'); // (what it is goes by its ending)
+            const std::string name = std::format("vnext-movie-{:016x}{}", std::hash<std::string>{}(*data), dot == std::string::npos ? std::string{} : path.substr(dot));
             file = [NSTemporaryDirectory() stringByAppendingPathComponent:text(name)];
             if (![[NSFileManager defaultManager] fileExistsAtPath:file] &&
                 ![[NSData dataWithBytesNoCopy:const_cast<char*>(data->data()) length:data->size() freeWhenDone:NO] writeToFile:file atomically:YES])

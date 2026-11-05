@@ -248,6 +248,12 @@ std::size_t length(std::string_view s);
 std::size_t offset(std::string_view s, std::size_t codepoints); // byte offset of the n-th codepoint
 } // namespace utf8
 
+// `text`, or as much of its start as `fits` with "..." after it: cut between letters, with no space or
+// comma left hanging before the dots ("..." alone when no more fits). How every text too long for its
+// room is cut, in the game and in the developer tools; `fits` says what too long is (a width, lines,
+// letters).
+std::string shortened(std::string_view text, const std::function<bool(std::string_view)>& fits);
+
 // Small and capital letters, in ASCII and the alphabets with one rule each for it (Latin with its
 // accents, Greek, Cyrillic): names compare the same however they're capitalised.
 char32_t lowerOf(char32_t c);
@@ -314,7 +320,7 @@ public:
     GameFiles& operator=(const GameFiles&) = delete;
     GameFiles(GameFiles&&) = delete;
     GameFiles& operator=(GameFiles&&) = delete;
-    // None open: just the disk (as what never reads a pack has it: the editor, a silent preview).
+    // None open: just the disk (as what never reads a pack has it: the editor, a silent sample).
     [[nodiscard]] static const GameFiles& disk();
     // Opens `file` as the game's pack (the error says why it can't be used).
     [[nodiscard]] std::expected<void, std::string> openPack(const std::string& file);
@@ -514,7 +520,7 @@ struct Settings {
     int mouths = 0;           // when mouths move: 0 as the characters say (mouth_moves=), 1 only with a voice, 2 never
     // Text
     int textSpeed = 45;      // characters per second, 0 = instant
-    int autoDelay = 500;     // milliseconds before auto-advance (plus a little per letter on lines without a voice)
+    int autoDelay = 500;     // milliseconds before auto-advance (plus a little per letter on lines without a voice); scripts say seconds
     int textboxOpacity = 85; // percent
     int textSize = 100;      // percent, for text in styles with text_size_follows=yes
     bool animations = true; // (off: no motion: animations show how they end, and looping ones stand still)
@@ -524,13 +530,13 @@ struct Settings {
     bool rollback = true;          // the mouse wheel / Back button goes back to earlier lines
     bool skipMovies = true;        // clicks and skipping go past movies (unless the story says skip=no)
     // Seeing and hearing
-    bool readAloud = false;    // the system reads the lines, choices and the buttons pointed at aloud (macOS)
+    bool readAloud = false;    // the system reads the lines, choices and the buttons pointed at aloud
     bool highContrast = false; // screens drawn in white on black, the button pointed at in yellow
     bool vibration = true;     // controllers rumble: the phone buzzing with a message, ringing with a call
     // Language: a translation's id, "original" (as written), or empty: the computer's language when
     // there's a translation for it.
     std::string language;
-    // Keys the player chose on the Controls screen, by control name ("none" for an emptied slot).
+    // Keys the player chose (with a screen's control parts: Settings' Keys), by control name ("none" for an emptied slot).
     std::map<std::string, std::vector<std::string>, std::less<>> keys;
 
     // Sets one value by its name (settings.txt, setting default.NAME); false for unknown names.
@@ -550,9 +556,9 @@ using ReadLog = std::unordered_set<std::uint64_t>;
 // A player setting a slider can change (slider setting=NAME): its place on the slider (0 to 1), and
 // how it reads ({NAME} on screens: "45 cps", "80%").
 struct SettingControl {
-    std::function<float(const Settings&)> value;
+    std::function<float(const Settings&)> value; // where its slider is (0 to 1)
     std::function<void(Settings&, float)> setValue;
-    std::function<std::string(const Settings&, const GameSettings&)> text;
+    std::function<double(const Settings&)> number; // what it is to screens' conditions and {texts} (a screen says its unit: "{master_volume}%")
     bool testSound = false; // play a short sound after changing it
 };
 const SettingControl* findSettingControl(std::string_view name);

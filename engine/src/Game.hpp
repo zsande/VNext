@@ -27,19 +27,19 @@ namespace vn {
 // The flowchart
 // ---------------------------------------------------------------------------
 
-// The story's flowchart: the points the player has passed in every playthrough (chapters, choices,
-// endings and "flowchart" lines), joined by the way they went. Each point keeps the game as it was the
+// The story's flowchart: the points the player has passed in every playthrough (choices and endings),
+// joined by the way they went. Each point keeps the game as it was the
 // last time the player was there, so they can go back to it. Kept in flowchart.txt.
 class Flowchart {
 public:
-    enum class Kind : std::uint8_t { Chapter, Choice, Ending, Point };
+    enum class Kind : std::uint8_t { Choice, Ending };
     struct Option {
         int index = 0;     // in the choice as written
         bool open = false; // it could be picked (else it was shown locked: needs ...)
     };
     struct Node {
         std::string id;              // "scene:offset": where it is in the scripts
-        Kind kind = Kind::Point;
+        Kind kind = Kind::Choice;
         int order = 0;               // the order places were first reached in
         std::string state;           // the game there (a save that repeats the place)
         std::vector<Option> options; // a choice's options, as shown last time (hidden ones left out)
@@ -278,7 +278,7 @@ struct PageLine {
     std::optional<SDL_Color> textColour;
 };
 
-// An option of the choice on screen (or an answer to a message).
+// An option of the choice on screen (or on the phone).
 struct ChoiceItem {
     std::string text;    // its text tags kept, for the screen
     bool locked = false; // shown, but it needs something first: (needs ...)
@@ -354,12 +354,9 @@ struct HistoryEntry {
 // tags become spans, and {expressions} are filled in. Other tags ({pause}, {speed}...) go to `other`.
 [[nodiscard]] RichText richText(std::string_view source, const Lookup& lookup, const Palette* palette, const TagHandler& other = {});
 
-// A screen the story opened and waits for ("open", "ask", a chapter's title card).
+// A screen the story opened and waits for ("open", a new day's calendar).
 struct ScreenRequest {
     std::string name;
-    std::string variable; // ask: the variable being typed into
-    std::string prompt;   // ask: the question, shown as {question}
-    int mostLetters = 0;  // ask: longest answer
     std::optional<std::string> opening, closing; // open ... with NAME and close with NAME: what it plays this time (none said: its own)
 };
 
@@ -376,8 +373,7 @@ public:
     Game& operator=(Game&&) = delete;
     ~Game() = default;
 
-    // `subroutine`: a "return" with nowhere to return to ends the game (splash screens).
-    void start(std::size_t pc, bool subroutine = false);
+    void start(std::size_t pc);
     void carry(Variables vars) { carried_ = std::move(vars); } // the variables the next start() begins with (else none)
     void update(float dt);
     void draw(const Font& labelFont);
@@ -390,13 +386,13 @@ public:
     void toggleAuto() { auto_ = !auto_; }
     // A command from a button, key or screen hook (anything that doesn't wait).
     void perform(const Command& command);
-    // The developer tools' preview: plays on as fast as it goes (picking the options that lead to
-    // command `target`) to the first line, choice, movie or screen opened at a command where `there`
-    // is true, and shows it (a line whole, a movie's first image), with the stage settled. When the
-    // story would go past `target` without doing it (an `if` it's in isn't true, or the option it's
-    // under isn't picked), it goes on from `target` itself, with everything as it is then (`skipped`).
-    // False if the story never gets there (or not within a second). Other movies are gone past.
-    bool playTo(std::size_t target, const std::function<bool(std::size_t)>& there, bool* skipped = nullptr);
+    // The developer tools' Play from this line (and the Screens tab's sample): plays on as fast as it goes
+    // (picking the options that lead to command `target`) to the first line, choice, movie or screen
+    // opened at a command where `there` is true, and shows it (a line whole, a movie's first image), with
+    // the stage settled. When the story would go past `target` without doing it (an `if` it's in isn't
+    // true, or the option it's under isn't picked), it goes on from `target` itself, with everything as
+    // it is then. False if the story never gets there (or not within a second). Other movies are gone past.
+    bool playTo(std::size_t target, const std::function<bool(std::size_t)>& there);
     // Set before start(): the story stops just before command `pc` (playTo() stops there, ready to do it,
     // whatever it is: a movie, a scene...), so a save made then starts with it.
     void stopBefore(std::optional<std::size_t> pc) { stopAt_ = pc; }
@@ -410,11 +406,12 @@ public:
     // A menu covers the game (or no longer does): the voice line and movie wait meanwhile.
     void setCovered(bool covered);
     [[nodiscard]] bool playingMovie() const { return wait_ == Wait::Movie; }
-    [[nodiscard]] bool openingScreen() const { return wait_ == Wait::Screen; } // (the story waits for request())
     void playMovieRound(float dt); // the developer tools' preview at a movie: it plays, round and round, and the story waits
 
     // Variables, then persistent ones, then what `variable` lines start them at, then the engine's built-in names.
     [[nodiscard]] Value variable(std::string_view name) const;
+    // As text, for a box the player types into: empty while nothing has given it a value yet (not 0).
+    [[nodiscard]] std::string typedValue(std::string_view name) const;
     void setVariable(const std::string& name, Value value);
     [[nodiscard]] const Variables& variables() const { return vars_; } // the story's own (set so far)
     [[nodiscard]] std::vector<Stage::ObjectState> onStage() const { return stage_.objects(); }
@@ -427,7 +424,7 @@ public:
     // State for the screens.
     [[nodiscard]] bool finished() const { return wait_ == Wait::Finished; }
     [[nodiscard]] const std::string& error() const { return error_; }
-    [[nodiscard]] bool showingSay() const { return wait_ == Wait::Say || (wait_ == Wait::Menu && menuPrompt_); }
+    [[nodiscard]] bool showingSay() const { return wait_ == Wait::Say || wait_ == Wait::Clock || (wait_ == Wait::Menu && menuPrompt_); } // (Clock: when the story goes on)
     [[nodiscard]] bool showingChoices() const { return wait_ == Wait::Menu || trigger_; } // (one up while the story goes on too)
     [[nodiscard]] bool menuPrompt() const { return wait_ == Wait::Menu && menuPrompt_; }
     [[nodiscard]] bool textComplete() const; // waiting for a click (end of the line or a {pause})
@@ -446,8 +443,8 @@ public:
     [[nodiscard]] const std::string& face() const { return face_; }
     [[nodiscard]] const std::string& faceBase() const { return faceBase_; }
     [[nodiscard]] const std::string& faceSide() const { return faceSide_; } // empty when there's no face
-    // What a textbox screen shows: the line on screen (in its textbox), or a line still up in
-    // another one, kept there (its screen has keep=yes) or said together with it. boxes(): the
+    // What a textbox screen shows: the line on screen (in its textbox), or a line in another one said
+    // together with it. boxes(): the
     // textboxes with a line to show, the line on screen's last.
     struct LineView {
         std::string_view speaker, text, face, faceBase, faceSide;
@@ -526,7 +523,6 @@ public:
     // How much of a timed choice's time is left (1 down to 0), if one is on screen.
     [[nodiscard]] std::optional<float> timeLeft() const;
     [[nodiscard]] const std::vector<HistoryEntry>& history() const { return history_; }
-    [[nodiscard]] const std::string& chapter() const { return chapter_; } // "chapter TITLE" (empty before the first)
     [[nodiscard]] const std::string& flowchartPoint() const { return flowchartNode_; } // the last point on the flowchart passed
     [[nodiscard]] std::size_t here() const { return resumePc_; } // the command the story is at
     [[nodiscard]] std::vector<std::size_t> takeRan() { return std::exchange(ran_, {}); } // the commands run since last asked (the editor marks lines never run)
@@ -547,7 +543,7 @@ public:
     // Things the engine picks up once per frame.
     [[nodiscard]] bool takeAutosaveRequest() { return std::exchange(autosave_, false); }
     [[nodiscard]] bool takeScreenRequest() { return std::exchange(screenRequested_, false); }
-    [[nodiscard]] std::vector<cmd::Ui> takeRequests() { return std::exchange(requests_, {}); } // notice, open...
+    [[nodiscard]] std::vector<cmd::Ui> takeRequests() { return std::exchange(requests_, {}); } // open, show phone...
     [[nodiscard]] bool takePersistentChanged() { return std::exchange(persistentChanged_, false); }
 
     // Save data is a small text format. load() returns a note for the player (when the script
@@ -567,8 +563,9 @@ public:
     [[nodiscard]] static Variables savedVariables(std::string_view state);
 
 private:
-    // (Chat: a chat scene waits for a message to come, or for a change to it; Call: a call rings)
-    enum class Wait : std::uint8_t { None, Say, Menu, Timer, Background, Pause, Move, Screen, Movie, Reached, Stopped, Finished, Chat, Call };
+    // (Chat: a chat scene waits for a message to come, or for a change to it; Call: a call rings; Clock: the player's
+    // clock, setting time real)
+    enum class Wait : std::uint8_t { None, Say, Menu, Timer, Background, Pause, Move, Screen, Movie, Reached, Stopped, Finished, Chat, Call, Clock };
 
     struct Stop {
         std::size_t at; // codepoint position in the text
@@ -598,6 +595,22 @@ private:
     void playMovie(const cmd::Movie& c, std::size_t here, bool fast);   // ...a movie
     void sendMessage(const cmd::Message& c, std::size_t here);          // ...a message on the phone, or a change to one
     void startCall(const cmd::Call& c, std::size_t here);               // ...a call
+    void passTime(const cmd::Time& c, std::size_t here);                // ...the story's time going on (or the player's waited for)
+    // The story's time (setting time): its day (the first is 1) and minutes from midnight; with setting time real, the
+    // player's (days since the story started). Kept as the variables time_day and time_minutes (time_started: real).
+    struct When {
+        int day = 1, minutes = 0;
+    };
+    [[nodiscard]] When timeNow() const;
+    [[nodiscard]] std::optional<Value> timeValue(std::string_view name) const; // time_clock, time_part, time_date...
+    [[nodiscard]] std::string partAt(int minutes) const;     // the part of the day then (setting time_parts)
+    [[nodiscard]] std::string clockText(int minutes) const;  // as the game shows it: 18:30, 6:30 PM, or (days and parts) Evening
+    [[nodiscard]] int dateOf(int day) const;                  // the calendar's date that day (days since 1970; -1: none)
+    [[nodiscard]] int weekdayOn(int day) const;               // (0 Monday; -1: none)
+    [[nodiscard]] std::string dateText(int day) const;       // as the game shows it: Saturday 14 July, Saturday, or Day 3
+    void timeMoved(When from, When to, bool fast);           // the background as it is then, and a new day's calendar
+    [[nodiscard]] std::string backgroundFor(std::string_view image) const; // its version for the part of the day (park_evening), if any
+    When waitFrom_{}; // (a wait for the player's clock: when it started)
     // The scripts' animation called `name` (none: "", or one the scripts don't have).
     [[nodiscard]] std::shared_ptr<const Animation> animation(std::string_view name) const;
     void waitFor(Wait wait, std::size_t here);
@@ -613,11 +626,9 @@ private:
     [[nodiscard]] const Stop* pendingStop() const;
     [[nodiscard]] int currentSpeed() const;
     [[nodiscard]] const GameSettings& gameSettings() const { return script_.gameSettings; }
-    bool have(RecordKind kind, std::string_view name); // the player has it now; false if they had it already (or it isn't listed)
-    void collect(RecordKind kind, std::string_view name); // ...and its message
+    void have(RecordKind kind, std::string_view name); // the player has it now (if the game lists it)
     void learnTips(std::string_view text);
     void waitForScreen(ScreenRequest request, std::size_t here);
-    void notice(std::string message) { requests_.push_back(cmd::Ui{.verb = "notice", .arg = std::move(message)}); }
 
     Context ctx_;
     const Script& script_;
@@ -640,7 +651,6 @@ private:
     Variables vars_;
     Variables carried_;
     std::string music_;
-    std::string chapter_;
     // The flowchart: the last point passed, and the option picked since (at a choice).
     std::string flowchartNode_;
     int flowchartOption_ = -1;
@@ -649,8 +659,7 @@ private:
     std::map<std::string, Loop, std::less<>> loops_; // looping sound channels (restored on load)
     std::map<std::string, std::string, std::less<>> expressions_; // each character's latest expression
     std::vector<std::string> screens_;                // screens shown with "show screen"
-    std::string textboxScreen_;                       // "textbox NAME" (empty: say)
-    std::vector<PageLine> page_;                      // lines since "new page"
+    std::vector<PageLine> page_;                      // the lines said (a page part shows the newest that fit)
     // The phone, a call, a chat scene.
     PhoneData phone_;
     PhoneData& ownPhone() { return phone_; }
@@ -685,7 +694,7 @@ private:
     void callOver();                                                            // the player's call ends
     std::optional<cmd::Message> change_;   // ...or to make this change (deletes it, edits it...) when `changeIn_` is over
     float changeIn_ = 0.0f;
-    bool unlogged_ = false;  // a chat's answer is being sent: the history has it already (as a choice)
+    bool unlogged_ = false;  // an option picked in a chat is being sent: the history has it already (as a choice)
     struct Person {
         std::string name, character; // as shown, and a defined character's lower-case name
         SDL_Color colour{255, 255, 255, 255};
@@ -693,7 +702,7 @@ private:
     [[nodiscard]] Person person(const std::string& character, const std::string& sender) const; // the one a phone line names
     [[nodiscard]] Person personNamed(std::string_view name) const;                                // ...by the name the phone shows
     void addMessage(PhoneData& phone, MessageItem m);
-    void arrive(MessageItem& m);                                 // it comes to the phone: its tips, image, sound, notice
+    void arrive(MessageItem& m);                                 // it comes to the phone: its tips, image and sound
     void change(const cmd::Message& c);                          // deletes it, edits it, reacts, reads it
     void hurry();                                                // the message a chat scene waits for comes now
     void logCall(const CallNow& c, bool missed);
@@ -703,21 +712,18 @@ private:
     void sayAgain(std::size_t page); // the line the story was on, back after a chat= or call= scene's lines
     void takeExpression(const cmd::Say& c, const CharacterDef* def); // a line's face for its speaker
 
-    // Lines in other textboxes than the one on screen's: kept there, or said together with it (a
-    // "together" block), each typing at its own speed. Saves keep them as their text with its tags.
+    // Lines in other textboxes than the one on screen's, said together with it (a "together" block), each
+    // typing at its own speed. Saves keep them as their text with its tags.
     struct BoxLine {
         std::string box, speaker, speakerKey, source, text, face;
         SDL_Color speakerColour{255, 255, 255, 255};
         std::vector<TextSpan> spans;
         float reveal = 0.0f;
         std::size_t length = 0;
-        bool keep = false; // (else it goes when the next line comes)
     };
     std::vector<BoxLine> others_;
     bool together_ = false; // the lines of a together block are being said
     [[nodiscard]] std::string boxOf(const CharacterDef* def) const; // the textbox a line goes to
-    [[nodiscard]] bool keeps(std::string_view box) const;           // its screen has keep=yes
-    [[nodiscard]] float speedOf(std::string_view box) const;        // its screen's text_speed= (1: the player's)
     [[nodiscard]] bool othersTyping() const;
     [[nodiscard]] BoxLine boxLine(std::string box, std::string speaker, SDL_Color colour, std::string source, const CharacterDef* def) const;
     void sayTogether(const cmd::Say& c, const CharacterDef* def); // a together block's line, before its last
@@ -748,6 +754,7 @@ private:
     std::optional<LineVoice> pendingVoice_; // a voice line started for the next line
     LineVoice lineVoice_;                   // the line on screen's own voice line (file empty: none)
     bool voiced_ = false;                // the line on screen has its voice line
+    bool madeUpVoice_ = false;           // ...made-up speech (it stands for the typing: shown at once by a click, it stops)
     bool textFollowsVoice_ = false;      // ...and its text shows as much as has been said
     bool typing_ = false;                // letters are appearing
     float speech_ = 0.0f;                // how much the speaker is speaking (0..1): mouths follow it

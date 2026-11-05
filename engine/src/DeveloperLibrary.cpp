@@ -3,6 +3,9 @@
 #include "DeveloperShared.hpp"
 #include "DeveloperUi.hpp"
 
+#include <numbers>
+#include <ranges>
+
 namespace vn {
 
 namespace {
@@ -51,10 +54,6 @@ std::vector<std::string> startLines(const AnimationStart& start) {
 
 } // namespace
 
-// The Library tab: the game's images, sounds, voices, movies and font files (to look at, hear, import
-// and rename; an image's sub-images and a font file's fonts under it), what the scripts list by name
-// (colours, styles, atlases, animations, endings, achievements, tips, input), each as a form, and the
-// variables.
 // The Library tab as it is this frame: the kind of file (or definition) listed, and where its list, the
 // button under it and the form go. Its files are drawn by drawLibraryFiles (the one chosen by
 // drawLibraryFile), its definitions by drawLibraryDefinitions.
@@ -73,21 +72,26 @@ struct Developer::LibraryFrame {
     }
 };
 
+// The Library tab: the game's images, sounds, voices, movies and font files (to look at, hear, import
+// and rename; an image's sub-images and a font file's fonts under it), what the scripts list by name
+// (colours, styles, atlases, animations, endings, achievements, tips, controls), each as a form, and the
+// variables.
 void Developer::drawLibrary(DeveloperUi& ui, const SDL_FRect& area) {
     DeveloperTools& d = tools;
     StoryEditor& editor = d.editor;
     const float k = ui.k;
     const auto [left, column, right] = ui.columns(area); // (column: what's in the kind chosen, under its heading)
 
-    // --- What's listed.
+    // --- What's listed, in the order a game is made in: its pictures (images, the atlases cut from them, movies),
+    // its sounds and voices, how its words and screens look and move, what it keeps track of, and its keys.
+    static constexpr std::string_view kOrder[]{"images", "atlas", "movies", "sounds", "voices", "fontfiles", "colour", "style", "animation",
+                                               "variables", "ending", "achievement", "tip", "control"};
     std::vector<std::pair<std::string_view, std::string_view>> kinds; // id, label
-    for (const FileKind& file : kFileKinds) {
-        kinds.emplace_back(file.id, file.label);
-        if (file.id == "sounds") kinds.emplace_back("voices", "Voices"_text);
+    for (const std::string_view id : kOrder) {
+        if (const auto file = std::ranges::find(kFileKinds, id, &FileKind::id); file != std::end(kFileKinds)) kinds.emplace_back(id, file->label);
+        else if (const auto def = std::ranges::find(kDefinitionKinds, id, &DefinitionKind::kind); def != std::end(kDefinitionKinds)) kinds.emplace_back(id, def->label);
+        else kinds.emplace_back(id, id == "voices" ? std::string_view("Voices"_text) : std::string_view("Variables"_text));
     }
-    for (const DefinitionKind& def : kDefinitionKinds)
-        if (def.listed) kinds.emplace_back(def.kind, def.label);
-    kinds.emplace_back("variables", "Variables"_text);
     auto wrongIn = [&](std::string_view kind) { // (images and fonts: what's made from them)
         const std::string_view of = kind == "variables" ? "variable" : kind == "images" ? "image" : kind == "fontfiles" ? "font" : kind;
         return std::ranges::any_of(editor.definitions(of), [&](const StoryEditor::Definition& def) { return d.problemWithin(def.file, def.line, def.end); });
@@ -252,13 +256,15 @@ void Developer::drawLibraryFiles(const LibraryFrame& f) {
                                                 }
                                                 nx += side + 8 * k;
                                             }
-                                            ui.textAround(name, nx, cy, layout::listText, theme::text);
-                                            if (fileKind->id == "sounds" && row.file) // (heard, as a list of sounds lets)
+                                            const bool hears = fileKind->id == "sounds" && row.file;
+                                            if (hears) // (heard, as a list of sounds lets)
                                                 listenButton(ui, {at.x + at.w - at.h, at.y, at.h, at.h}, d.cachedSound(engine.assets(), lower(stemOf(name))), true);
                                             const auto dot = name.rfind('.'); // (an MP4, MOV or M4V: Linux players need GStreamer for it)
-                                            if (row.file && dot != npos && std::ranges::contains(kSystemMovieTypes, std::string_view(lower(name.substr(dot)))))
-                                                ui.textAround("on Linux: needs GStreamer"_tr, nx + ui.width(name, layout::listText) + 8 * k, cy, layout::smallText, kWarn);
-                                            else if (row.file && d.unused.contains(name)) ui.textAround("unused"_tr, nx + ui.width(name, layout::listText) + 8 * k, cy, layout::smallText, theme::dim);
+                                            const bool gstreamer = row.file && dot != npos && std::ranges::contains(kSystemMovieTypes, std::string_view(lower(name.substr(dot))));
+                                            const std::string_view note = gstreamer ? std::string_view("on Linux: needs GStreamer"_tr) : row.file && d.unused.contains(name) ? std::string_view("unused"_tr) : std::string_view{};
+                                            const float noteW = note.empty() ? 0.0f : ui.width(note, layout::smallText) + 8 * k; // (after the name, which is cut to leave it room)
+                                            const float shown = ui.textFitted(name, nx, cy, layout::listText, theme::text, at.x + at.w - (hears ? at.h : 0.0f) - layout::listPad * k - noteW - nx);
+                                            if (!note.empty()) ui.textAround(note, nx + shown + 8 * k, cy, layout::smallText, gstreamer ? kWarn : theme::dim);
                                         }});
     switch (event.kind) {
     case ListKind::Chosen: {
@@ -341,12 +347,12 @@ void Developer::drawLibraryFile(const LibraryFrame& f, const std::string& name) 
     const auto slash = key.find('/');
     const std::string called = scriptName(slash == npos ? key : key.substr(slash + 1)); // ("19. YOMI.flac": 19_yomi)
     const std::string translation = slash == npos ? std::string{} : " " + "The {} translation shows it instead."_tr(key.substr(0, slash)); // (said after what it is)
-    ui.formTitle(std::format("{}: {}", tr(fileKind->one), name), right.x, right.y);
     // To the Trash (the system's, so it can be got back): a second click does it.
     const std::string armId = "trash:" + path;
     const bool armed = d.armed == armId;
     const float trashW = std::max(ui.buttonWidth("Move to the Trash"_tr, layout::buttonText, layout::widerButtonW), // (one size, either way, as its words say)
                                   ui.buttonWidth("Click again to move it"_tr, layout::buttonText, layout::widerButtonW));
+    ui.formTitle(std::format("{}: {}", tr(fileKind->one), name), right.x, right.y, kAccent, right.w - trashW - layout::gap * k);
     if (ui.button({right.x + right.w - trashW, right.y, trashW, buttonH}, armed ? "Click again to move it"_tr : "Move to the Trash"_tr, armed, true, layout::buttonText)) {
         if (!armed) {
             d.armed = armId;
@@ -386,9 +392,8 @@ void Developer::drawLibraryFile(const LibraryFrame& f, const std::string& name) 
             const auto own = std::ranges::find_if(fileKind->extensions, [&](std::string_view ext) { return d.cachedExists(engine.gameRoot() + as + std::string(ext)); });
             const bool has = own != std::end(fileKind->extensions);
             const float bw = ui.buttonWidth(has ? "Replace..."_tr : "Its own file..."_tr, layout::buttonText, layout::wideButtonW);
-            ui.textAround(has ? (images ? "{} shows {}"_tr : "{} plays {}"_tr)(id, as + std::string(*own)) : (images ? "{} shows this one"_tr : "{} plays this one"_tr)(id),
-                          right.x, y + buttonH / 2, layout::noteText, theme::dim,
-                          right.w - bw - 10 * k);
+            const std::string says = has ? (images ? "{} shows {}"_tr : "{} plays {}"_tr)(id, as + std::string(*own)) : (images ? "{} shows this one"_tr : "{} plays this one"_tr)(id);
+            ui.textFitted(says, right.x, y + buttonH / 2, layout::noteText, theme::dim, right.w - bw - 10 * k);
             if (ui.button({right.x + right.w - bw, y, bw, buttonH}, has ? "Replace..."_tr : "Its own file..."_tr, false, true, layout::buttonText))
                 chooseFiles(tr(fileKind->label), fileKind->extensions, as);
             y += buttonH + layout::gap * k;
@@ -511,7 +516,7 @@ void Developer::drawLibraryDefinitions(const LibraryFrame& f) {
         paintColour = [&](std::size_t i, const SDL_FRect& at) {
             float x = at.x + layout::listPad * k;
             if (const auto c = parseColour(fieldValue(editor.fields(kind, defs[i]), "Colour"), &engine.palette())) x = ui.swatch(x, at.y + at.h / 2, *c);
-            ui.textAround(defs[i].name, x, at.y + at.h / 2, layout::listText, theme::text);
+            ui.textFitted(defs[i].name, x, at.y + at.h / 2, layout::listText, theme::text, at.x + at.w - layout::listPad * k - x);
         };
     const auto event = ui.editList("library", listBox, d.libraryScroll,
                                    {.count = defs.size(),
@@ -537,7 +542,9 @@ void Developer::drawLibraryDefinitions(const LibraryFrame& f) {
         break;
     case ListKind::Renamed:
         if (trim(event.name).empty()) return; // (emptied: it keeps its name)
-        d.saidRenamed(editor.renameDefinition(kind, event.item, event.name, std::format("def-name:{}:{}", kind, d.focusCount)), "A name is one word (letters, numbers, _ and -) that no other one of these has."_tr);
+        d.saidRenamed(editor.renameDefinition(kind, event.item, event.name, std::format("def-name:{}:{}", kind, d.focusCount)),
+                      kind == "ending" || kind == "achievement" || kind == "tip" ? "A name is one word (letters, numbers and _) that no other one of these has."_tr
+                                                                                 : "A name is one word (letters, numbers, _ and -) that no other one of these has."_tr);
         return;
     case ListKind::Deleted:
         editor.removeDefinition(defs[event.item]);
@@ -567,10 +574,10 @@ void Developer::drawLibraryDefinitions(const LibraryFrame& f) {
         if (kind == "colour") lines = {std::format("colour {} #ffffff", unique("new_colour"))};
         else if (kind == "style") lines = {std::format("style {}", unique("new_style"))};
         else if (kind == "atlas") lines = {std::format("atlas {}", unique("new_atlas"))}; // (its image is called the same; its frames' names: typed into the form's)
-        else if (kind == "ending") lines = {std::format("ending {} \"\"", unique("new_ending"))};
-        else if (kind == "achievement") lines = {std::format("achievement {} \"\"", unique("new_achievement"))};
-        else if (kind == "tip") lines = {std::format("tip {} \"\"", unique("new_tip"))};
-        else if (kind == "control") lines = {std::format("control {}", unique("new_input"))};
+        else if (kind == "ending") lines = {std::format("ending {}", unique("new_ending"))};
+        else if (kind == "achievement") lines = {std::format("achievement {}", unique("new_achievement"))};
+        else if (kind == "tip") lines = {std::format("tip {}", unique("new_tip"))};
+        else if (kind == "control") lines = {std::format("control {}", unique("new_control"))};
         d.libraryItem = editor.addDefinition(kind, lines);
         f.typeName(kind, *d.libraryItem);
         return;
@@ -594,9 +601,9 @@ void Developer::drawDefinition(DeveloperUi& ui, const std::string& kind, const S
     const auto it = std::ranges::find(kDefinitionKinds, std::string_view(kind), &DefinitionKind::kind);
     const std::string_view label = it != std::end(kDefinitionKinds) ? tr(it->one) : std::string_view(kind); // (in the tools' language)
     // The form (it scrolls when it's longer than the room it has).
-    ui.formTitle(std::format("{}: {}", label, def.name), right.x, right.y);
-    asTextButton(ui, right.x + right.w, right.y);
-    const float boxH = layout::boxH * k, rowGap = layout::rowGap * k, labelW = std::round(right.w * layout::labelPart);
+    const float toggleW = asTextButton(ui, right.x + right.w, right.y) + layout::gap * k;
+    ui.formTitle(std::format("{}: {}", label, def.name), right.x, right.y, kAccent, right.w - toggleW);
+    const float boxH = layout::boxH * k, rowGap = layout::rowGap * k;
     float top = right.y + layout::titleH * k;
     if (kind == "style") { // (how it looks, over its form)
         drawStyleSample(ui, def.name, {right.x, top, right.w, std::round(std::min(layout::sampleStyleH * k, right.w * layout::sampleStylePart))});
@@ -635,6 +642,8 @@ void Developer::drawDefinition(DeveloperUi& ui, const std::string& kind, const S
     if (kind == "style" && d.styleView && d.styleOf.second == def.name) // (an empty box: what the style it's based on gives it)
         showStyleValues(fields, d.styleView->def().elements.front().style, engine.palette());
     const std::string id = std::format("def:{}:{}", kind, def.line);
+    const float least = std::round(right.w * layout::labelPart); // (the labels' column: with a sub-image's title in the gallery under the form, its too)
+    const float labelW = kind == "sub-image" ? labelColumn(ui, least, right.w, {fields}, {"Title in the gallery"_tr}) : labelColumn(ui, least, right.w, {fields});
     if (const auto edit = drawForm(ui, id, fields, right.x, right.w, labelW, y)) {
         if (edit->typed) {
             if (d.focusOwner != id + ":" + edit->name) {
@@ -650,13 +659,13 @@ void Developer::drawDefinition(DeveloperUi& ui, const std::string& kind, const S
             d.focus.clear();
         }
     }
-    if (kind == "sub-image") drawRecordTitle(ui, "gallery", lower(def.name), right.x, right.w, y); // (its title in the gallery, under its form)
+    if (kind == "sub-image") drawRecordTitle(ui, "gallery", lower(def.name), right.x, right.w, y, labelW); // (its title in the gallery, under its form)
     ui.formDrawn(formBox, y);
 }
 
 // An image's title in the gallery, or a song's in the music room: its gallery or song line, made
 // when one is typed, and taken out when it's emptied.
-void Developer::drawRecordTitle(DeveloperUi& ui, std::string_view kind, const std::string& name, float x, float w, float& y) {
+void Developer::drawRecordTitle(DeveloperUi& ui, std::string_view kind, const std::string& name, float x, float w, float& y, float labelW) {
     DeveloperTools& d = tools;
     StoryEditor& editor = d.editor;
     const auto defs = editor.definitions(kind);
@@ -665,7 +674,8 @@ void Developer::drawRecordTitle(DeveloperUi& ui, std::string_view kind, const st
     const bool song = kind == "song";
     const std::vector<StoryEditor::Field> fields{{.name = "Title", .value = title, .label = song ? "Title in the music room"_text : "Title in the gallery"_text, .box = Box::Text,
                                                   .hint = "None"}};
-    if (const auto edit = drawForm(ui, std::format("title:{}:{}", kind, name), fields, x, w, std::round(w * 0.3f), y)) {
+    if (labelW <= 0.0f) labelW = labelColumn(ui, std::round(w * layout::labelPart), w, {fields});
+    if (const auto edit = drawForm(ui, std::format("title:{}:{}", kind, name), fields, x, w, labelW, y)) {
         if (trim(edit->value).empty()) {
             if (def != defs.end()) editor.removeDefinition(*def);
         } else if (def != defs.end()) {
@@ -676,7 +686,7 @@ void Developer::drawRecordTitle(DeveloperUi& ui, std::string_view kind, const st
     }
 }
 
-// The Library's variables: the ones the scripts change or ask for, or list with a variable line (and
+// The Library's variables: the ones the scripts change (or an input or a slider sets), or list with a variable line (and
 // while a game is going on, the story's own too). Each has its value then (to change), what it starts
 // at and what it's for (its variable line), and the lines that use it. + New variable lists one; a double click
 // renames one (Enter: in every line that uses it), and its x takes its variable line out.
@@ -726,11 +736,13 @@ void Developer::drawVariables(DeveloperUi& ui, const SDL_FRect& area, const SDL_
                                     .indent = {},
                                     .paint =
                                         [&](std::size_t i, const SDL_FRect& box) {
-                                            const float pad = layout::listPad * k;
-                                            ui.textAround(names[i], box.x + pad, box.y + box.h / 2, layout::listText, theme::text);
+                                            const float pad = layout::listPad * k, mid = box.y + box.h / 2;
+                                            const float nameW = ui.textFitted(names[i], box.x + pad, mid, layout::listText, theme::text, box.w - 2 * pad);
                                             if (!playing) return;
-                                            const std::string v = ui.fitted(valueOf(names[i]), layout::noteText, box.w - 3 * pad - ui.width(names[i], layout::listText)); // (in the room the name leaves)
-                                            ui.textAround(v, box.x + box.w - pad - ui.width(v, layout::noteText), box.y + box.h / 2, layout::noteText, theme::dim);
+                                            const std::string value = valueOf(names[i]), v = ui.fitted(value, layout::noteText, box.w - 3 * pad - nameW); // (in the room the name leaves, at the right)
+                                            const SDL_FPoint vs = ui.measure(v, layout::noteText);
+                                            ui.textAround(v, box.x + box.w - pad - vs.x, mid, layout::noteText, theme::dim);
+                                            if (v != value) ui.tip({box.x + box.w - pad - vs.x, mid - vs.y / 2, vs.x, vs.y}, value);
                                         }});
     switch (event.kind) {
     case DeveloperUi::ListEvent::Kind::Chosen:
@@ -785,8 +797,8 @@ void Developer::drawVariables(DeveloperUi& ui, const SDL_FRect& area, const SDL_
         return;
     }
     const std::string& name = names[*d.libraryItem];
-    ui.formTitle("Variable: {}"_tr(name), form.x, form.y);
-    const float boxH = layout::boxH * k, labelW = std::round(form.w * layout::labelPart), gap = layout::rowGap * k;
+    ui.formTitle("Variable: {}"_tr(name), form.x, form.y, kAccent, form.w);
+    const float boxH = layout::boxH * k, gap = layout::rowGap * k;
     float y = form.y + layout::titleH * k;
     const auto def = definition(name);
     if (def)
@@ -803,6 +815,7 @@ void Developer::drawVariables(DeveloperUi& ui, const SDL_FRect& area, const SDL_
     const std::vector<StoryEditor::Field> fields{{.name = "Starts at", .value = start, .label = "Starting value"_text, .box = Box::VariableValue, .hint = "0"},
                                                  {.name = "What it's for", .value = about, .label = "Description"_text, .box = Box::Text},
                                                  {.name = "Kept between games"_text, .value = kept ? "yes" : "no", .box = Box::YesNo, .choices = "no yes"}};
+    const float labelW = labelColumn(ui, std::round(form.w * layout::labelPart), form.w, {fields}, {"Now"_tr}); // (with Now's, under the form)
     if (const auto edit = drawForm(ui, "variable:" + name + ":def", fields, form.x, form.w, labelW, y)) {
         if (edit->name == "Kept between games") {
             const std::string bare = kept ? name.substr(11) : name, to = edit->value == "yes" ? "persistent." + bare : bare;
@@ -823,7 +836,7 @@ void Developer::drawVariables(DeveloperUi& ui, const SDL_FRect& area, const SDL_
         if (def) editor.setDefinition(*def, {line}, std::format("variable:{}:{}{}", name, edit->name, d.focusCount));
         else editor.addDefinition("variable", {line});
     }
-    ui.textAround("Now"_tr, form.x, y + boxH / 2, layout::smallText, theme::dim, labelW - 8 * k);
+    ui.textFitted("Now"_tr, form.x, y + boxH / 2, layout::labelText, theme::dim, labelW - 8 * k);
     if (playing) { // (a number, yes or no, or words)
         const StoryEditor::Field now{.name = "now", .value = valueOf(name), .box = Box::VariableValue}; // (as every value's box)
         if (const auto typed = ui.pickField("variable:" + name, {form.x + labelW, y, form.w - labelW, boxH}, now, layout::boxText)) {
@@ -832,7 +845,7 @@ void Developer::drawVariables(DeveloperUi& ui, const SDL_FRect& area, const SDL_
             engine.game_->setVariable(name, t == "yes" ? Value(1) : t == "no" ? Value(0) : n ? number(*n) : Value(t));
         }
     } else {
-        ui.textAround("Shown while a game is going on: Play, then F10."_tr, form.x + labelW, y + boxH / 2, layout::noteText, theme::dim, form.w - labelW);
+        ui.textFitted("Shown while a game is going on: Play, then F10."_tr, form.x + labelW, y + boxH / 2, layout::noteText, theme::dim, form.w - labelW);
     }
     y += boxH + gap + layout::gap * k;
     if (d.lookedUses.what != name || d.lookedUses.version != editor.version()) // (looked for again when the variable or the scripts change)
@@ -873,20 +886,20 @@ void Developer::drawVoices(DeveloperUi& ui, const SDL_FRect& list, const SDL_FRe
         d.libraryItem = *clicked;
     if (!d.libraryItem) {
         const auto recorded = std::ranges::count_if(lines, [&](const Voiced& v) { return there(v.file, ""); });
-        ui.text(lines.empty() ? "A character with Voices (in their form) says each line with a file of its own: sounds/voices/NAME/SCENE_N. Their lines are listed here, with the file each one plays."_tr()
+        ui.text(lines.empty() ? "A character with Voice files (in their form) says each line with a file of its own: sounds/voices/NAME/SCENE_N. Their lines are listed here, with the file each one plays."_tr()
                               : "{} lines with voices, {} of them recorded (the ones not recorded yet are dim). Click one to hear it, or to see which file it needs."_tr(lines.size(), recorded),
                 form.x, form.y, layout::noteText, theme::dim, form.w);
         return;
     }
     const Voiced& v = lines[*d.libraryItem];
-    ui.formTitle("Voice: {}"_tr("sounds/" + v.file), form.x, form.y);
+    ui.formTitle("Voice: {}"_tr("sounds/" + v.file), form.x, form.y, kAccent, form.w);
     float y = form.y + layout::titleH * k;
     y += ui.text(std::format("{}: {}", v.who, v.text), form.x, y, layout::listText, theme::text, form.w).y + 10 * k;
     const float buttonH = layout::buttonH * k;
     const bool here = there(v.file, "");
     const float importW = ui.buttonWidth(here ? "Replace..."_tr : "Import..."_tr, layout::buttonText, layout::wideButtonW);
-    ui.textAround(here ? "It's there."_tr : "It isn't recorded yet: the line plays without a voice."_tr, form.x, y + buttonH / 2, layout::noteText, here ? kGood : theme::dim,
-                  form.w - importW - 10 * k);
+    ui.textFitted(here ? "It's there."_tr : "It isn't recorded yet: the line plays without a voice."_tr, form.x, y + buttonH / 2, layout::noteText, here ? kGood : theme::dim,
+                  form.w - importW - 10 * k); // (one line, as every row with a button)
     if (ui.button({form.x + form.w - importW, y, importW, buttonH}, here ? "Replace..."_tr : "Import..."_tr, false, true, layout::buttonText))
         chooseFiles("Sounds"_tr, kSoundTypes, "sounds/" + v.file);
     y += buttonH + layout::gap * k;
@@ -897,7 +910,7 @@ void Developer::drawVoices(DeveloperUi& ui, const SDL_FRect& list, const SDL_FRe
         const std::string id = stemOf(language);
         const bool translated = there(v.file, id + "/");
         const float ownW = ui.buttonWidth(translated ? "Replace..."_tr : "Its own file..."_tr, layout::buttonText, layout::wideButtonW);
-        ui.textAround(translated ? "{} plays {}"_tr(id, "sounds/" + id + "/" + v.file) : "{} plays this one"_tr(id), form.x, y + buttonH / 2, layout::noteText,
+        ui.textFitted(translated ? "{} plays {}"_tr(id, "sounds/" + id + "/" + v.file) : "{} plays this one"_tr(id), form.x, y + buttonH / 2, layout::noteText,
                       theme::dim, form.w - ownW - 10 * k);
         if (ui.button({form.x + form.w - ownW, y, ownW, buttonH}, translated ? "Replace..."_tr : "Its own file..."_tr, false, true, layout::buttonText))
             chooseFiles("Sounds"_tr, kSoundTypes, "sounds/" + id + "/" + v.file);
@@ -948,9 +961,10 @@ void Developer::drawAtlas(DeveloperUi& ui, const StoryEditor::Definition& def, c
         const int expression = i / perExpression;
         const bool first = i % perExpression == 0, chosen = expression == static_cast<int>(d.atlasExpression);
         draw::outline(r, cell, chosen ? kAccent : SDL_Color{kEdge.r, kEdge.g, kEdge.b, 140});
-        if (first && expression < static_cast<int>(a->expressions.size())) {
+        if (first && expression < static_cast<int>(a->expressions.size())) { // (its name at its top, cut to fit: its whole in a tip)
             const DeveloperUi::Clip clipped(ui, cell);
-            ui.text(a->expressions[static_cast<std::size_t>(expression)], cell.x + 3 * k, cell.y + 2 * k, layout::sampleText, chosen ? kAccent : theme::text);
+            ui.textFitted(a->expressions[static_cast<std::size_t>(expression)], cell.x + 3 * k, cell.y + 2 * k + ui.measure("Ag", layout::sampleText).y / 2,
+                          layout::sampleText, chosen ? kAccent : theme::text, cell.w - 6 * k);
         }
         if (ui.click(cell)) d.atlasExpression = static_cast<std::size_t>(expression);
     }
@@ -1002,7 +1016,7 @@ void Developer::drawAtlas(DeveloperUi& ui, const StoryEditor::Definition& def, c
         }
     }
     if (parts.empty()) ui.textAround(a->expressions.empty() ? "" : a->expressions[d.atlasExpression], right.x + 6 * k, right.y + 12 * k, layout::sampleText, theme::text);
-    else ui.textAround("Drag the eyes or the mouth into place"_tr, box.x + 2 * pad + half, box.y + box.h - pad - 9 * k, layout::sampleText, theme::dim);
+    else ui.textFitted("Drag the eyes or the mouth into place"_tr, box.x + 2 * pad + half, box.y + box.h - pad - 9 * k, layout::sampleText, theme::dim, half);
     draw::outline(r, box, kEdge);
 }
 
@@ -1058,8 +1072,8 @@ constexpr std::pair<std::string_view, Ease> kEaseNames[]{{"linear", Ease::Linear
 
 bool byAmount(std::string_view key) { return key == "left" || key == "right" || key == "up" || key == "down"; }
 
-// A new change's easing on the timeline's row `row`: a fade's is even (as the scripts have it), the rest smooth.
-std::string_view usualEase(std::size_t row) { return wordsOf(kTimelineRows[row].keys).front() == "fade" ? "linear" : "inout"; }
+// A new change's easing on the timeline's row `row`: as the scripts have it for the row's first key.
+std::string_view rowEase(std::size_t row) { return usualEase(wordsOf(kTimelineRows[row].keys).front()); }
 
 // A timeline's changes as the game plays them, `times` times (0: again and again). (A value that
 // doesn't read: as if it didn't change.)
@@ -1117,7 +1131,6 @@ StoryEditor::Bar barWritten(StoryEditor::Bar b, std::size_t row, std::string_vie
     if (b.key != "wipe") b.shape.clear();
     return b;
 }
-
 
 float lastEnd(const std::vector<StoryEditor::Bar>& bars) {
     float last = 0.0f;
@@ -1195,13 +1208,13 @@ void Developer::drawAnimation(DeveloperUi& ui, const StoryEditor::Definition& gi
     ui.scrollForm(formBox, boxH + rowGap);
     float y = formBox.y - d.formScroll;
     const DeveloperUi::Clip clipped(ui, formBox, true);
-    const float labelW = std::round(room.w * layout::labelPart);
+    const float least = std::round(room.w * layout::labelPart); // (the labels' column, as wide as they need: each of its two forms its own)
     for (std::size_t l = def.line; l < def.end; ++l)
         if (const ScriptError* problem = d.problemAt(def.file, l)) y += ui.text(problem->message, room.x, y, layout::noteText, kBad, room.w).y + rowGap;
 
     // Its name and how often it plays.
     const std::string id = std::format("def:animation:{}", def.line);
-    if (const auto edit = drawForm(ui, id, fields, room.x, room.w, labelW, y)) {
+    if (const auto edit = drawForm(ui, id, fields, room.x, room.w, labelColumn(ui, least, room.w, {fields}), y)) {
         auto changed = fields;
         std::ranges::find(changed, edit->name, &Field::name)->value = edit->value;
         std::vector<std::string> written = editor.linesOf("animation", changed);
@@ -1225,7 +1238,7 @@ void Developer::drawAnimation(DeveloperUi& ui, const StoryEditor::Definition& gi
     if (ui.button({room.x, y, room.w, buttonH}, "+ New change"_tr, false, timeline.ok, layout::buttonText)) {
         const std::size_t row = v.bar ? StoryEditor::timelineRow(timeline.bars[*v.bar].key) : 2;
         StoryEditor::Bar bar{.key = std::string(wordsOf(kTimelineRows[row].keys).front()), .value = std::string(kTimelineRows[row].start),
-                             .start = std::round(std::min(v.playhead, timeline.length) * 20.0f) / 20.0f, .seconds = 0.5f, .ease = std::string(usualEase(row))};
+                             .start = std::round(std::min(v.playhead, timeline.length) * 20.0f) / 20.0f, .seconds = 0.5f, .ease = std::string(rowEase(row))};
         StoryEditor::Timeline added = timeline;
         added.bars.push_back(bar);
         added.length = lastEnd(added.bars) + after;
@@ -1247,12 +1260,12 @@ void Developer::drawAnimation(DeveloperUi& ui, const StoryEditor::Definition& gi
         {.name = "To"_text, .value = barShown(b), .box = kTimelineRows[row].box, .suggest = std::string(kTimelineRows[row].more), .group = std::string(kTimelineRows[row].label)},
         {.name = "Starts at"_text, .value = secondsText(b.start), .label = "Starts at (seconds)"_text, .box = StoryEditor::Box::Seconds, .hint = "0"},
         {.name = "Duration"_text, .value = b.seconds > 0.0f ? secondsText(b.seconds) : std::string{}, .label = "Duration (seconds)"_text, .box = StoryEditor::Box::Seconds,
-         .hint = "At once"_hint, .beside = true},
-        {.name = "Easing"_text, .value = b.ease, .box = StoryEditor::Box::Easing}};
+         .hint = "At once"_hint},
+        {.name = "Easing"_text, .value = b.ease, .box = StoryEditor::Box::Easing, .usual = std::string(usualEase(b.key))}};
     if (b.key == "wipe") // (where it shows first: the image's darkest parts)
         change.insert(change.begin() + 1, {.name = "Shape"_text, .value = b.shape, .box = StoryEditor::Box::Shape, .hint = "None"_hint});
     const std::string changeId = std::format("{}:change", id);
-    if (const auto edit = drawForm(ui, changeId, change, room.x, room.w, labelW, y)) {
+    if (const auto edit = drawForm(ui, changeId, change, room.x, room.w, labelColumn(ui, least, room.w, {change}), y)) {
         StoryEditor::Bar changed = b;
         if (edit->name == "To") changed = barWritten(changed, row, edit->value);
         else if (edit->name == "Shape") changed.shape = std::string(trim(edit->value));
@@ -1318,7 +1331,7 @@ float Developer::drawTimeline(DeveloperUi& ui, const StoryEditor::Definition& de
         const float top = y + rulerH + rowH * static_cast<float>(row);
         if (row % 2 == 1) draw::rect(r, {trackX, top, trackW, rowH}, {255, 255, 255, 8});
         const std::string label(tr(kTimelineRows[row].label));
-        ui.textAround(ui.fitted(label, layout::smallText, labelW - 14 * k), x + 8 * k, top + rowH / 2, layout::smallText, theme::dim);
+        ui.textFitted(label, x + 8 * k, top + rowH / 2, layout::smallText, theme::dim, labelW - 14 * k);
     }
     if (xOf(length) < trackX + trackW) draw::rect(r, {xOf(length), y + rulerH, trackX + trackW - xOf(length), grid.h - rulerH}, {0, 0, 0, 110});
     float step = 30.0f;
@@ -1351,7 +1364,7 @@ float Developer::drawTimeline(DeveloperUi& ui, const StoryEditor::Definition& de
             room -= after - at;
             at = after;
         }
-        if (room > 16 * k) ui.textAround(ui.fitted(colour ? colourWords(b.value, &engine.palette()) : barShown(b), layout::sampleText, room), at, mid, layout::sampleText, textColour);
+        if (room > 16 * k) ui.textFitted(colour ? colourWords(b.value, &engine.palette()) : barShown(b), at, mid, layout::sampleText, textColour, room);
     };
     for (const bool instant : {false, true})
         for (std::size_t i = 0; i < bars.size(); ++i) {
@@ -1447,7 +1460,7 @@ float Developer::drawTimeline(DeveloperUi& ui, const StoryEditor::Definition& de
                 if (!ui.click(lane)) continue;
                 if (d.doubleClick) { // (a change there, going to what a new one on the row does, for half a second)
                     StoryEditor::Bar bar{.key = std::string(wordsOf(kTimelineRows[row].keys).front()), .value = std::string(kTimelineRows[row].start),
-                                         .start = snap(pointer, std::nullopt), .seconds = 0.5f, .ease = std::string(usualEase(row))};
+                                         .start = snap(pointer, std::nullopt), .seconds = 0.5f, .ease = std::string(rowEase(row))};
                     StoryEditor::Timeline t = timeline;
                     t.bars.push_back(bar);
                     t.length = lastEnd(t.bars) + std::max(0.0f, timeline.length - lastEnd(timeline.bars));
@@ -1652,7 +1665,7 @@ void Developer::drawSubImage(DeveloperUi& ui, const StoryEditor::Definition& def
 // shows how it looks then).
 void Developer::drawStyleSample(DeveloperUi& ui, const std::string& style, const SDL_FRect& box) {
     DeveloperTools& d = tools;
-    const float k = ui.k, h = engine.canvas().w * box.h / box.w; // (in the engine.canvas()'s pixels: as tall as the box is for its width)
+    const float k = ui.k, h = engine.canvas().w * box.h / box.w; // (in the game's pixels: as tall as the box is for its width)
     if (d.styleOf != std::pair{d.editor.version(), style}) { // the scripts, with a screen of them at the end of main.vnscript
         d.styleView.reset();
         d.styleScript.reset();
@@ -1665,7 +1678,8 @@ void Developer::drawStyleSample(DeveloperUi& ui, const std::string& style, const
             std::format("    text \"Some words\" style={} x={} y={} width={}", style, std::lround(engine.canvas().w * 0.5f), std::lround(h / 2 - 16),
                         std::lround(engine.canvas().w * 0.46f))};
         std::string sample = "\n";
-        for (const std::string& line : placesFromPixels(pixels, engine.canvas().w, engine.canvas().h)) sample += line + "\n";
+        for (const std::string& line : placesFromPixels(pixels, engine.canvas().w, engine.canvas().h, ownSizes(pixels, {}, engine.canvas().w, engine.canvas().h, 1.0f)))
+            sample += line + "\n";
         auto script = std::make_unique<Script>(Script::load(
             "scripts/main.vnscript",
             [&](const std::string& p) {
@@ -1685,9 +1699,9 @@ void Developer::drawStyleSample(DeveloperUi& ui, const std::string& style, const
         return;
     }
     const float scale = box.w / engine.canvas().w;
-    const SDL_Event e = mouseEventAt(SDL_EVENT_MOUSE_MOTION, ui.over(box) ? (d.mouseX - box.x) / scale : -1000.0f, ui.over(box) ? (d.mouseY - box.y) / scale : -1000.0f);
+    const SDL_Event e = mouseMotionAt(ui.over(box) ? (d.mouseX - box.x) / scale : -1000.0f, ui.over(box) ? (d.mouseY - box.y) / scale : -1000.0f);
     {
-        const SetFor _(engine.trying_, true); // (pointing at it only)
+        const SetFor _(engine.sampling_, true); // (pointing at it only)
         d.styleView->handleEvent(e);
     }
     if (paintCanvas([&] { d.styleView->draw(engine.renderer()); })) {

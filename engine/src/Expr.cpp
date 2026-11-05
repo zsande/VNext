@@ -8,19 +8,13 @@
 #include <charconv>
 #include <climits>
 #include <cmath>
-#include <limits>
 #include <cstdlib>
 #include <expected>
 #include <optional>
 #include <random>
-#include <ranges>
-#include <set>
-#include <span>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace vn {
@@ -542,30 +536,6 @@ std::string fillValues(std::string_view text, const Lookup& lookup) {
     return out;
 }
 
-std::string withValues(std::string_view text, const Variables& values) {
-    std::string out;
-    out.reserve(text.size());
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        const char c = text[i];
-        const auto close = text.find('}', i);
-        if ((c == '{' || c == '}') && i + 1 < text.size() && text[i + 1] == c) {
-            out += text.substr(i, 2);
-            ++i;
-        } else if (c == '{' && close != std::string_view::npos) {
-            const std::string_view inner = text.substr(i + 1, close - i - 1);
-            if (const auto it = values.find(trim(inner)); it != values.end()) {
-                for (char v : toString(it->second)) out += v == '{' || v == '}' ? std::string(2, v) : std::string(1, v);
-            } else {
-                out += text.substr(i, close - i + 1);
-            }
-            i = close;
-        } else {
-            out += c;
-        }
-    }
-    return out;
-}
-
 std::string checkText(std::string_view text) {
     for (std::size_t i = 0; i < text.size(); ++i) {
         if ((text[i] == '{' || text[i] == '}') && i + 1 < text.size() && text[i + 1] == text[i]) {
@@ -594,7 +564,7 @@ std::vector<std::string> namesIn(std::string_view text) {
         const std::string_view inner = text.substr(i + 1, close - i - 1);
         i = close;
         if (isTextTag(inner)) continue;
-        if (const auto e = Expr::parse(inner))
+        if (const Expr* e = cachedExpr(inner)) // (read once: a screen asks every frame)
             for (std::string& name : e->names())
                 if (!std::ranges::contains(out, name)) out.push_back(std::move(name));
     }

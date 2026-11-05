@@ -39,6 +39,27 @@ std::string unflatten(std::string_view text) {
     return out;
 }
 
+// The player's clock: their date (days since 1970), minutes from midnight, and seconds since 1970.
+struct RealNow {
+    int date = 0, minutes = 0;
+    double seconds = 0.0;
+};
+RealNow realNow() {
+    SDL_Time now = 0;
+    SDL_DateTime t{};
+    if (!SDL_GetCurrentTime(&now) || !SDL_TimeToDateTime(now, &t, true)) return {};
+    return {daysFromDate(t.year, t.month, t.day), t.hour * 60 + t.minute, static_cast<double>(now) / 1e9};
+}
+
+// `text` with each {name} in it replaced by its value.
+std::string filledIn(std::string text, std::initializer_list<std::pair<std::string_view, std::string>> values) {
+    for (const auto& [name, value] : values) {
+        const std::string tag = std::format("{{{}}}", name);
+        for (std::size_t at = text.find(tag); at != std::string::npos; at = text.find(tag, at + value.size())) text.replace(at, tag.size(), value);
+    }
+    return text;
+}
+
 } // namespace
 
 void Flowchart::visit(const std::string& id, Kind kind, const std::string& from, int option, std::string state,
@@ -80,7 +101,7 @@ bool Flowchart::read(std::string_view saved) {
             Node n{.id = id};
             int kind = 0;
             ls >> kind >> n.order;
-            n.kind = static_cast<Kind>(std::clamp(kind, 0, 3));
+            n.kind = static_cast<Kind>(std::clamp(kind, 0, 1));
             for (std::string option; ls >> option;)
                 if (const auto colon = option.find(':'); colon != std::string::npos)
                     if (int to = 0; std::from_chars(option.data(), option.data() + colon, to).ec == std::errc{}) n.options.push_back({to, option[colon + 1] == '1'});
@@ -690,7 +711,11 @@ void Stage::drawView(SDL_Renderer* r, Assets& assets, const Font* font, float ch
     int outW = 0, outH = 0;
     SDL_GetCurrentRenderOutputSize(r, &outW, &outH);
     const float density = std::max(1.0f, std::min(static_cast<float>(outW) / canvas.w, static_cast<float>(outH) / canvas.h));
-    const float zoom = std::max(look.zoom, 0.1f);
+    // The view stays inside the stage: looking off its middle without zooming in (a shake, a small move), it zooms
+    // in as far as that needs to show nothing past the stage's edges, at most to 125% (further off, it stops at them).
+    const float x = 0.5f + look.x / canvas.w, y = 0.5f + look.y / canvas.h;
+    const float off = std::max(std::abs(x - 0.5f), std::abs(y - 0.5f));
+    const float zoom = look.zoom >= 1.0f ? std::max(look.zoom, 1.0f / std::max(0.8f, 1.0f - 2.0f * off)) : std::max(look.zoom, 0.1f);
     const float scale = std::min(density * std::max(1.0f, zoom), 8192.0f / std::max(canvas.w, canvas.h));
     SDL_Texture* drawn = canvasTexture(r, drawn_, static_cast<int>(std::ceil(canvas.w * scale)), static_cast<int>(std::ceil(canvas.h * scale)));
     if (!drawn) return drawStage(r, assets, font, characterHeight, frameOf);
@@ -701,7 +726,7 @@ void Stage::drawView(SDL_Renderer* r, Assets& assets, const Font* font, float ch
         drawStage(r, assets, font, characterHeight, frameOf);
     }
     // Keep the view inside the stage when zoomed in (turning still shows its corners).
-    const float half = 0.5f / zoom, x = 0.5f + look.x / canvas.w, y = 0.5f + look.y / canvas.h;
+    const float half = 0.5f / zoom;
     const float fx = zoom >= 1.0f ? std::clamp(x, half, 1.0f - half) : x;
     const float fy = zoom >= 1.0f ? std::clamp(y, half, 1.0f - half) : y;
     const SDL_FRect src{0, 0, canvas.w * scale, canvas.h * scale};
@@ -1022,7 +1047,7 @@ Stage::ObjectState readObject(std::istream& ls) {
 Game::Game(Context ctx, const Script& script)
     : ctx_(std::move(ctx)), script_(script), lookup_([this](std::string_view name) { return variable(name); }), stage_(ctx_.canvas) {}
 
-void Game::start(std::size_t pc, bool subroutine) {
+void Game::start(std::size_t pc) {
     stage_.reset();
     vars_ = std::exchange(carried_, {});
     callStack_.clear();
@@ -1039,7 +1064,6 @@ void Game::start(std::size_t pc, bool subroutine) {
     together_ = false;
     text_.clear();
     screens_.clear();
-    textboxScreen_.clear();
     page_.clear();
     phone_ = {};
     call_.reset();
@@ -1050,13 +1074,12 @@ void Game::start(std::size_t pc, bool subroutine) {
     expressions_.clear();
     error_.clear();
     music_.clear();
-    chapter_.clear();
     flowchartNode_.clear();
     flowchartOption_ = -1;
     pendingVoice_.reset();
     past_.clear();
     ctx_.sound.stopAll(0.5f);
-    if (subroutine) callStack_.push_back(script_.code.size()); // its "return" ends the game
+    if (gameSettings().time == TimeKind::Real && !vars_.contains("time_started")) vars_.insert_or_assign("time_started", realNow().date); // (its day 1)
     pc_ = resumePc_ = pc;
     wait_ = Wait::None;
     run();
@@ -1067,10 +1090,10 @@ bool Game::skipping() const {
 }
 
 std::string Game::summary() const {
-    std::string line;
-    if (wait_ == Wait::Menu && menuPrompt_) line = text_;
-    else if (!history_.empty()) line = history_.back().speaker.empty() ? history_.back().text : std::format("{}: {}", history_.back().speaker, history_.back().text);
-    return chapter_.empty() ? line : line.empty() ? chapter_ : std::format("{}  ·  {}", chapter_, line); // the chapter first
+    if (wait_ == Wait::Menu && menuPrompt_) return text_;
+    if (history_.empty()) return {};
+    const HistoryEntry& last = history_.back();
+    return last.speaker.empty() ? last.text : std::format("{}: {}", last.speaker, last.text);
 }
 
 void Game::fail(std::string message) {
@@ -1087,7 +1110,7 @@ void Game::run() {
             wait_ = Wait::Finished;
             return;
         }
-        if (--budget == 0) return fail("The story ran a very long time without showing anything (does a jump go round in a circle?)");
+        if (--budget == 0) return fail("The story ran a very long time without showing anything (does a jump go round in a circle?)"_tr);
         if (stopAt_ && pc_ == *stopAt_) { // (stopBefore)
             resumePc_ = pc_;
             resumeRandom_ = random_;
@@ -1134,11 +1157,17 @@ std::string clockNow() {
     if (!SDL_GetCurrentTime(&now) || !SDL_TimeToDateTime(now, &t, true)) return {};
     return std::format("{}:{:02}", t.hour, t.minute);
 }
+
 } // namespace
 
 Value Game::variable(std::string_view name) const {
     if (item_)
         if (const auto it = item_->find(name); it != item_->end()) return it->second;
+    if (gameSettings().time != TimeKind::None) { // the time's values; the phone's clock and date (unless setting phone_follows_time no)
+        if (name.starts_with("time_"))
+            if (auto v = timeValue(name)) return *v;
+        if (gameSettings().phoneFollowsTime && (name == "phone_clock" || name == "phone_date")) return *timeValue(name == "phone_clock" ? "time_clock" : "time_date");
+    }
     const Value* kept = nullptr;
     if (const auto it = vars_.find(name); it != vars_.end()) kept = &it->second;
     else if (const auto p = ctx_.persistent.find(name); p != ctx_.persistent.end()) kept = &p->second;
@@ -1148,6 +1177,11 @@ Value Game::variable(std::string_view name) const {
     if (ctx_.builtin)
         if (auto v = ctx_.builtin(name)) return *v;
     return 0;
+}
+
+std::string Game::typedValue(std::string_view name) const {
+    const bool has = vars_.contains(name) || ctx_.persistent.contains(name) || script_.startValues.contains(name) || (item_ && item_->contains(name));
+    return has ? toString(variable(name)) : std::string{};
 }
 
 void Game::setVariable(const std::string& name, Value value) {
@@ -1165,9 +1199,9 @@ RichText richText(std::string_view source, const Lookup& lookup, const Palette* 
     std::map<std::string, std::vector<std::size_t>, std::less<>> styles; // open {bold} {italic} {underline} {crossed_out}
     std::vector<std::pair<std::size_t, std::string>> rubies;             // open {furigana READING} tags
     std::vector<std::size_t> tips;                                       // open {tip NAME} tags
-    // A tip's words: underlined, in the colour called "tip" ("colour tip ...", in the built-in menus).
+    // A tip's words: underlined, in the game's colour called "tip" (without one, the ready-made look's accent).
     auto tip = [&](std::size_t begin, std::size_t end) {
-        out.spans.push_back({.begin = begin, .end = end, .colour = parseColour("tip", palette).value_or(SDL_Color{126, 200, 255, 255}),
+        out.spans.push_back({.begin = begin, .end = end, .colour = parseColour("tip", palette).value_or(SDL_Color{173, 162, 255, 255}),
                              .style = TTF_STYLE_UNDERLINE});
     };
     static const std::map<std::string, TTF_FontStyleFlags, std::less<>> kStyles{
@@ -1217,7 +1251,7 @@ void Game::say(std::string speaker, SDL_Color colour, std::string_view text, con
     speaker_ = std::move(speaker);
     speakerKey_ = def ? def->key : std::string{};
     speakerColour_ = colour;
-    voiced_ = textFollowsVoice_ = typing_ = false;
+    voiced_ = madeUpVoice_ = textFollowsVoice_ = typing_ = false;
     lineTime_ = 0.0f;
     textColour_ = def ? def->textColour : std::nullopt;
     textbox_ = boxOf(def);
@@ -1240,7 +1274,7 @@ void Game::say(std::string speaker, SDL_Color colour, std::string_view text, con
         else if (tag == "no_wait") noWait_ = true;
         else if (tag == "speed") speeds_.push_back({at, n ? std::max(0, static_cast<int>(*n)) : -1});
         else if (tag == "/speed") speeds_.push_back({at, -1});
-        else if (tag == "appears") revealMode_ = arg == "line" ? TextAppears::Line : arg == "word" ? TextAppears::Word : TextAppears::Letter;
+        else if (tag == "appears") revealMode_ = lower(arg) == "line" ? TextAppears::Line : lower(arg) == "word" ? TextAppears::Word : TextAppears::Letter;
     });
     text_ = std::move(rich.text);
     spans_ = std::move(rich.spans);
@@ -1254,17 +1288,7 @@ const Game::Stop* Game::pendingStop() const {
 }
 
 std::string Game::boxOf(const CharacterDef* def) const {
-    return def && !def->textbox.empty() ? def->textbox : !textboxScreen_.empty() ? textboxScreen_ : "textbox";
-}
-
-bool Game::keeps(std::string_view box) const {
-    const ScreenDef* screen = script_.screen(box);
-    return screen && screen->keep;
-}
-
-float Game::speedOf(std::string_view box) const {
-    const ScreenDef* screen = script_.screen(box);
-    return screen ? screen->textSpeed : 1.0f;
+    return def && !def->textbox.empty() ? def->textbox : "textbox";
 }
 
 bool Game::othersTyping() const {
@@ -1275,7 +1299,6 @@ Game::BoxLine Game::boxLine(std::string box, std::string speaker, SDL_Color colo
     RichText rich = richText(source, lookup_, &script_.palette);
     BoxLine l{.box = std::move(box), .speaker = std::move(speaker), .speakerKey = def ? def->key : std::string{}, .source = std::move(source),
               .text = std::move(rich.text), .speakerColour = colour, .spans = std::move(rich.spans)};
-    l.keep = keeps(l.box);
     l.length = utf8::length(l.text);
     if (def && !def->face.empty()) {
         const auto it = expressions_.find(def->key);
@@ -1284,8 +1307,8 @@ Game::BoxLine Game::boxLine(std::string box, std::string speaker, SDL_Color colo
     return l;
 }
 
-// A line of a together block, before its last: it shows now in its own textbox (typing at that
-// textbox's speed, without a voice), and the story goes on to the next line.
+// A line of a together block, before its last: it shows now in its own textbox (typing, without a
+// voice), and the story goes on to the next line.
 void Game::sayTogether(const cmd::Say& c, const CharacterDef* def) {
     BoxLine l = boxLine(boxOf(def), def ? def->name : c.speaker, def ? def->nameColour : gameSettings().narrationColour, fillValues(c.text, lookup_), def);
     if (skipping() || ctx_.settings.textSpeed == 0) l.reveal = static_cast<float>(l.length);
@@ -1329,7 +1352,7 @@ int Game::currentSpeed() const {
     int cps = -1;
     for (const auto& s : speeds_)
         if (s.at <= static_cast<std::size_t>(reveal_)) cps = s.cps;
-    return cps < 0 ? static_cast<int>(std::lround(static_cast<float>(ctx_.settings.textSpeed) * speedOf(textbox_))) : cps;
+    return cps < 0 ? ctx_.settings.textSpeed : cps;
 }
 
 std::size_t Game::revealLimit() const {
@@ -1363,8 +1386,9 @@ void Game::execute(const Command& command, std::size_t here) {
             [&](const cmd::Say& c) { sayLine(c, here, fast); },
             [&](const cmd::Background& c) { // a new background (what was on stage goes with the one before), or the one there played on
                 have(RecordKind::Gallery, c.image);
-                if (c.image != stage_.background()) stage_.clearObjects();
-                stage_.setBackground(c.image, animation(c.with.value_or("")), instant);
+                const std::string shown = backgroundFor(c.image); // (park_evening in the evening, when there's one)
+                if (shown != stage_.background()) stage_.clearObjects();
+                stage_.setBackground(shown, animation(c.with.value_or("")), instant);
                 if (c.animation) stage_.animateBackground(animation(*c.animation), true, fast);
                 if (stage_.backgroundComing()) wait_ = Wait::Background; // (the story goes on once it's in)
             },
@@ -1405,15 +1429,14 @@ void Game::execute(const Command& command, std::size_t here) {
             [&](const cmd::Menu& c) { openMenu(c, here); },
             [&](const cmd::Jump& c) {
                 if (c.unless && c.unless->test(lookup_)) return;
-                if (c.call) {
-                    if (callStack_.size() >= 256) return fail("Too many calls inside calls (does a scene call itself?)");
-                    callStack_.push_back(pc_);
-                }
                 pc_ = c.target;
                 choiceAgain_ = c.again;
             },
             [&](const cmd::Return&) {
-                if (callStack_.empty()) return fail("'return' was reached, but nothing called this scene (use jump or end instead?)");
+                if (callStack_.empty()) { // (nothing started these lines, a chat= scene played on its own: the story's over, as at a scene's end)
+                    wait_ = Wait::Finished;
+                    return;
+                }
                 pc_ = callStack_.back();
                 callStack_.pop_back();
                 if (pass_ && callStack_.size() < pass_->depth) hiddenLines_ = std::exchange(pass_, std::nullopt)->lines; // a choice's return=no
@@ -1424,12 +1447,18 @@ void Game::execute(const Command& command, std::size_t here) {
                     if (!a.chat.empty() && !parking_) putAway_ = a.chat, putAwayIn_ = 2.0f; // (a chat scene's: the phone's put away once its messages have come)
                 }
             },
-            [&](const cmd::End&) { wait_ = Wait::Finished; },
+            [&](const cmd::End&) { // a scene's end: back to what started it (a phone scene's), else the story's over
+                if (!callStack_.empty()) return execute(cmd::Return{}, here);
+                wait_ = Wait::Finished;
+            },
             [&](const cmd::Set& c) {
                 const Value old = variable(c.variable);
-                if (c.op == '!') return setVariable(c.variable, truthy(old) ? 0 : 1);
                 const Value v = c.value ? c.value->eval(lookup_) : Value{0};
-                setVariable(c.variable, c.op == '=' ? v : combine(old, c.op, v));
+                if (c.op == '!') setVariable(c.variable, truthy(old) ? 0 : 1);
+                else setVariable(c.variable, c.op == '=' ? v : combine(old, c.op, v));
+                // An ending reached (set persistent.ending.NAME = yes) by the story's own line, not a button's: a point on the flowchart.
+                if (c.variable.starts_with("persistent.ending.") && truthy(variable(c.variable)) && here < script_.code.size() && &command == &script_.code[here].command)
+                    passPoint(here, Flowchart::Kind::Ending);
             },
             [&](const cmd::Play& c) { play(c, fast); },
             [&](const cmd::Wait& c) {
@@ -1445,27 +1474,13 @@ void Game::execute(const Command& command, std::size_t here) {
                 if (!c.show) std::erase(screens_, c.name);
                 else if (!std::ranges::contains(screens_, c.name)) screens_.push_back(c.name);
             },
-            [&](const cmd::Ask& c) {
-                if (!c.fallback.empty() || !std::holds_alternative<std::string>(variable(c.variable)))
-                    setVariable(c.variable, c.fallback);
-                waitForScreen({.name = "ask", .variable = c.variable, .prompt = expand(c.prompt, lookup_), .mostLetters = c.mostLetters}, here);
-            },
             [&](const cmd::Ui& c) { // open SCREEN: the story waits until the player closes it (unless it's story=goes_on)
                 const ScreenDef* screen = c.verb == "open" ? script_.screen(c.arg) : nullptr;
                 if (!screen || !screen->storyWaits) return requests_.push_back(c);
                 vars_.insert_or_assign("answer", std::string{}); // until it answers
                 waitForScreen({.name = c.arg, .opening = c.opening, .closing = c.closing}, here);
             },
-            [&](const cmd::Chapter& c) { // a new part of the story: its title card, if the screens have one
-                chapter_ = fillValues(c.title, lookup_);
-                passPoint(here, Flowchart::Kind::Chapter);
-                if (!fast && script_.screen("chapter")) waitForScreen({.name = "chapter"}, here);
-            },
-            [&](const cmd::Mark&) { passPoint(here, Flowchart::Kind::Point); },
-            [&](const cmd::Record& c) { // an image unlocked, an ending reached, an achievement earned, a tip learned
-                if (c.kind == RecordKind::Ending && script_.record(c.kind, c.name)) passPoint(here, Flowchart::Kind::Ending);
-                collect(c.kind, c.name);
-            },
+            [&](const cmd::Time& c) { passTime(c, here); },
             [&](const cmd::Movie& c) { playMovie(c, here, fast); },
             [&](const cmd::Message& c) { sendMessage(c, here); }, // on the phone (a chat scene's: the story waits for it)
             [&](const cmd::Weather& c) { stage_.setWeather(c, instant ? 0.0f : c.fade); },
@@ -1474,16 +1489,11 @@ void Game::execute(const Command& command, std::size_t here) {
                 if (c.with) stage_.animateCamera(animation(*c.with), false, instant);
                 if (c.wait && !fast && stage_.moving()) wait_ = Wait::Move;
             },
-            [&](const cmd::Textbox& c) {
-                if (c.hide) return void(std::erase_if(others_, [&](const BoxLine& l) { return c.screen.empty() || l.box == c.screen; }));
-                if (!c.newPage) textboxScreen_ = c.screen == "textbox" ? std::string{} : c.screen;
-                page_.clear(); // a new textbox starts on an empty page
-            },
         },
         command);
 }
 
-// A line said (or narrated): its speaker's face and textbox (the other textboxes' lines go, or stay), its
+// A line said (or narrated): its speaker's face and textbox (the other textboxes' lines go, unless said together with it), its
 // voice (a voice line just before it, their voice file, or made-up speech), the history, and the story
 // waiting for a click.
 void Game::sayLine(const cmd::Say& c, std::size_t here, bool fast) {
@@ -1498,19 +1508,12 @@ void Game::sayLine(const cmd::Say& c, std::size_t here, bool fast) {
         trigger_.reset();
         choiceItems_.clear();
     }
-    // Lines in other textboxes: ones said with the last line go (unless their textbox keeps
-    // them), and the line on screen stays as one if its textbox does.
-    if (!together_) std::erase_if(others_, [](const BoxLine& l) { return !l.keep; });
+    // Lines in other textboxes, said together with the last line: they go.
+    if (!together_) others_.clear();
     if (c.together) return sayTogether(c, def);
     together_ = false;
     const std::string box = boxOf(def);
     std::erase_if(others_, [&](const BoxLine& l) { return l.box == box; });
-    if (!text_.empty() && textbox_ != box && keeps(textbox_)) {
-        BoxLine kept{.box = textbox_, .speaker = speaker_, .speakerKey = speakerKey_, .source = source_, .text = text_, .face = face_,
-                     .speakerColour = speakerColour_, .spans = spans_, .reveal = static_cast<float>(length_), .length = length_, .keep = true};
-        std::erase_if(others_, [&](const BoxLine& l) { return l.box == kept.box; });
-        others_.push_back(std::move(kept));
-    }
     lineVoice_ = std::exchange(pendingVoice_, std::nullopt).value_or(LineVoice{}); // a voice line just before it
     bool voiced = !lineVoice_.file.empty();
     const std::optional<bool> follows = lineVoice_.textFollows;
@@ -1525,7 +1528,7 @@ void Game::sayLine(const cmd::Say& c, std::size_t here, bool fast) {
     if (!voiced && entry.voice.empty() && def && def->madeUpVoice > 0.0f && ctx_.settings.madeUpVoices) entry.madeUpVoice = def->madeUpVoice, entry.madeUpVoiceSpeed = def->madeUpVoiceSpeed;
     if (!voiced && !fast) {
         if (!entry.voice.empty()) ctx_.sound.playVoice(entry.voice), voiced = true;
-        else if (entry.madeUpVoice > 0.0f) voiced = ctx_.sound.playMadeUpVoice(text_, entry.madeUpVoice, entry.madeUpVoiceSpeed);
+        else if (entry.madeUpVoice > 0.0f) voiced = madeUpVoice_ = ctx_.sound.playMadeUpVoice(text_, entry.madeUpVoice, entry.madeUpVoiceSpeed);
     }
     voiced_ = voiced;
     textFollowsVoice_ = voiced && follows.value_or(gameSettings().textFollowsVoices);
@@ -1553,7 +1556,7 @@ void Game::sayAgain(std::size_t page) {
     const std::size_t here = current_ = pc_++;
     const CharacterDef* def = c->character.empty() ? nullptr : script_.character(c->character);
     takeExpression(*c, def);
-    std::erase_if(others_, [](const BoxLine& l) { return !l.keep; });
+    others_.clear();
     together_ = false;
     say(def ? def->name : c->speaker, def ? def->nameColour : gameSettings().narrationColour, c->text, def);
     reveal_ = static_cast<float>(length_);
@@ -1616,7 +1619,7 @@ void Game::play(const cmd::Play& c, bool fast) {
         musicVolume_ = c.volume;
         have(RecordKind::Song, file); // the music room
         if (file.empty()) ctx_.sound.stopMusic(c.fade);
-        else ctx_.sound.playMusic(path, c.loop, c.fade, c.volume);
+        else ctx_.sound.playMusic(path, c.loop, c.fade, c.volume, c.fadeOut);
         break;
     case cmd::Play::Track::Voice:
         if (file.empty()) return ctx_.sound.stopVoice();
@@ -1629,9 +1632,9 @@ void Game::play(const cmd::Play& c, bool fast) {
             if (c.channel.empty()) loops_.clear();
             else loops_.erase(c.channel);
         } else if (c.channel.empty()) {
-            if (!fast) ctx_.sound.playSound(path, c.volume);
+            if (!fast) ctx_.sound.playSound(path, c.volume, c.fade, c.fadeOut);
         } else {
-            ctx_.sound.playChannel(c.channel, path, c.loop, c.volume, c.fade);
+            ctx_.sound.playChannel(c.channel, path, c.loop, c.volume, c.fade, c.fadeOut.value_or(0.0f));
             if (c.loop) loops_.insert_or_assign(c.channel, Loop{file, c.volume});
             else loops_.erase(c.channel);
         }
@@ -1664,17 +1667,14 @@ void Game::playMovie(const cmd::Movie& c, std::size_t here, bool fast) {
 // The language changed: the line, choices or question on screen again in the new one (the line
 // types out again unless it was all there; its voice goes on).
 void Game::retranslate() {
-    if (wait_ == Wait::Screen && !request_.variable.empty()) { // ask
-        if (const auto* c = std::get_if<cmd::Ask>(&script_.code[resumePc_].command)) request_.prompt = expand(c->prompt, lookup_);
-        return;
-    }
     if (wait_ != Wait::Say && wait_ != Wait::Menu) return;
     const Command& command = script_.code[resumePc_].command;
     auto again = [&](const std::string& speaker, SDL_Color colour, const std::string& text, const CharacterDef* def, bool whole) {
-        const bool voiced = voiced_, follows = textFollowsVoice_;
+        const bool voiced = voiced_, madeUp = madeUpVoice_, follows = textFollowsVoice_;
         const float time = lineTime_;
         say(speaker, colour, text, def);
         voiced_ = voiced;
+        madeUpVoice_ = madeUp;
         textFollowsVoice_ = follows;
         lineTime_ = time;
         if (whole) {
@@ -1713,7 +1713,6 @@ void Game::perform(const Command& command) {
     if (const auto* jump = std::get_if<cmd::Jump>(&command)) {
         const auto pc = script_.findScene(jump->scene);
         if (!pc) return;
-        if (jump->call) callStack_.push_back(wait_ == Wait::None || wait_ == Wait::Finished ? pc_ : resumePc_);
         choiceItems_.clear();
         menuPrompt_ = false;
         pc_ = *pc;
@@ -1740,6 +1739,7 @@ void Game::nextLine() {
         const bool others = othersTyping(); // lines said together with it: all there at once
         for (BoxLine& l : others_) l.reveal = static_cast<float>(l.length);
         if (reveal_ < static_cast<float>(length_)) {
+            if (madeUpVoice_) ctx_.sound.stopVoice(); // (made-up speech is the typing's: shown at once, it's done)
             // Show everything up to the next click pause (timed pauses are skipped).
             while (const Stop* stop = pendingStop()) {
                 if (stop->seconds < 0) {
@@ -1752,6 +1752,7 @@ void Game::nextLine() {
             return;
         }
         if (others) return;
+        ctx_.sound.stopVoice(); // clicked past: its voice goes with it (not on over what comes next)
         break;
     }
     case Wait::Background:
@@ -1762,7 +1763,7 @@ void Game::nextLine() {
         if (!chat_.empty()) return; // (a chat scene's wait holds: it's the chat's own timing)
         break;
     case Wait::Pause:
-    case Wait::Reached: // (the preview: on from where it stopped)
+    case Wait::Reached: // (played to a line by the developer tools: on from where it stopped)
         break;
     case Wait::Chat: // (a click hurries a chat scene's message, or its change)
         if (change_) change(*std::exchange(change_, std::nullopt));
@@ -1785,7 +1786,7 @@ void Game::hurry() {
     else arrive(*it);
 }
 
-bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& there, bool* skipped) {
+bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& there) {
     watch_ = target;
     watched_ = std::ranges::contains(ran_, target); // (start() runs on to the first wait: it may have run it already)
     watchThere_ = &there;
@@ -1803,7 +1804,6 @@ bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& th
         case Wait::Say:
         case Wait::Menu:
             if (!watched_ && target < script_.code.size() && resumePc_ > target) { // gone past it: on from it
-                if (skipped) *skipped = true;
                 choiceItems_.clear();
                 trigger_.reset();
                 menuPrompt_ = false;
@@ -1838,7 +1838,6 @@ bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& th
         case Wait::Screen:
         case Wait::Movie:
             if (!watched_ && target < script_.code.size() && resumePc_ > target) { // gone past it: on from it
-                if (skipped) *skipped = true;
                 if (wait_ == Wait::Movie) movie_.reset();
                 request_ = {};
                 pc_ = target;
@@ -1879,6 +1878,13 @@ bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& th
             break;
         }
         case Wait::Timer: // a wait: over at once (a chat scene's too, which a click doesn't end)
+            wait_ = Wait::None;
+            run();
+            break;
+        case Wait::Clock: // a wait for the player's clock: over at once
+            vars_.erase("time_wait");
+            vars_.erase("time_wait_line");
+            text_.clear();
             wait_ = Wait::None;
             run();
             break;
@@ -1928,7 +1934,7 @@ Variables Game::savedVariables(std::string_view state) {
     return vars;
 }
 
-// The player is at a point on the flowchart (a chapter, a choice, an ending or a "flowchart" line): it
+// The player is at a point on the flowchart (a choice or an ending): it
 // remembers the game here, and which way the player came.
 void Game::passPoint(std::size_t here, Flowchart::Kind kind, std::vector<Flowchart::Option> options) {
     const auto [label, offset] = script_.locate(here);
@@ -2120,15 +2126,8 @@ void Game::arrive(MessageItem& m) {
     if (!fast && !gameSettings().phoneMessageSound.empty()) ctx_.sound.playSound(ctx_.assets.sound(gameSettings().phoneMessageSound));
     if (m.with == chat_) return; // (a chat scene's: on the phone already)
     if (!fast) requests_.push_back(cmd::Ui{.verb = "buzz"}); // (controllers buzz, as a phone does)
-    if (gameSettings().newMessages == NewMessages::Open) { // (the engine opens the phone on it, unless it's up already; not while skipping past)
-        if (!fast) requests_.push_back(cmd::Ui{.verb = "show phone", .arg = "message", .phone = m.with});
-        return;
-    }
-    if (gameSettings().newMessages != NewMessages::Notice) return; // (button: the Phone button counts it)
-    // A notice, as a phone shows one: who, and the start of what they wrote.
-    std::string text = m.text;
-    if (utf8::length(text) > 60) text = std::string(trim(std::string_view(text).substr(0, utf8::offset(text, 57)))) + "...";
-    requests_.push_back(cmd::Ui{.verb = "notice", .arg = text.empty() ? m.from : std::format("{}: {}", m.from, text), .phone = m.with});
+    if (gameSettings().newMessages == NewMessages::Open && !fast) // (the engine opens the phone on it, unless it's up already; not while skipping past)
+        requests_.push_back(cmd::Ui{.verb = "show phone", .arg = "message", .phone = m.with}); // (button: the Phone button counts it)
 }
 
 namespace {
@@ -2337,7 +2336,7 @@ void Game::runAside(std::size_t target) {
     wait_ = Wait::None;
     for (int budget = kInstructionBudget; wait_ == Wait::None && callStack_.size() >= depth;) {
         if (pc_ >= script_.code.size()) wait_ = Wait::Finished;
-        else if (--budget == 0) fail("A phone scene's lines ran a very long time without showing anything (does a jump go round in a circle?)");
+        else if (--budget == 0) fail("A phone scene's lines ran a very long time without showing anything (does a jump go round in a circle?)"_tr);
         else {
             const std::size_t here = current_ = pc_++;
             resumePc_ = pc_;
@@ -2411,7 +2410,7 @@ void Game::choose(std::size_t index) {
     RichText chosen = richText(choiceItems_[index].text, lookup_, &script_.palette);
     for (TextSpan& span : chosen.spans) span.begin += 2, span.end += 2; // after "> "
     addHistory({.speaker = "", .colour = SDL_Color{150, 150, 165, 255}, .text = "> " + chosen.text, .choice = true, .spans = std::move(chosen.spans)});
-    if (!m->phone.empty()) { // a chat's answer: sent there, as the player's (the history has it already, as a choice)
+    if (!m->phone.empty()) { // a chat's choice: the option picked is sent there, as the player's (the history has it already, as a choice)
         unlogged_ = true;
         addMessage(ownPhone(), {.with = m->phone, .colour = kOwnColour, .text = fillValues(picked.text, lookup_), .read = true});
         unlogged_ = false;
@@ -2429,25 +2428,15 @@ void Game::choose(std::size_t index) {
     run();
 }
 
-bool Game::have(RecordKind kind, std::string_view name) {
-    if (!script_.record(kind, name)) return false;
-    const std::string var = Script::recordVariable(kind, name);
-    const bool fresh = !truthy(variable(var));
-    if (fresh) setVariable(var, 1);
-    return fresh;
-}
-
-// The player has it now, with its message: every ending, a new achievement or tip.
-void Game::collect(RecordKind kind, std::string_view name) {
-    const Script::Record* r = script_.record(kind, name);
-    if (!r) return;
-    std::ignore = have(kind, name); // (the story says so itself, if it wants to: notice after it)
+void Game::have(RecordKind kind, std::string_view name) {
+    if (!script_.record(kind, name)) return;
+    if (const std::string var = Script::recordVariable(kind, name); !truthy(variable(var))) setVariable(var, 1); // (a tip read stays read: 2)
 }
 
 // The tips a text shows ({tip NAME}...{/tip}): learned when it's said.
 void Game::learnTips(std::string_view text) {
     (void)expand(text, lookup_, [&](std::string_view tag, std::string_view name, std::size_t) {
-        if (tag == "tip") collect(RecordKind::Tip, name);
+        if (tag == "tip") have(RecordKind::Tip, name);
     });
 }
 
@@ -2477,7 +2466,7 @@ void Game::update(float dt) {
     typing_ = false;
     const float cps = static_cast<float>(ctx_.settings.textSpeed);
     for (BoxLine& l : others_) // lines in other textboxes type on, each at its textbox's speed
-        l.reveal = fast || cps <= 0.0f ? static_cast<float>(l.length) : std::min(static_cast<float>(l.length), l.reveal + cps * speedOf(l.box) * dt);
+        l.reveal = fast || cps <= 0.0f ? static_cast<float>(l.length) : std::min(static_cast<float>(l.length), l.reveal + cps * dt);
 
     switch (wait_) {
     case Wait::None:
@@ -2502,6 +2491,16 @@ void Game::update(float dt) {
         if ((timer_ -= dt) <= 0.0f || fast) {
             wait_ = Wait::None;
             run();
+        }
+        break;
+    case Wait::Clock: // the player's clock gets there (setting time real): the story goes on
+        if (const auto until = vars_.find("time_wait"); until == vars_.end() || realNow().seconds >= toNumber(until->second)) {
+            vars_.erase("time_wait");
+            vars_.erase("time_wait_line");
+            text_.clear();
+            wait_ = Wait::None;
+            timeMoved(waitFrom_, timeNow(), false);
+            if (wait_ == Wait::None) run();
         }
         break;
     case Wait::Pause: // until a click, or auto-forward's delay
@@ -2741,7 +2740,6 @@ std::string Game::save() const {
     if (!stage_.background().empty())
         out += std::format("background {}{}{}\n", stage_.background(), stage_.backgroundAnimation(true).empty() ? "" : " animation=" + escape(stage_.backgroundAnimation(true)),
                            stage_.backgroundAnimation(false).empty() ? "" : " played=" + escape(stage_.backgroundAnimation(false)));
-    if (!chapter_.empty()) out += std::format("chapter {}\n", escape(chapter_));
     if (!flowchartNode_.empty()) out += std::format("flowchartpoint {} {}\n", flowchartNode_, flowchartOption_);
     if (!music_.empty()) out += std::format("musicvol {}\nmusic {}\n", std::lround(musicVolume_ * 1000.0f), music_);
     for (const auto& [channel, loop] : loops_)
@@ -2764,7 +2762,6 @@ std::string Game::save() const {
     if (call_ && call_->talking && call_->at) // (one ringing rings again: its command is done again)
         out += std::format("pcallnow {} {} {} {} {} {} {} {}\n", call_->outgoing ? 1 : 0, std::lround(call_->time * 1000.0f), call_->colour.r, call_->colour.g,
                            call_->colour.b, field(call_->who), field(call_->character), located(*call_->at));
-    if (!textboxScreen_.empty()) out += std::format("textbox {}\n", textboxScreen_);
     for (std::size_t i = 0; i + (wait_ == Wait::Say ? 1 : 0) < page_.size(); ++i) { // (the line on screen is said again)
         const PageLine& p = page_[i];
         out += std::format("page {} {} {} {} {}\n", p.colour.r, p.colour.g, p.colour.b, escape(p.speaker.empty() ? "-" : p.speaker), escape(p.text));
@@ -2777,7 +2774,7 @@ std::string Game::save() const {
     if (const cmd::Effect e = stage_.effect(); e.looks != 0) out += std::format("effect {} {}\n", e.looks, std::lround(e.amount * 1000.0f));
     if (trigger_) out += std::format("trigger {} {}\n", located(trigger_->at), trigger_->lines + (wait_ == Wait::Say ? 1 : 0)); // (the line is said again)
     for (const BoxLine& l : others_)
-        out += std::format("box {} {} {} {} {} {} {} {} {}\n", l.keep ? 1 : 0, l.speakerColour.r, l.speakerColour.g, l.speakerColour.b, escape(l.box),
+        out += std::format("box {} {} {} {} {} {} {} {}\n", l.speakerColour.r, l.speakerColour.g, l.speakerColour.b, escape(l.box),
                            escape(l.speakerKey.empty() ? "-" : l.speakerKey), escape(l.speaker.empty() ? "-" : l.speaker), escape(l.face.empty() ? "-" : l.face),
                            escape(l.source));
     if (pass_) out += std::format("pass {} {}\n", pass_->depth, pass_->lines);
@@ -2872,7 +2869,7 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     std::uint64_t hash = 0;
     std::string note;
     std::optional<std::size_t> resume;
-    std::optional<std::uint64_t> random; // (saves from before random() was saved have none)
+    std::optional<std::uint64_t> random; // (none written: the game's own goes on)
     std::optional<Trigger> trigger;
     std::optional<Pass> pass;
     int hidden = 0;
@@ -2880,7 +2877,7 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     std::vector<std::size_t> stack;
     Variables vars;
     std::vector<Stage::ObjectState> objects;
-    std::string background, backgroundAnimation, backgroundPlayed, music, chapter, flowchartNode;
+    std::string background, backgroundAnimation, backgroundPlayed, music, flowchartNode;
     int flowchartOption = -1;
     float musicVolume = 1.0f;
     std::map<std::string, Loop, std::less<>> loops;
@@ -2892,7 +2889,6 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     std::optional<CallNow> callNow;
     std::map<std::string, std::string, std::less<>> expressions;
     std::optional<LineVoice> voice;
-    std::string textbox;
     std::vector<PageLine> page;
     cmd::Weather weather;
     cmd::Effect effect;
@@ -2928,13 +2924,12 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
         } else if (Pass passed; key == "pass" && ls >> passed.depth >> passed.lines) pass = passed;
         else if (key == "hidden") ls >> hidden;
         else if (key == "box") { // a line in another textbox: all there
-            int keep = 0, r = 0, g = 0, b = 0;
+            int r = 0, g = 0, b = 0;
             std::string box, speakerKey, speaker, face, source;
-            ls >> keep >> r >> g >> b >> box >> speakerKey >> speaker >> face >> source;
+            ls >> r >> g >> b >> box >> speakerKey >> speaker >> face >> source;
             auto none = [](const std::string& s) { return s == "-" ? std::string{} : s; };
             BoxLine l = boxLine(unescape(box), none(unescape(speaker)), {static_cast<Uint8>(r), static_cast<Uint8>(g), static_cast<Uint8>(b), 255},
                                 unescape(source), script_.character(none(unescape(speakerKey))));
-            l.keep = keep != 0;
             l.face = none(unescape(face));
             l.reveal = static_cast<float>(l.length);
             others.push_back(std::move(l));
@@ -2955,7 +2950,6 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
                 if (field.starts_with("animation=")) backgroundAnimation = unescape(field.substr(10));
                 else if (field.starts_with("played=")) backgroundPlayed = unescape(field.substr(7));
         }
-        else if (key == "chapter") chapter = unescape(rest);
         else if (key == "flowchartpoint") ls >> flowchartNode >> flowchartOption;
         else if (key == "music") music = rest;
         else if (key == "musicvol") musicVolume = static_cast<float>(toInt(rest)) / 1000.0f;
@@ -3024,8 +3018,6 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
             std::string character, expression;
             ls >> character >> expression;
             expressions.insert_or_assign(unescape(character), unescape(expression));
-        } else if (key == "textbox") {
-            textbox = rest;
         } else if (key == "page") {
             int r = 0, g = 0, b = 0;
             std::string speaker, text;
@@ -3087,13 +3079,11 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
         stage_.animateBackground(animation(backgroundAnimation), true, true);
         stage_.animateBackground(animation(backgroundPlayed), false, true);
     }
-    chapter_ = chapter;
     flowchartNode_ = flowchartNode;
     flowchartOption_ = flowchartOption;
     stage_.setWeather(weather, 0.0f);
     stage_.setEffect(effect, true);
     stage_.restoreCamera(animation(cameraOwn), animation(cameraPlayed), cameraStart);
-    textboxScreen_ = textbox;
     page_ = std::move(page);
     vars_ = std::move(vars);
     callStack_ = std::move(stack);
@@ -3138,7 +3128,7 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     putAway_.clear();
     hiddenLines_ = hidden;
     others_ = std::move(others);
-    together_ = std::ranges::any_of(others_, [](const BoxLine& l) { return !l.keep; }); // (the last line of a together block is said again)
+    together_ = !others_.empty(); // (the last line of a together block is said again)
     error_.clear();
     skip_ = uiHidden_ = menuPrompt_ = false;
     pendingVoice_ = voice; // the line's own voice line plays again
@@ -3148,6 +3138,152 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     wait_ = Wait::None;
     run();
     return note;
+}
+
+// ---------------------------------------------------------------------------
+// Time
+// ---------------------------------------------------------------------------
+
+Game::When Game::timeNow() const {
+    const GameSettings& g = gameSettings();
+    auto kept = [&](std::string_view name) -> std::optional<int> { // (the variable, as the story has it)
+        const auto it = vars_.find(name);
+        return it != vars_.end() ? std::optional(static_cast<int>(std::lround(toNumber(it->second)))) : std::nullopt;
+    };
+    if (g.time == TimeKind::Real) {
+        const RealNow now = realNow();
+        return {std::max(1, now.date - kept("time_started").value_or(now.date) + 1), now.minutes};
+    }
+    return {std::max(1, kept("time_day").value_or(1)), ((kept("time_minutes").value_or(g.timeStartMinutes) % 1440) + 1440) % 1440};
+}
+
+std::string Game::partAt(int minutes) const {
+    const auto& parts = gameSettings().dayParts;
+    std::string out = parts.back().first; // (before the first one starts: the last one's, from the night before)
+    for (const auto& [name, start] : parts)
+        if (start <= minutes) out = name;
+    return out;
+}
+
+std::string Game::clockText(int minutes) const {
+    const GameSettings& g = gameSettings();
+    if (g.time == TimeKind::Days) return script_.translated(upperFirst(partAt(minutes))); // (no clock: the part of the day)
+    const int hours = minutes / 60, m = minutes % 60;
+    if (!g.clock12) return std::format("{}:{:02}", hours, m);
+    return std::format("{}:{:02} {}", hours % 12 == 0 ? 12 : hours % 12, m, script_.translated(hours < 12 ? "AM" : "PM"));
+}
+
+int Game::dateOf(int day) const {
+    const GameSettings& g = gameSettings();
+    if (g.time == TimeKind::Real) {
+        const auto started = vars_.find("time_started");
+        return started != vars_.end() ? static_cast<int>(std::lround(toNumber(started->second))) + day - 1 : realNow().date;
+    }
+    return g.timeStartDate >= 0 ? g.timeStartDate + day - 1 : -1;
+}
+
+int Game::weekdayOn(int day) const {
+    if (const int date = dateOf(day); date >= 0) return weekdayOf(date);
+    const int first = gameSettings().timeStartWeekday;
+    return first >= 0 ? (first + day - 1) % 7 : -1;
+}
+
+std::string Game::dateText(int day) const {
+    const int date = dateOf(day), weekday = weekdayOn(day);
+    const std::string named = weekday >= 0 ? script_.translated(kWeekdays[static_cast<std::size_t>(weekday)]) : std::string{};
+    if (date < 0) return weekday >= 0 ? named : filledIn(script_.translated("Day {day}"), {{"day", std::to_string(day)}});
+    const auto [year, month, dom] = dateFromDays(date);
+    return filledIn(script_.translated("{weekday} {day} {month}"),
+                    {{"weekday", named}, {"day", std::to_string(dom)}, {"month", script_.translated(kMonths[static_cast<std::size_t>(month - 1)])}, {"year", std::to_string(year)}});
+}
+
+std::optional<Value> Game::timeValue(std::string_view name) const {
+    const When now = timeNow();
+    const int date = dateOf(now.day), weekday = weekdayOn(now.day);
+    if (name == "time_day") return now.day;
+    if (name == "time_hour") return now.minutes / 60;
+    if (name == "time_minute") return now.minutes % 60;
+    if (name == "time_part") return partAt(now.minutes); // (as the scripts name it: for if lines)
+    if (name == "time_weekday") return weekday >= 0 ? std::string(kWeekdays[static_cast<std::size_t>(weekday)]) : std::string{}; // (in English: for if lines)
+    if (name == "time_month") return date >= 0 ? std::string(kMonths[static_cast<std::size_t>(dateFromDays(date)[1] - 1)]) : std::string{};
+    if (name == "time_year") return date >= 0 ? dateFromDays(date)[0] : 0;
+    if (name == "time_clock") return clockText(now.minutes); // (as it shows: in the player's language)
+    if (name == "time_date") return dateText(now.day);
+    if (name == "time_waiting") return wait_ == Wait::Clock ? 1 : 0; // (setting time real: the story waits for the player's clock...)
+    if (name == "time_until") { // (...until then)
+        const auto until = vars_.find("time_wait");
+        if (wait_ != Wait::Clock || until == vars_.end()) return std::string{};
+        const double left = toNumber(until->second) - realNow().seconds;
+        return clockText(static_cast<int>(std::lround(now.minutes + std::max(0.0, left) / 60.0)) % 1440);
+    }
+    return std::nullopt;
+}
+
+std::string Game::backgroundFor(std::string_view image) const {
+    const GameSettings& g = gameSettings();
+    std::string base(image); // (one named for a part of the day already: its own name first)
+    for (const auto& [part, start] : g.dayParts)
+        if (base.size() > part.size() + 1 && base.ends_with("_" + part) && ctx_.assets.hasImage(base.substr(0, base.size() - part.size() - 1)))
+            base.resize(base.size() - part.size() - 1);
+    if (g.time == TimeKind::None || !g.backgroundsFollowTime || base.empty() || base.front() == '#') return std::string(image);
+    const std::string version = base + "_" + partAt(timeNow().minutes);
+    return ctx_.assets.hasImage(version) ? version : base == image ? std::string(image) : base;
+}
+
+void Game::timeMoved(When from, When to, bool fast) {
+    if (!stage_.background().empty()) // (the background as it is in the new part of the day)
+        if (const std::string shown = backgroundFor(stage_.background()); shown != stage_.background()) stage_.setBackground(shown, nullptr, true);
+    if (to.day != from.day && !fast && script_.screen("calendar")) waitForScreen({.name = "calendar"}, pc_); // (a new day: the calendar, when the screens have one)
+}
+
+void Game::passTime(const cmd::Time& c, std::size_t here) {
+    const GameSettings& g = gameSettings();
+    const When from = timeNow();
+    const int first = g.dayParts.front().second; // (a day's first part: the next one after the last)
+    When to = from;
+    if (c.passes && c.passing > 0) {
+        const int total = from.minutes + c.passing;
+        to = {from.day + total / 1440, total % 1440};
+    } else if (c.passes) { // to the next part of the day
+        const auto next = std::ranges::find_if(g.dayParts, [&](const auto& p) { return p.second > from.minutes; });
+        to = next != g.dayParts.end() ? When{from.day, next->second} : When{from.day + 1, first};
+    } else {
+        int at = c.minutes >= 0 ? c.minutes : from.minutes; // (no time of day said: the same time)
+        if (!c.part.empty())
+            if (const auto part = std::ranges::find(g.dayParts, c.part, &std::pair<std::string, int>::first); part != g.dayParts.end()) at = part->second;
+        const bool already = c.part.empty() ? at == from.minutes : partAt(from.minutes) == c.part; // (it's then already)
+        if (c.day > 0) { // that day, then
+            to = c.day == from.day && already ? from : When{c.day, at};
+        } else {
+            const int days = c.weekday >= 0 && weekdayOn(from.day) >= 0 ? (c.weekday - weekdayOn(from.day) + 7) % 7 : 0;
+            if (days == 0 && already) to = from;
+            else if (days == 0 && at < from.minutes) to = {from.day + (c.weekday >= 0 ? 7 : 1), at}; // (past it: the next one)
+            else to = {from.day + days, at};
+        }
+    }
+    if (g.time != TimeKind::Real) {
+        vars_.insert_or_assign("time_day", to.day);
+        vars_.insert_or_assign("time_minutes", to.minutes);
+        return timeMoved(from, to, skipping());
+    }
+    // The player's clock: the story waits for it, the textbox saying until when (developer mode, and the story
+    // played to a line by the developer tools: on at once). A save made meanwhile waits for the same moment.
+    const RealNow now = realNow();
+    const auto kept = vars_.find("time_wait"), keptLine = vars_.find("time_wait_line");
+    const double until = kept != vars_.end() && keptLine != vars_.end() && std::lround(toNumber(keptLine->second)) == static_cast<long>(here)
+                           ? toNumber(kept->second)
+                           : now.seconds - std::fmod(now.seconds, 60.0) + ((to.day - from.day) * 1440.0 + (to.minutes - from.minutes)) * 60.0;
+    if (g.developer || watch_ != SIZE_MAX || until <= now.seconds) {
+        vars_.erase("time_wait");
+        vars_.erase("time_wait_line");
+        return;
+    }
+    vars_.insert_or_assign("time_wait", until);
+    vars_.insert_or_assign("time_wait_line", static_cast<int>(here));
+    waitFrom_ = from;
+    say({}, g.narrationColour, filledIn(script_.translated("The story goes on at {time}."), {{"time", clockText(to.minutes)}}), nullptr);
+    reveal_ = static_cast<float>(length_);
+    waitFor(Wait::Clock, here);
 }
 
 } // namespace vn

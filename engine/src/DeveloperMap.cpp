@@ -20,6 +20,39 @@ std::vector<SDL_FPoint> curveOf(SDL_FPoint p0, SDL_FPoint p3, float k) {
     return curve;
 }
 
+// A rounded corner at v, coming from `from` and going on to `to` (4 points, on whole pixels).
+void cornerOf(std::vector<SDL_FPoint>& way, SDL_FPoint from, SDL_FPoint v, SDL_FPoint to, float radius) {
+    const auto toward = [&](SDL_FPoint p) { // (its start and end: radius from v, half the side at most)
+        const float dx = p.x - v.x, dy = p.y - v.y, len = std::hypot(dx, dy), step = std::min(radius, len / 2);
+        return len > 0.0f ? SDL_FPoint{v.x + dx / len * step, v.y + dy / len * step} : v;
+    };
+    const SDL_FPoint s = toward(from), e = toward(to);
+    for (int i = 0; i < 4; ++i) {
+        const float t = static_cast<float>(i) / 3, u = 1 - t;
+        way.push_back({std::round(u * u * s.x + 2 * u * t * v.x + t * t * e.x), std::round(u * u * s.y + 2 * u * t * v.y + t * t * e.y)});
+    }
+}
+
+// An arrow from box a to box b: a curve, or, when b isn't far enough right of a for one (left of it, or a
+// itself), the way around: out to the right, along the gap under a's row (over it, to a scene higher up)
+// and in from the left, so it doesn't run behind the boxes. Its middle point is the middle of the way (the
+// chosen one's x goes there). gapY: the gap between rows; k: the window's scale.
+std::vector<SDL_FPoint> arrowOf(const SDL_FRect& a, const SDL_FRect& b, float gapY, float k) {
+    const SDL_FPoint p0{std::round(a.x + a.w), std::round(a.y + a.h / 2)}, p3{std::round(b.x), std::round(b.y + b.h / 2)};
+    const float stub = 12 * k; // (how far it goes out of a, and into b, before it turns)
+    if (p3.x - p0.x >= 2 * stub) return curveOf(p0, p3, k);
+    const float lane = p3.y < a.y ? a.y - gapY / 2 : a.y + a.h + gapY / 2;
+    const SDL_FPoint v1{p0.x + stub, p0.y}, v2{v1.x, lane}, v4{p3.x - stub, p3.y}, v3{v4.x, lane};
+    std::vector<SDL_FPoint> way{p0};
+    cornerOf(way, p0, v1, v2, 6 * k);
+    cornerOf(way, v1, v2, v3, 6 * k);
+    way.push_back({std::round((v2.x + v3.x) / 2), std::round(lane)}); // (as many points before it as after)
+    cornerOf(way, v2, v3, v4, 6 * k);
+    cornerOf(way, v3, v4, p3, 6 * k);
+    way.push_back(p3);
+    return way;
+}
+
 // Whether (x, y) is on a curve (6 pixels from it at most, times k).
 bool onCurve(const std::vector<SDL_FPoint>& curve, float x, float y, float k) {
     for (std::size_t s = 0; s + 1 < curve.size(); ++s) {
@@ -31,15 +64,16 @@ bool onCurve(const std::vector<SDL_FPoint>& curve, float x, float y, float k) {
     return false;
 }
 
-// An arrow along a curve, with its head at the end: dashed (a call), or thick (chosen, pointed at).
-void drawCurve(SDL_Renderer* r, const std::vector<SDL_FPoint>& curve, SDL_Color c, bool dashed, bool thick, float k) {
+// An arrow along a curve, with its head at the end: thick when it's chosen or pointed at.
+void drawCurve(SDL_Renderer* r, const std::vector<SDL_FPoint>& curve, SDL_Color c, bool thick, float k) {
     SDL_SetRenderDrawColor(r, c.r, c.g, c.b, c.a);
-    for (int pass = 0; pass < (thick ? 2 : 1); ++pass) { // (thick: once more, a pixel lower)
+    for (int pass = 0; pass < (thick ? 3 : 1); ++pass) { // (thick: once more a pixel lower, and a pixel to the right)
         std::vector<SDL_FPoint> line = curve;
-        for (SDL_FPoint& p : line) p.y += static_cast<float>(pass);
-        if (!dashed) SDL_RenderLines(r, line.data(), static_cast<int>(line.size()));
-        else
-            for (std::size_t s = 0; s + 1 < line.size(); s += 2) SDL_RenderLine(r, line[s].x, line[s].y, line[s + 1].x, line[s + 1].y);
+        for (SDL_FPoint& p : line) {
+            if (pass == 1) p.y += 1;
+            if (pass == 2) p.x += 1;
+        }
+        SDL_RenderLines(r, line.data(), static_cast<int>(line.size()));
     }
     const SDL_FPoint p3 = curve.back();
     SDL_RenderLine(r, p3.x - 8 * k, p3.y - 5 * k, p3.x, p3.y);
@@ -58,6 +92,7 @@ struct Developer::MapFrame {
     };
     DeveloperUi& ui;
     SDL_FRect area;
+    float top; // where the boxes start, under the help (as far down as it goes: it can take two lines)
     const std::vector<StoryEditor::Scene>& scenes;
     std::vector<StoryEditor::Link> links;
     std::map<std::string, std::size_t> byName{};
@@ -77,17 +112,20 @@ struct Developer::MapFrame {
 };
 
 // The Map tab: every scene as a box, in columns by how many jumps they are from start (the ones the
-// story never jumps to after them), or where it was put by hand, with arrows for jumps, calls and
-// options' arrows. A click chooses a scene, another click renames it, and a double click opens it in
-// the Story tab; dragging one moves it, and dragging the dot at its right to another makes it jump
-// there. A click chooses an arrow, and its x (or Delete) takes it away. Dragging the space between
-// them (or the wheel) looks around.
+// story never jumps to after them), or where it was put by hand, with an arrow for each jump. A click
+// chooses a scene, another click renames it, and a double click opens it in the Story tab; dragging one
+// moves it, and dragging the dot at its right to another makes it jump there. A click chooses an arrow,
+// and its x (or Delete) takes it away. Dragging the space between them (or the wheel) looks around.
 void Developer::drawMap(DeveloperUi& ui, const SDL_FRect& area) {
     DeveloperTools& d = tools;
     StoryEditor& editor = d.editor;
     SDL_Renderer* r = ui.r;
     const float k = ui.k;
-    MapFrame f{.ui = ui, .area = area, .scenes = editor.scenes(), .links = editor.links()};
+    // What can be done, over the map (the + New scene button at its right); the boxes start under it.
+    const std::string_view help = "Drag a scene to move it, or its dot to another to jump there. Click an arrow, then its x, to take it away; double-click a scene to open it."_tr;
+    const float helpX = area.x + 12 * k, helpW = area.x + area.w - 170 * k - helpX;
+    const float top = std::max(layout::mapPadY * k, 6 * k + ui.measure(help, layout::noteText, helpW).y + (layout::mapPadY - layout::mapNoteY) * k);
+    MapFrame f{.ui = ui, .area = area, .top = top, .scenes = editor.scenes(), .links = editor.links()};
     const auto& scenes = f.scenes;
     const auto& links = f.links;
     layOutMap(f);
@@ -108,10 +146,8 @@ void Developer::drawMap(DeveloperUi& ui, const SDL_FRect& area) {
     }
     // The arrows: out to the right of one box, in from the left of another (or to the mouse).
     for (std::size_t i = 0; i < links.size(); ++i)
-        if (const auto to = f.byName.find(links[i].to); to != f.byName.end()) {
-            const SDL_FRect a = f.boxes[links[i].from], b = f.boxes[to->second];
-            f.arrows.push_back({i, curveOf({a.x + a.w, a.y + a.h / 2}, {b.x, b.y + b.h / 2}, k)});
-        }
+        if (const auto to = f.byName.find(links[i].to); to != f.byName.end())
+            f.arrows.push_back({i, arrowOf(f.boxes[links[i].from], f.boxes[to->second], layout::nodeGapY * k, k)});
     if (d.mapArrow && std::ranges::none_of(links, [&](const auto& l) { return std::pair{l.from, l.line} == *d.mapArrow; })) d.mapArrow.reset();
     if (const auto it = std::ranges::find_if(f.arrows, [&](const MapFrame::Arrow& a) { return d.mapArrow == std::pair{links[a.link].from, links[a.link].line}; });
         it != f.arrows.end())
@@ -120,18 +156,12 @@ void Developer::drawMap(DeveloperUi& ui, const SDL_FRect& area) {
     drawMapArrows(f);
     drawMapScenes(f);
     if (mapLetGo(f)) return;
-    // What the arrows mean, the column of scenes nothing jumps to, and what can be done.
-    float lx = area.x + 12 * k;
-    for (const auto& [label, colour] : {std::pair{"Jump"_tr, kEdge}, {"Call (dashed)"_tr, kWarn}}) {
-        draw::rect(r, {lx, area.y + 14 * k, 18 * k, 3 * k}, colour);
-        lx += 24 * k + ui.text(label, lx + 24 * k, area.y + 6 * k, layout::smallText, theme::dim).x + 14 * k;
-    }
-    ui.text("Drag a scene to move it, or its dot to another to jump there. Click an arrow to take it away; double-click a scene to open it."_tr, lx + 10 * k,
-            area.y + 6 * k, layout::noteText, theme::dim, area.x + area.w - 170 * k - lx);
+    // What can be done, and the column of scenes nothing jumps to (each arrow: a jump).
+    ui.text(help, helpX, area.y + 6 * k, layout::noteText, theme::dim, helpW);
     const float nodeW = layout::nodeW * k, gapX = layout::nodeGapX * k;
     if (f.unreachedLaidOut && f.reached < static_cast<int>(scenes.size()))
-        ui.text("Nothing jumps to these"_tr, area.x + layout::mapPadX * k + static_cast<float>(f.reached) * (nodeW + gapX) - d.mapX, area.y + layout::mapNoteY * k - d.mapY,
-                layout::smallText, theme::dim);
+        ui.text("Nothing jumps to these"_tr, area.x + layout::mapPadX * k + static_cast<float>(f.reached) * (nodeW + gapX) - d.mapX,
+                area.y + top - (layout::mapPadY - layout::mapNoteY) * k - d.mapY, layout::smallText, theme::dim);
 }
 
 // Where each scene's box is: in its column (jumps from start, found going out from it; the ones the story
@@ -175,7 +205,7 @@ void Developer::layOutMap(MapFrame& f) {
         const int row = rowsIn[column[i]]++;
         f.unreachedLaidOut = f.unreachedLaidOut || column[i] == reached;
         boxes[i] = {area.x + layout::mapPadX * k + static_cast<float>(column[i]) * (nodeW + gapX) - d.mapX,
-                    area.y + layout::mapPadY * k + static_cast<float>(row) * (nodeH + gapY) - d.mapY, nodeW, nodeH};
+                    area.y + f.top + static_cast<float>(row) * (nodeH + gapY) - d.mapY, nodeW, nodeH};
     }
     if (d.mapPress && d.mapPress->from >= scenes.size()) d.mapPress.reset();
     if (d.mapPress && !d.mapPress->dot && d.mapPress->moving) // (being moved)
@@ -205,7 +235,7 @@ bool Developer::removeMapArrow(const MapFrame& f) {
     editor.removeLink(link);
     d.mapArrow.reset();
     d.failed = false;
-    d.status = link.call ? "'{}' no longer calls '{}'."_tr(from, link.to) : "'{}' no longer jumps to '{}'."_tr(from, link.to);
+    d.status = "'{}' no longer jumps to '{}'."_tr(from, link.to);
     return true;
 }
 
@@ -288,14 +318,13 @@ void Developer::drawMapArrows(const MapFrame& f) {
         const StoryEditor::Link& link = links[a.link];
         const bool chosen = d.mapArrow == std::pair{link.from, link.line};
         const bool lit = chosen || hoveredArrow == a.link || hovered == link.from || (hovered && f.byName.at(link.to) == *hovered);
-        SDL_Color c = chosen ? kAccent : link.call ? kWarn : kEdge;
+        SDL_Color c = chosen ? kAccent : kEdge;
         if (!lit && (hovered || hoveredArrow || d.mapArrow)) c.a = 90;
-        drawCurve(r, a.curve, c, link.call, chosen || hoveredArrow == a.link, k);
+        drawCurve(r, a.curve, c, chosen || hoveredArrow == a.link, k);
     }
     if (d.mapPress && d.mapPress->dot && d.mapPress->moving) {
         const SDL_FRect a = boxes[d.mapPress->from];
-        const SDL_FPoint to = target ? SDL_FPoint{boxes[*target].x, boxes[*target].y + boxes[*target].h / 2} : SDL_FPoint{d.mouseX, d.mouseY};
-        drawCurve(r, curveOf({a.x + a.w, a.y + a.h / 2}, to, k), kAccent, false, true, k);
+        drawCurve(r, target ? arrowOf(a, boxes[*target], layout::nodeGapY * k, k) : curveOf({a.x + a.w, a.y + a.h / 2}, {d.mouseX, d.mouseY}, k), kAccent, true, k);
     }
     if (const auto* chosenArrow = f.chosenArrow) { // (its x, over the arrows)
         const SDL_FPoint mid = chosenArrow->curve[chosenArrow->curve.size() / 2];
@@ -333,8 +362,10 @@ void Developer::drawMapScenes(const MapFrame& f) {
             }
             continue;
         }
-        ui.textIn(scenes[i].name, {boxes[i].x, boxes[i].y, boxes[i].w - 14 * k, boxes[i].h}, layout::listText,
-                  unreached && scenes[i].name != "start" ? theme::dim : theme::text);
+        const SDL_FRect nameBox{boxes[i].x, boxes[i].y, boxes[i].w - 14 * k, boxes[i].h}; // (its name, cut to fit: its whole in a tip)
+        const std::string name = ui.fitted(scenes[i].name, layout::listText, nameBox.w - 12 * k);
+        ui.textIn(name, nameBox, layout::listText, unreached && scenes[i].name != "start" ? theme::dim : theme::text);
+        if (name != scenes[i].name) ui.tip(nameBox, scenes[i].name);
         const SDL_FRect dot = f.dotOf(boxes[i]);
         const SDL_Color dc = hoveredDot == i || (d.mapPress && d.mapPress->dot && d.mapPress->from == i) ? kAccent : kEdge;
         draw::rect(r, {dot.x + 3 * k, dot.y + 3 * k, dot.w - 6 * k, dot.h - 6 * k}, dc);

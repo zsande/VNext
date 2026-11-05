@@ -27,17 +27,23 @@ public:
     // the short ones in a row keep one size.
     float buttonWidth(std::string_view label, float size, float least) { return std::max(least * k, width(label, size) + layout::buttonPad * k); }
     SDL_FPoint measure(std::string_view s, float size, float wrap = 0.0f); // (how big text() would draw it)
-    // `s` on one line `room` wide: as it is, or as much of it as fits, ending with "...".
+    // `s` on one line `room` wide: as it is, or shortened() to fit (ending with "...").
     std::string fitted(std::string_view s, float size, float room);
+    // The whole of a text shown cut to fit at `area`: shown in a tip while the pointer rests on it
+    // (Developer::drawTip).
+    void tip(const SDL_FRect& area, std::string_view whole);
+    // `s` on one line `room` wide from x, centred on `middle` (up and down): as it is, or fitted(), its
+    // whole in a tip. How a text that may not fit is drawn. Gives how wide it's drawn.
+    float textFitted(std::string_view s, float x, float middle, float size, SDL_Color colour, float room);
     // A panel's heading ("Scenes", "Images", "Preview"...), the same on every tab: in the middle of its
     // row (layout::headingH high from `y`), on one line `room` wide.
     void heading(std::string_view title, float x, float y, float room = std::numeric_limits<float>::infinity());
     // Buttons that make something new, in named groups, the same on every tab (the Story's New line, the
-    // Screens' New part): each group's name at the left, its buttons after it in as few rows as the room
-    // takes them, as even as they can be (8 in two rows: 4 and 4), as wide as the room, and lined up in
-    // an even grid when every label fits its cell. grouped() lays them out (from the room's top left: each
-    // button, by its place over all the groups, and each group's name), groupedButtons() draws them at
-    // (x, y) and gives the one clicked (`chosen`: the ones that look pressed).
+    // Screens' New part): each group's name at the left, its buttons after it on one row as wide as the
+    // room, an even grid when every label fits its cell (else each as wide as its label, narrower when
+    // they must be). grouped() lays them out (from the room's top left: each button, by its place over all
+    // the groups, and each group's name), groupedButtons() draws them at (x, y) and gives the one clicked
+    // (`chosen`: the ones that look pressed).
     struct ButtonGroup {
         std::string_view name;
         std::vector<std::string_view> labels;
@@ -57,9 +63,13 @@ public:
     };
     [[nodiscard]] Columns columns(const SDL_FRect& area, bool form = true) const;
     // A form's title ("Line", "Style: shout"...), the same on every tab: at the top of its row
-    // (layout::titleH high from `y`), level with a button there (As text).
-    void formTitle(std::string_view title, float x, float y, SDL_Color colour = kAccent);
+    // (layout::titleH high from `y`), level with a button there (As text), cut to fit in `room` (what
+    // that leaves it).
+    void formTitle(std::string_view title, float x, float y, SDL_Color colour = kAccent, float room = std::numeric_limits<float>::infinity());
     void textIn(std::string_view s, const SDL_FRect& box, float size, SDL_Color colour);
+    // A text with a look (its spans: bold, colours, a reading over it...) in the middle of `box`, as textIn(),
+    // `reveal` letters of it showing.
+    void richIn(const RichText& text, const SDL_FRect& box, float size, SDL_Color colour, std::size_t reveal = TextBlock::kAll);
     // Drawing stays inside `box` (and the box before it) while it lives; with `clicks`, clicks count only
     // in there too (a list that scrolls). Then both are as they were.
     class Clip {
@@ -114,29 +124,27 @@ public:
     // gives the one clicked.
     std::optional<std::size_t> buttons(float x, float y, float w, float h, const std::vector<std::string_view>& labels, const std::vector<bool>& enabled,
                                        float size = 14);
-    // Buttons as wide as their labels, in rows `w` wide: their places, from the top left of the first.
-    // Buttons that belong side by side (yes and no, at least and at most, left and right...): a row
-    // never ends between them.
+    // Whether two buttons belong side by side (yes and no, at least and at most, left and right...): a
+    // row never ends between them.
     static bool pairedButtons(std::string_view a, std::string_view b);
     // Buttons in rows `w` wide: each as wide as its label, wrapped when they don't fit. The ones that
     // belong together (pairs, and `with`: each that stays with the one before it) never split across rows.
     std::vector<SDL_FRect> flow(const std::vector<std::string_view>& labels, float w, float h, float gap, float size, const std::vector<bool>& with = {},
                                 float pad = 16.0f);
-    // The buttons a field's choices make in `box`: what they say (their labels, or the words) and
-    // where (all alike in one row when they fit, else as wide as their labels, in rows stretched to
-    // the box's width, under it).
+    // A field's choices: each word and what its button (or its list) says, Yes before No.
+    static std::vector<std::pair<std::string_view, std::string>> choiceLabels(const StoryEditor::Field& f);
+    // The buttons a field's choices make in `box`: what they say and where, in one row (all alike when
+    // they fit so, else as wide as their labels, sharing out the room left). No places: they don't fit it.
     struct ChoiceButtons {
         std::vector<std::string_view> words;
         std::vector<std::string> shown;
         std::vector<SDL_FRect> places;
     };
     ChoiceButtons choiceButtons(const SDL_FRect& box, const StoryEditor::Field& f);
-    // How tall a field's choices are as buttons in a box `w` wide and `h` tall (more rows under it when they don't fit).
-    float choicesHeight(const StoryEditor::Field& f, float w, float h);
-    // A field's choices as buttons in `box` (in more rows, under it, when they don't fit: `y` moves
-    // down to the last): gives the field's new value when one is clicked. With `multi`, a click turns
-    // one on or off ("none" goes on its own).
-    std::optional<std::string> choices(const SDL_FRect& box, const StoryEditor::Field& f, float& y);
+    // A field's choices in `box`, always one row: buttons when they fit, else one box saying what's
+    // chosen, whose list opens under it on a click. Gives the field's new value when one is clicked or
+    // picked. With `multi`, a click turns one on or off ("none" goes on its own).
+    std::optional<std::string> choices(const std::string& id, const SDL_FRect& box, const StoryEditor::Field& f);
     // A tab in the bar at the top (red: what it shows has a mistake).
     bool tab(const SDL_FRect& box, std::string_view label, bool chosen, bool wrong, float size = layout::tabText);
     // Text centred on `middle` (up and down).
@@ -164,10 +172,19 @@ public:
     // to list: a click on the box or its arrow opens it. Gives the new text, typed or picked.
     std::optional<std::string> pickField(const std::string& id, const SDL_FRect& box, const StoryEditor::Field& given, float size = 16);
     // The form in `box` (the Story, Screens and Library tabs' right side) scrolled by the wheel over
-    // it, `step` a turn, no further than its ends as drawn last frame; then, once it's drawn down to
-    // `y`, its height kept for the next.
+    // it, `step` a turn, or by its scrollbar, no further than its ends as drawn last frame; then, once
+    // it's drawn down to `y`, its height kept for the next.
     void scrollForm(const SDL_FRect& box, float step);
     void formDrawn(const SDL_FRect& box, float y);
+    // A scrollbar down `track` for what's `total` high and shows `view` of it, scrolled `scroll` down (in
+    // any one measure: pixels, lines); `of`: the place that scroll is kept (it tells one from another).
+    // None while it all shows. Its thumb dragged, or the track clicked (the thumb comes there, to drag
+    // on), scrolls it.
+    void scrollbar(const void* of, const SDL_FRect& track, float view, float total, float& scroll);
+    // Where a scrollbar runs: inside a box at its right (its rows leave it layout::scrollbarRoom), or
+    // beside one, in the margin at its right (a form's, which has no box of its own).
+    [[nodiscard]] SDL_FRect barInside(const SDL_FRect& box) const;
+    [[nodiscard]] SDL_FRect barBeside(const SDL_FRect& box) const;
     // What the spell checker doesn't check: the characters' names (and their words).
     std::vector<std::string> names() const;
     // A small triangle around (x, y): a dropdown's, pointing down (open: up), or the same turned to point

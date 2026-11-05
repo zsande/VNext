@@ -394,10 +394,10 @@ public:
         const ScopeExit _([&] { g.gFree(uri); });
         // Images as blue, green, red and alpha; sound as two sides at kSoundRate, each read as soon
         // as it's asked for (not at its time: the player times them). A few images wait at most.
-        const std::string description =
-            std::string("playbin uri=\"") + uri +
-            "\" video-sink=\"videoconvert ! video/x-raw,format=BGRA ! appsink name=images sync=false max-buffers=4\" "
-            "audio-sink=\"audioconvert ! audioresample ! audio/x-raw,format=F32LE,channels=2,rate=48000,layout=interleaved ! appsink name=sound sync=false\"";
+        const std::string description = std::format(
+            "playbin uri=\"{}\" video-sink=\"videoconvert ! video/x-raw,format=BGRA ! appsink name=images sync=false max-buffers=4\" "
+            "audio-sink=\"audioconvert ! audioresample ! audio/x-raw,format=F32LE,channels=2,rate={},layout=interleaved ! appsink name=sound sync=false\"",
+            uri, kSoundRate);
         pipeline_ = Pipeline(g.parseLaunch(description.c_str(), nullptr));
         if (!pipeline_) return false;
         images_ = Element(g.byName(pipeline_.get(), "images"));

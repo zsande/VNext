@@ -62,7 +62,7 @@ std::vector<std::string> toolsTexts() {
             break;
         case TextShape::Suggestions: // (what each is)
             for (const std::string_view entry : wordsOf(text, '|'))
-                if (const auto colon = entry.find(':'); colon != npos) add(entry.substr(colon + 1));
+                if (const std::string_view about = suggestionOf(entry).second; !about.empty()) add(about);
             break;
         case TextShape::Hint: // (words; not a value, as 100% or 1)
             if (std::isupper(static_cast<unsigned char>(text.front()))) add(text);
@@ -120,6 +120,16 @@ std::string styleValueText(const Style& s, std::string_view key, const Palette& 
 
 namespace dev {
 
+std::pair<std::string_view, std::string_view> suggestionOf(std::string_view entry) {
+    const auto digit = [&](std::size_t k) { return k < entry.size() && std::isdigit(static_cast<unsigned char>(entry[k])); };
+    for (std::size_t i = 0; i < entry.size(); ++i) {
+        if (entry[i] != ':') continue;
+        const bool time = digit(i - 1) && digit(i + 1) && digit(i + 2) && (i + 3 == entry.size() || entry[i + 3] == ' ' || entry[i + 3] == ':'); // (8:00)
+        if (!time) return {entry.substr(0, i), entry.substr(i + 1)};
+    }
+    return {entry, {}};
+}
+
 std::string scaled(const std::string& line, float sy) {
     if (sy == 1.0f) return line;
     static const std::set<std::string_view> down{"size", "padding", "bar"};
@@ -134,8 +144,6 @@ std::string scaled(const std::string& line, float sy) {
     }
     return out;
 }
-
-
 
 void showStyleValues(std::vector<StoryEditor::Field>& fields, const Style& style, const Palette& palette) {
     for (StoryEditor::Field& f : fields) {
@@ -168,18 +176,16 @@ void showGameSettingValues(std::vector<StoryEditor::Field>& fields, const GameSe
         std::string v;
         if (f.name == "Animation on show" || f.name == "Animation on hide") { // (the game's, from Settings: none, or its name)
             const std::string& named = f.name == "Animation on show" ? gameSettings.animationOnShow : gameSettings.animationOnHide;
-            v = named.empty() ? std::string("None"_hint) : named;
+            v = named.empty() ? std::string("At once"_hint) : named; // (as Settings says it)
         }
         else if (f.name == "Its speed") v = std::format("{:g}", gameSettings.madeUpVoiceSpeed);
+        else if (f.name == "Fade out") v = std::format("{:g}", gameSettings.musicCrossfade); // (a music line's: the song before's)
         else if (f.name == "Blinks every") v = std::format("{:g}", gameSettings.secondsBetweenBlinks);
         else if (f.name == "Mouth's speed") v = std::format("{:g}", gameSettings.mouthSpeed);
         else continue;
         f.hint = std::move(v);
     }
 }
-
-
-
 
 std::optional<std::size_t> sceneOf(const StoryEditor& editor, const ScriptError& e) {
     const auto line = static_cast<std::size_t>(std::max(e.line - 1, 0));
@@ -189,51 +195,17 @@ std::optional<std::size_t> sceneOf(const StoryEditor& editor, const ScriptError&
     return std::nullopt;
 }
 
-
 bool inSettings(const StoryEditor& editor, const ScriptError& e) {
     return e.line > 0 && e.file == "scripts/main.vnscript" && editor.isSetting(static_cast<std::size_t>(e.line - 1));
 }
 
-SDL_Event mouseEventAt(Uint32 type, float x, float y, bool twice) {
+SDL_Event mouseMotionAt(float x, float y) {
     SDL_Event e{};
-    e.type = type;
-    if (type == SDL_EVENT_MOUSE_MOTION) {
-        e.motion.x = x;
-        e.motion.y = y;
-    } else {
-        e.button.button = SDL_BUTTON_LEFT;
-        e.button.down = type == SDL_EVENT_MOUSE_BUTTON_DOWN;
-        e.button.clicks = twice ? 2 : 1;
-        e.button.x = x;
-        e.button.y = y;
-    }
+    e.type = SDL_EVENT_MOUSE_MOTION;
+    e.motion.x = x;
+    e.motion.y = y;
     return e;
 }
-
-SDL_Event wheelEventAt(float turns, float x, float y) {
-    SDL_Event e{};
-    e.type = SDL_EVENT_MOUSE_WHEEL;
-    e.wheel.y = turns;
-    e.wheel.mouse_x = x;
-    e.wheel.mouse_y = y;
-    return e;
-}
-
-SDL_Event textEvent(const char* text) {
-    SDL_Event e{};
-    e.type = SDL_EVENT_TEXT_INPUT;
-    e.text.text = text;
-    return e;
-}
-
-SDL_Event keyEvent(const SDL_KeyboardEvent& key) {
-    SDL_Event e{};
-    e.key = key;
-    e.type = SDL_EVENT_KEY_DOWN;
-    return e;
-}
-
-
 
 std::vector<std::string> clipboardLines() {
     std::vector<std::string> out;

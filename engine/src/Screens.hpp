@@ -10,11 +10,11 @@
 #include <functional>
 #include <limits>
 #include <map>
-#include <unordered_map>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -72,7 +72,7 @@ inline constexpr SDL_Color dim{150, 150, 165, 255};
 using FontPtr = std::unique_ptr<TTF_Font, SdlDeleter<TTF_CloseFont>>; // (a font file open)
 
 // A TTF font that renders at the window's real pixel density, so text stays sharp when the
-// 1280x720 logical canvas is scaled up. Falls back to SDL's built-in debug font if no TTF is found.
+// game's canvas is scaled up. Falls back to SDL's built-in debug font if no TTF is found.
 class Font {
 public:
     Font() = default;
@@ -245,12 +245,12 @@ private:
 
 class Engine;
 
-// A screen from the script, live: draws its elements and handles input for them.
 // A place on the screen across, -1 to 1 like the stage's, as the left edge of something `size` wide on a
 // `screen` that wide: ±1 lines its edge up with the screen's, past that it goes off, and at ±2 it's just off
 // the screen. (Down: pass minus the place, as 1 is the top; it gives the top edge.)
 [[nodiscard]] float placeEdge(float place, float size, float screen);
 
+// A screen from the script, live: draws its elements and handles input for them.
 class ScreenView {
 public:
     // `tools`: shown in the developer tools (its animations go on while the game stands still under them).
@@ -310,6 +310,12 @@ public:
         Variables item;
     };
     [[nodiscard]] std::optional<Pressed> takePressed();
+    // What a control's move, press, scroll and put back actions do to the screen on top that takes clicks.
+    [[nodiscard]] bool takesClicks() const { return !targets_.empty(); }
+    void move(int dx, int dy);           // points at the next part that takes clicks that way (a slider pointed at: left and right change it)
+    void pressPointed();                 // the part pointed at, clicked
+    void scrollBy(std::string_view how); // up, down, to the top or to the end: its history, else the container that scrolls
+    void putBack();                      // what's being dragged, back where it was
     // What the buttons that came to be chosen because of their chosen= set (set VARIABLE to VALUE,
     // setting NAME VALUE), to put in effect as if they were clicked: a choice that shows is the one that
     // holds. Their other actions (opening a screen, music, quitting...) run only when they're clicked.
@@ -324,7 +330,7 @@ public:
 
 private:
     // Part `index` as it is now (in a screen with lists: their parts once for each item): whether it was drawn,
-    // where (as bounds() above), its box as laid out, the box it's in (the part it's in, or the screen: its x
+    // where (as partBounds() above), its box as laid out, the box it's in (the part it's in, or the screen: its x
     // and y are places in it, its w and h shares of it), and a part's index from the part itself.
     [[nodiscard]] bool drawn(std::size_t index) const { return index < drawn_.size() && drawn_[index]; }
     [[nodiscard]] SDL_FRect bounds(std::size_t index);
@@ -332,6 +338,7 @@ private:
     [[nodiscard]] const SDL_FRect& rectOf(std::size_t index) const { return state_[index].rect; }
     [[nodiscard]] SDL_FRect boxOf(std::size_t index) const;
     [[nodiscard]] std::size_t indexOf(const Element& el) const { return static_cast<std::size_t>(&el - def_->elements.data()); }
+    [[nodiscard]] std::size_t asDrawn(std::size_t part) const; // the script's part `part` as it is now (in a list: its first item's; SIZE_MAX: none)
     // The style part `index` is drawn with: its own, or the one its animation makes of it for the moment.
     [[nodiscard]] const Style& styleOf(std::size_t index) const { return state_[index].styled ? *state_[index].styled : def_->elements[index].style; }
 
@@ -390,7 +397,7 @@ private:
     struct Target {
         Spot spot;
         SDL_FRect rect;
-        bool keyboard; // reachable with the arrow keys
+        bool reachable; // the move actions go to it (a history line's small buttons: only the pointer)
     };
     // Lists and grids (choices, saves, the gallery, endings, the flowchart...): columns= item_width= item_height=
     // spacing= (or spacing_across= and spacing_down=), with these defaults (an itemW of 0: the part's width shared out).
@@ -402,6 +409,7 @@ private:
     };
     // (item_width=, spacing=... are shares of the box the part is in; without them, these pixels)
     [[nodiscard]] Grid grid(const Element& el, Grid defaults) const;
+    [[nodiscard]] Grid recordsGrid(const Element& el) const; // a list of records' (the gallery's cards three to a row, the rest a row each)
     [[nodiscard]] float share(const Element& el, std::string_view key, bool across, float fallback) const; // (name_width=, wide_tab_width=...)
     void layout(); // where each part is now (its place and size in its box)
     struct ElementState {
@@ -415,8 +423,7 @@ private:
         std::string movieName;
         float movieTime = 0.0f;       // the engine's time when it last played
         std::uint64_t movieFrame = 0; // the frame it was last drawn in
-        float panX = 0.0f;            // the flowchart: how far it's been moved sideways
-        bool centred = false;        // ...and whether it has been moved to the current place yet
+        bool centred = false;        // the flowchart: whether it has been moved to the current place yet
         std::vector<std::string> ids; // ...the place each item goes to
         std::optional<float> since;     // a part with an animation: when it showed (its animation starts then)
         std::optional<float> clicked;   // a button with click_animation=: when it was clicked (it plays from then)
@@ -456,11 +463,16 @@ private:
     [[nodiscard]] std::optional<std::size_t> scrollableAt(float x, float y);
     void glideStep(std::size_t index);
     void settle(std::size_t index, float most);
-    // A container's scrollbars (scrollbar=yes) at its right edge and (`across`) along its bottom, and the
-    // thumb on each; the bars, drawn after its parts.
+    // A part's scrollbars (scrollbar=yes: a container, a list of records, a history, a flowchart) at its right
+    // edge and (`across`) along its bottom, and the thumb on each (a history's from its latest line, at the
+    // bottom); the bars, drawn after what's in it.
     [[nodiscard]] SDL_FRect barOf(std::size_t index, bool across) const;
     [[nodiscard]] SDL_FRect thumbOf(std::size_t index, bool across) const;
+    [[nodiscard]] float barRoom(std::size_t index) const; // (how much of its right edge its scrollbar takes: a list's items stay clear of it)
     void drawScrollbar(SDL_Renderer* r, std::size_t index, float alpha);
+    // Whether this screen shows one of `names` (in a part's words or image, or when it shows, takes clicks or
+    // looks chosen): what clicking a gallery's image or a tip picks ({gallery_image}, {tip_text}...).
+    [[nodiscard]] bool shows(std::span<const std::string_view> names) const;
     void reveal(const Target& t); // (in a container that scrolls: scrolled into view)
     // Dragging scrolls a container: its parts (once the mouse has moved a few pixels: then the button
     // under it isn't clicked), or its scrollbar's thumb. Which, where the mouse went down, and how far
@@ -495,7 +507,7 @@ private:
     void drawNamebox(SDL_Renderer* r, std::size_t index, float alpha);
     void drawChoices(SDL_Renderer* r, std::size_t index, float alpha);
     void drawHistory(SDL_Renderer* r, std::size_t index, float alpha);
-    void drawRecords(SDL_Renderer* r, std::size_t index, float alpha); // the gallery, endings, songs, achievements
+    void drawRecords(SDL_Renderer* r, std::size_t index, float alpha); // the gallery, endings, songs, achievements, tips
     void drawFlowchart(SDL_Renderer* r, std::size_t index, float alpha);
     [[nodiscard]] bool shows(std::size_t index); // its when= lets it, and on the phone its app (app=) is the one open
     [[nodiscard]] int newOn(const Element& app); // what's new in an app (a container with app=, the script's): in the lists in it, and its count=
@@ -508,7 +520,6 @@ private:
     void drawSlider(SDL_Renderer* r, std::size_t index, float alpha);
     void drawMovie(SDL_Renderer* r, std::size_t index, float alpha);
     [[nodiscard]] float number(const Element& el, std::string_view key, float fallback);
-    [[nodiscard]] std::string inputTarget(const Element& el);
     bool handleInput(const SDL_Event& e);
     // The input box that takes typing: the one clicked last (typing_), else the first shown.
     [[nodiscard]] std::optional<std::size_t> typedInto();

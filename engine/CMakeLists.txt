@@ -156,7 +156,7 @@ add_executable(vnext
     src/Engine.cpp                # the player: window, menus, saving, settings, reload (and main)
     src/Developer.cpp             # developer mode: the developer tools (opening them, their bar and tabs)
     src/DeveloperStory.cpp        # ...the Story tab
-    src/DeveloperPreview.cpp      # ...the preview (a row's, a screen's)
+    src/DeveloperPreview.cpp      # ...the games they play on their own (Play from this line, the Screens tab's sample)
     src/DeveloperScreens.cpp      # ...the Screens tab
     src/DeveloperMap.cpp          # ...the Map tab
     src/DeveloperLibrary.cpp      # ...the Library tab

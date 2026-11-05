@@ -17,7 +17,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <span>
 #include <set>
 #include <string>
 #include <vector>
@@ -78,7 +77,7 @@ public:
     void settingsChanged(bool testSound);
     [[nodiscard]] SlotBrowser& slots() { return slots_; }
     // A save slot clicked (the questions, if any, before saving over a save and before loading while a
-    // game is on) and its delete button (the question before deleting); a point on the flowchart clicked.
+    // game is on) and its delete button (the question before deleting).
     void slotPressed(std::size_t index, std::string overwriteQuestion, std::string loadQuestion);
     void slotDelete(std::size_t index, std::string question);
     // The history's buttons: hear entry `entry`'s voice again; go back to its line (closing the menus).
@@ -120,18 +119,16 @@ public:
     void back();
     bool phoneBack(); // a step back on the phone (the image, the chat, the app); false: none to take (Back then closes it)
     bool unlockPhone(std::string_view code); // its lock screen goes (with the passcode, if it has one: right or not)
-    void openNotice();                       // the notice of a message clicked: the phone opens on it
     // Controllers rumble (unless the player's Vibration setting is off): `strength` from 0 to 1, for `ms`.
     void rumble(float strength, Uint32 ms);
     [[nodiscard]] std::string appHolding(const ScreenDef& def, std::string_view list) const; // the app with a list= of that in it (none: "")
     void openChat(const ScreenDef& def, std::string with); // someone's chat, in the app it's in
-    // What the phone's parts do (a screen being tried in the developer tools only says so): send what the player can
-    // text, call someone, answer (or decline) a call, comment on a post.
+    // What the phone's parts do (a sample of the developer tools' does nothing): call someone, pick an option
+    // waiting on it, answer (or decline) a call, press the lock screen's keypad.
     void callPerson(const std::string& who);
     void pickOnPhone(std::size_t option); // an option of a chat or call scene's choice waiting on the phone
     void answerCall(bool answer);
     void keypad(std::string_view key); // the lock screen's keypad: a digit (once there are enough, they're tried), or back
-    // A photo of the stage (as "photo" took it, a save's lines), as an image.
     // Languages: the game's own first, then its translations (the "language" setting).
     [[nodiscard]] std::vector<std::string> languageNames() const;
     [[nodiscard]] int languageIndex() const;
@@ -139,14 +136,14 @@ public:
     // The language a word names, as Settings::language has it: "original" for the game's own (by its name,
     // or "original"), a translation's id for its file, name or code; none for a word that's no language.
     [[nodiscard]] std::optional<std::string> languageIdNamed(std::string_view word) const;
-    void changeSetting(Settings& s, std::string_view what); // a button's "setting NAME VALUE"
-    // The Controls screen: the key in a control's slot, and changing it (the next key pressed).
+    void changeSetting(std::string_view what); // a button's "setting NAME VALUE"
+    // A control part: the key in a control's slot, and changing it (the next key pressed).
     [[nodiscard]] std::string keyLabel(std::string_view control, std::size_t slot) const;
     static constexpr std::size_t kPadSlot = 99; // a control's controller button (slot=pad)
     [[nodiscard]] static std::size_t slotOf(const Element& el); // slot=1, 2... or pad
     [[nodiscard]] static std::vector<std::size_t> keySlots(const std::vector<std::string>& names);
     void startRebind(const std::string& control, std::size_t slot) {
-        if (!trying_) rebinding_ = std::pair{control, slot};
+        if (!sampling_) rebinding_ = std::pair{control, slot};
     }
     [[nodiscard]] bool rebinding(std::string_view control, std::size_t slot) const {
         return rebinding_ && rebinding_->first == control && rebinding_->second == slot;
@@ -166,7 +163,6 @@ public:
     [[nodiscard]] const Variables& persistent() const { return persistent_; }
 
 private:
-
     // Shuts SDL down after every other member (declared first => destroyed last).
     struct Session {
         bool ttf = false;
@@ -208,7 +204,7 @@ private:
     std::string openGame();
     void loadPlayerData();
     void begin();
-    void play(); // the game from the beginning: the splash screen, then scene start
+    void play(); // the game from the beginning: scene start
     bool lookForGame(); // developer mode without a game: one found next to the player begins (false: still none)
     [[nodiscard]] Script readScript() const;
     // Packs the game folder into `file` (game.vnext next to the folder): what was done, or why not.
@@ -250,8 +246,8 @@ private:
     void leaveStory(bool keepSound = false); // the story stops (if one is going on), with its sounds and screens
     void openTitle(bool keepSound = false);
     void quit(); // (in developer mode, back to the developer tools)
-    void newGame(std::string_view label, bool subroutine = false);
-    void startAt(std::size_t pc, bool subroutine = false, const Variables* carried = nullptr); // (`carried`: the variables it begins with)
+    void newGame(std::string_view label);
+    void startAt(std::size_t pc, const Variables* carried = nullptr); // (`carried`: the variables it begins with)
     void leaveTitle();
     void beginStory(); // scene start, as the game begins
     void newStory();   // New Game: on from where the story opened the title screen (or scene start)
@@ -262,6 +258,7 @@ private:
     void showPhone(const cmd::Ui& c);                      // the story's: a chat scene, a call or a message shown on it
     void hidePhone();                                      // ...over: it goes, if the story opened it
     [[nodiscard]] ScreenView* topView(); // the screen on top: the top overlay, else the title on the title screen
+    [[nodiscard]] ScreenView* keyView(); // the screen a control's move, press and scroll actions work on
     [[nodiscard]] ScreenView* textbox();
     // A screen opened over the rest, playing `opening` and later `closing` this time (with NAME and close
     // with NAME; none: its own animation_on_open= and animation_on_close=).
@@ -293,7 +290,6 @@ private:
     std::expected<std::string, std::string> resume(std::string_view state);
     [[nodiscard]] SurfacePtr captureThumbnail();
     void reload();
-    void notice(std::string message, std::string phone = {}); // (a message's: `phone`, its chat, opens when it's clicked)
     void readAloud(); // (the player's setting: what's new on screen, once)
 
     // Display
@@ -337,10 +333,6 @@ private:
     SaveStore saves_;
     SlotBrowser slots_;
     std::optional<std::string> musicBeforeSongs_; // what played before the music room (a path; empty: nothing)
-    struct Notice {
-        std::string text, phone; // (a message's: its chat)
-    };
-    std::deque<Notice> noticeQueue_;              // messages waiting for the one showing to go
     std::string topScreen_;                       // the screen on top, and since when (close_after=)
     float topSince_ = 0.0f;
     [[nodiscard]] bool songsOpen() const;         // a screen with a songs part is open
@@ -351,7 +343,6 @@ private:
     bool covered_ = false; // a menu covers the game (its voice and movie wait)
     std::unique_ptr<Game> game_;                          // idle (not started) on the title screen
     std::map<std::string, ScreenView, std::less<>> views_; // every screen of the script
-    const Script* viewsFrom_ = nullptr; // (the preview: view() gives the editor's screens, as they are now)
     std::vector<std::string> overlays_;                   // open menus, the top one last
     std::vector<std::string> shown_;                      // "show screen" screens last frame (action_on_open / action_on_close)
     std::size_t calledDepth_ = 0;                         // overlays_ size while a screen the story waits for is open
@@ -392,24 +383,17 @@ private:
     bool storyStarted_ = false;                           // without a title screen, the story's end closes the player
     bool waiting_ = false;                                // developer mode: no game is going on, the developer tools wait for Play
     bool textInputWanted_ = false, textInputActive_ = false;
-    bool splash_ = false;                                 // running "scene splashscreen"
     bool opening_ = false;                                // scene start before it opens the title screen (nothing's saved then)
     bool titleShown_ = false;                             // (its action_on_close runs when a game starts)
-    // The scripts' animation a line names for a screen to open or close with: none said (its own), "none"
-    // (null), or that one.
     std::optional<std::size_t> storyStart_;               // where New Game starts: the line after the one that opened the title screen
     Variables beforeTitle_; // what the story set before it opened the title screen (a language picked...): the title screen and New Game keep it
-    // While the Screens tab's screen is tried: its buttons do nothing (no saving, loading or leaving),
-    // and what they would have done is kept here instead.
-    bool trying_ = false;
-    std::vector<Command> tried_;
+    // While the developer tools point at a sample of theirs (the Library's style): what it would do isn't done.
+    bool sampling_ = false;
     std::string spoken_; // what was read aloud last
 
     Mode mode_ = Mode::Title;
     std::string question_;
     std::function<void()> confirmYes_;
-    std::string notice_, noticePhone_; // (a message's notice: its chat)
-    float noticeTime_ = 0.0f;
     std::vector<SDL_Point> windowSizes_;
     bool hasSave_ = false;
     bool thumbnail_ = false;

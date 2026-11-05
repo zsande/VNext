@@ -1,7 +1,8 @@
 #pragma once
 
-// What the developer files (Developer*.cpp, StoryEditor.cpp) share, and only they include: the tables
-// their forms are made from, and the helpers more than one of them uses. They're in a namespace of
+// What the developer files (Developer*.cpp, StoryEditor.cpp) share, and only they include: the player
+// (Engine.hpp: they all work on it), the tables their forms are made from, and the helpers more than one of
+// them uses. They're in a namespace of
 // their own (dev) that the developer files use as if each had declared them.
 
 #include "Developer.hpp"
@@ -9,19 +10,14 @@
 
 #include <SDL3_image/SDL_image.h>
 #include <SDL3_mixer/SDL_mixer.h>
-#include <deque>
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cfloat>
-#include <charconv>
-#include <climits>
 #include <cmath>
+#include <deque>
 #include <functional>
 #include <map>
-#include <numbers>
-#include <numeric>
-#include <ranges>
 #include <set>
 #include <span>
 
@@ -30,8 +26,8 @@ namespace vn::dev {
 constexpr std::size_t npos = std::string_view::npos;
 constexpr int kIndent = 4; // spaces for each level the editor adds
 
-// For as long as it lives, `place` holds what `standIn` held (the preview's story in the engine's place, Try
-// it's settings in the player's), and standIn what place held: swapped back when it goes, whatever happens.
+// For as long as it lives, `place` holds what `standIn` held (the Screens tab's sample story in the engine's
+// place, its phone in the player's), and standIn what place held: swapped back when it goes, whatever happens.
 template <class T>
 class SwappedIn {
 public:
@@ -172,7 +168,7 @@ inline const Slot kStyleSlots[]{
 
 inline const Slot kAtlasSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
                              {.type = Type::Option, .name = "Image", .key = "image", .box = Box::Image},
-                             {.type = Type::Option, .name = "Frames in a row", .key = "frames_in_a_row", .box = Box::Count},
+                             {.type = Type::Option, .name = "Frames in a row", .key = "frames_in_a_row", .box = Box::Count, .hint = "None (a row each)"},
                              {.type = Type::Option, .name = "Same names as", .key = "same_names_as", .box = Box::Record}};
 
 inline const Slot kSubImageSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
@@ -230,20 +226,19 @@ struct DefinitionKind {
     std::string_view kind;
     ToolsText label, one; // what the Library's list calls them, and one of them (its form's title)
     std::span<const Slot> slots;
-    bool listed = true; // the Library lists them (sub-images are under their images, fonts under their files; places aren't)
 };
 
 inline const DefinitionKind kDefinitionKinds[]{
     {.kind = "colour", .label = "Colours", .one = "Colour", .slots = kColourSlots},
     {.kind = "style", .label = "Styles", .one = "Style", .slots = kStyleSlots},
-    {.kind = "font", .label = "Font", .one = "Font", .slots = kFontSlots, .listed = false},
-    {.kind = "place", .label = "Places", .one = "Place", .slots = kPlaceSlots, .listed = false},
+    {.kind = "font", .label = "Font", .one = "Font", .slots = kFontSlots},
+    {.kind = "place", .label = "Places", .one = "Place", .slots = kPlaceSlots},
     {.kind = "atlas", .label = "Atlases", .one = "Atlas", .slots = kAtlasSlots},
-    {.kind = "sub-image", .label = "Sub-images", .one = "Sub-image", .slots = kSubImageSlots, .listed = false},
+    {.kind = "sub-image", .label = "Sub-images", .one = "Sub-image", .slots = kSubImageSlots},
     {.kind = "animation", .label = "Animations", .one = "Animation", .slots = kAnimationSlots},
-    {.kind = "gallery", .label = "Gallery", .one = "Gallery image", .slots = kGallerySlots, .listed = false},
+    {.kind = "gallery", .label = "Gallery", .one = "Gallery image", .slots = kGallerySlots},
     {.kind = "ending", .label = "Endings", .one = "Ending", .slots = kEndingSlots},
-    {.kind = "song", .label = "Songs", .one = "Song", .slots = kSongSlots, .listed = false},
+    {.kind = "song", .label = "Songs", .one = "Song", .slots = kSongSlots},
     {.kind = "achievement", .label = "Achievements", .one = "Achievement", .slots = kAchievementSlots},
     {.kind = "tip", .label = "Tips", .one = "Tip", .slots = kTipSlots},
     {.kind = "control", .label = "Controls", .one = "Control", .slots = kControlSlots},
@@ -253,6 +248,8 @@ const CommandForm* formOf(StoryEditor::Kind kind);
 
 // Words of a list, split by `by`.
 std::vector<std::string_view> wordsOf(std::string_view list, char by = ' ');
+// A suggestion ("value:what it is") as its value and what it is (none: empty); a time's colon (8:00) is the value's.
+std::pair<std::string_view, std::string_view> suggestionOf(std::string_view entry);
 std::string spaced(std::string_view word); // "stop_music" -> "stop music"
 
 // An expression's parts at its top level (outside brackets and quotes), split at `ops`: words ("and",
@@ -329,12 +326,11 @@ inline const std::array kSettings{
     Setting{.label = "Text"},
     Setting{.name = "text_appears", .label = "Text appears", .standard = "letter", .choices = "letter word line", .help = "A letter, a word or a whole line at a time", .box = Box::TextAppears},
     Setting{.name = "narration_colour", .label = "Narration colour", .standard = "#96aaff", .help = "The speaker's colour for narration, and for speakers who aren't characters", .box = Box::Colour},
-    Setting{.name = "history_length", .label = "History length", .standard = "25", .help = "Lines kept for the History screen", .box = Box::Count},
+    Setting{.name = "history_length", .label = "History length", .standard = "25", .help = "Latest lines kept for History parts to show", .box = Box::Count},
     Setting{.name = "rollback_lines", .label = "Rollback lines", .standard = "100", .help = "Lines and choices players can go back (0: none)", .box = Box::Count},
     Setting{.name = "skip_time", .label = "Skip time per line (seconds)", .standard = "0.05", .help = "How long each line shows while skipping", .box = Box::Seconds},
     Setting{.name = "hold_to_skip", .label = "Hold to skip", .standard = "ctrl", .choices = "ctrl shift alt none", .help = "The key that skips while it's held", .box = Box::HoldToSkip},
     Setting{.name = "auto_letter_delay", .label = "Auto delay per letter (seconds)", .standard = "0.01", .help = "How much longer auto-forward waits for each letter of a line without a voice", .box = Box::Seconds},
-    Setting{.name = "notice_time", .label = "Notice time (seconds)", .standard = "2.5", .help = "How long a notice stays", .box = Box::Seconds},
     Setting{.label = "Images"},
     Setting{.name = "image_scaling", .label = "Image scaling", .standard = "smooth", .choices = "smooth pixel", .help = "How scaled images look: smooth, or sharp pixels for pixel art", .box = Box::ImageScaling},
     Setting{.name = "character_height", .label = "Character height", .standard = "95%", .help = "The tallest a character may be, of the screen's height", .box = Box::Percent},
@@ -347,8 +343,8 @@ inline const std::array kSettings{
     Setting{.name = "glide", .label = "Lists glide after a drag", .standard = "yes", .help = "Lists and containers that scroll keep gliding when let go while moving (a part can say otherwise)", .box = Box::YesNo},
     Setting{.name = "glide_speed", .label = "Glide speed", .standard = "100%", .help = "How fast they glide, of the speed they were let go at", .box = Box::Percent},
     Setting{.name = "glide_distance", .label = "Glide distance", .standard = "100%", .help = "How far they carry: 200% slows down half as fast", .box = Box::Percent},
-    Setting{.name = "scrollbar_thickness", .label = "Scrollbar thickness", .standard = "6", .help = "Pixels thick a container's scrollbar is (a part can say otherwise)", .box = Box::Pixels},
-    Setting{.name = "fading_edges", .label = "Fading edges", .standard = "0", .help = "Pixels a fading edge spans (a part can say otherwise)", .box = Box::Pixels,
+    Setting{.name = "scrollbar_thickness", .label = "Scrollbar thickness", .standard = "6", .help = "Pixels thick a scrollbar is (a part can say otherwise)", .box = Box::Pixels},
+    Setting{.name = "fading_edges", .label = "Fading edges", .standard = "0", .help = "Pixels a fading edge spans (0: a fifth of the box, 64 at most; a container can say otherwise)", .box = Box::Pixels,
             .suggest = "0:a fifth of the box|32|64|96"},
     Setting{.label = "Sound"},
     Setting{.name = "music_crossfade", .label = "Music crossfade (seconds)", .standard = "0.5", .help = "How long the old song fades out when the music changes", .box = Box::Seconds},
@@ -360,19 +356,26 @@ inline const std::array kSettings{
     Setting{.label = "Characters"},
     Setting{.name = "mouths_move", .label = "Mouths move", .standard = "yes", .choices = "yes voice no", .help = "When mouths move as characters speak (a character can say otherwise)", .box = Box::MouthMoves},
     Setting{.name = "mouth_speed", .label = "Mouth speed", .standard = "4", .help = "Mouth movements a second without a voice", .box = Box::PerSecond},
-    Setting{.name = "blink", .label = "Blinking", .standard = "yes", .help = "Characters blink (a character can say otherwise)", .box = Box::YesNo},
+    Setting{.name = "blink", .label = "Blinks", .standard = "yes", .help = "Characters blink (a character can say otherwise)", .box = Box::YesNo},
     Setting{.name = "seconds_between_blinks", .label = "Seconds between blinks", .standard = "4", .help = "How often characters blink, on average", .box = Box::Seconds},
+    Setting{.label = "Time"},
+    Setting{.name = "time", .label = "Time", .standard = "none", .choices = "none story real days", .help = "The story's own clock and calendar, the player's real ones (the story waits for them), or days and parts of the day", .box = Box::TimeKind},
+    Setting{.name = "time_start", .label = "Starts at", .help = "A date (2025-07-14) or a weekday, then a time or a part of the day: without either, days go by number", .box = Box::TimeStart, .hint = "8:00"},
+    Setting{.name = "time_parts", .label = "Parts of the day", .standard = "morning 6:00, afternoon 12:00, evening 18:00, night 22:00", .help = "Each part of the day and when it starts: {time_part}, and time lines' words", .quoted = true, .box = Box::DayParts},
+    Setting{.name = "clock", .label = "Clock", .standard = "24", .choices = "24 12", .help = "How times show: 18:30, or 6:30 PM", .box = Box::Clock},
+    Setting{.name = "phone_follows_time", .label = "The phone follows it", .standard = "yes", .help = "The phone's clock and date, and the times on its messages and calls, are the game's time", .box = Box::YesNo},
+    Setting{.name = "backgrounds_follow_time", .label = "Backgrounds follow it", .standard = "yes", .help = "A background's version for the part of the day shows when there is one: park_evening for park", .box = Box::YesNo},
     Setting{.label = "Phone"},
     Setting{.name = "has_phone", .label = "Has a phone when", .help = "The player has their phone while this is true (a variable)", .box = Box::Variable, .hint = "Always"},
     Setting{.name = "phone_owner", .label = "Owner", .help = "Whose phone it is, as it starts: the variable phone_owner (the player can change it in its Settings app)", .quoted = true, .box = Box::Text},
     Setting{.name = "phone_wallpaper", .label = "Home screen wallpaper", .help = "The image behind its apps, as it starts: the variable phone_wallpaper (the player can change it in its Settings app)", .box = Box::Image},
     Setting{.name = "phone_lock_wallpaper", .label = "Lock screen wallpaper", .help = "The image behind its lock screen, as it starts: the variable phone_lock_wallpaper (the player can change it in its Settings app)", .box = Box::Image},
     Setting{.name = "phone_passcode", .label = "Passcode", .help = "The code its lock screen asks for, as it starts: the variable phone_passcode (the player can change it in its Settings app)", .quoted = true, .box = Box::Text},
-    Setting{.name = "phone_clock", .label = "Clock", .help = "The time it shows, as it starts: the variable phone_clock (none: the computer's clock)", .quoted = true, .box = Box::Text, .hint = "The computer's"},
-    Setting{.name = "phone_date", .label = "Date", .help = "The date its lock screen and chats show, as it starts: the variable phone_date", .quoted = true, .box = Box::Text},
+    Setting{.name = "phone_clock", .label = "Clock", .help = "The time it shows, as it starts: the variable phone_clock (none: the computer's clock; when it follows the time, the time's)", .quoted = true, .box = Box::Text, .hint = "The computer's"},
+    Setting{.name = "phone_date", .label = "Date", .help = "The date its lock screen and chats show, as it starts: the variable phone_date (when it follows the time, the time's)", .quoted = true, .box = Box::Text},
     Setting{.name = "phone_signal", .label = "Signal", .standard = "yes", .help = "It has a signal, as it starts: the variable phone_signal (without one, calls don't get through and the player can't reply)", .box = Box::YesNo},
     Setting{.name = "phone_battery", .label = "Battery", .standard = "100", .help = "How full its battery is, 0 to 100, as it starts: the variable phone_battery (at 0 the phone is off)", .box = Box::Count},
-    Setting{.name = "new_messages", .label = "New messages", .standard = "button", .choices = "button open notice", .help = "How players learn a message has come to their phone", .box = Box::NewMessages},
+    Setting{.name = "new_messages", .label = "New messages", .standard = "button", .choices = "button open", .help = "How players learn a message has come to their phone", .box = Box::NewMessages},
     Setting{.name = "chat_messages", .label = "Chat messages come", .standard = "typed", .choices = "typed click", .help = "How a chat scene's messages come: as they're typed, or each after a click", .box = Box::ChatMessages},
     Setting{.name = "phone_typing", .label = "Phone typing speed", .standard = "6", .help = "Letters a second people type messages on the phone (0: at once)", .box = Box::TextSpeed},
     Setting{.name = "phone_history", .label = "Messages in the history", .standard = "no", .help = "The phone's messages show in the history too", .box = Box::YesNo},
@@ -387,7 +390,7 @@ inline const std::array kSettings{
     Setting{.name = "default.vsync", .label = "VSync", .standard = "yes", .help = "Frames in step with the screen", .box = Box::YesNo},
     Setting{.name = "default.frame_limit", .label = "Frame limit", .standard = "0", .help = "Frames a second (0: no limit)", .box = Box::Count, .suggest = "0:no limit|30|60|120|144"},
     Setting{.name = "default.text_speed", .label = "Text speed", .standard = "45", .help = "Letters a second (0: at once)", .box = Box::TextSpeed},
-    Setting{.name = "default.auto_delay", .label = "Auto delay (milliseconds)", .standard = "500", .help = "How long auto-forward waits after a line", .box = Box::Count},
+    Setting{.name = "default.auto_delay", .label = "Auto delay (seconds)", .standard = "0.5", .help = "How long auto-forward waits after a line", .box = Box::Seconds},
     Setting{.name = "default.textbox_opacity", .label = "Textbox opacity", .standard = "85%", .help = "How solid the textbox is", .box = Box::Opacity},
     Setting{.name = "default.text_size", .label = "Text size", .standard = "100%", .help = "The size of text that follows this setting", .box = Box::Percent},
     Setting{.name = "default.animations", .label = "Animations", .standard = "yes", .help = "Characters, images and screens move, fade and wipe", .box = Box::YesNo},
@@ -397,7 +400,7 @@ inline const std::array kSettings{
     Setting{.name = "default.voice_volume", .label = "Voice volume", .standard = "100%", .help = "Voices", .box = Box::Volume},
     Setting{.name = "default.made_up_voices", .label = "Made-up voices", .standard = "yes", .help = "Characters' made-up voices play", .box = Box::YesNo},
     Setting{.name = "default.typing_sounds", .label = "Typing sounds", .standard = "yes", .help = "Characters' typing sounds play", .box = Box::YesNo},
-    Setting{.name = "default.mouths", .label = "Mouths move", .standard = "always", .choices = "always voice never", .help = "When mouths move as characters speak", .box = Box::Mouths},
+    Setting{.name = "default.mouths", .label = "Mouths move", .standard = "yes", .choices = "yes voice no", .help = "When mouths move as characters speak", .box = Box::Mouths},
     Setting{.name = "default.skip_unread", .label = "Skip unread text", .standard = "no", .help = "Skipping goes past lines not read yet", .box = Box::YesNo},
     Setting{.name = "default.skip_after_choices", .label = "Skip after choices", .standard = "no", .help = "Skipping goes on after a choice", .box = Box::YesNo},
     Setting{.name = "default.skip_movies", .label = "Skip movies", .standard = "yes", .help = "Clicks and skipping go past movies", .box = Box::YesNo},
@@ -407,8 +410,8 @@ inline const std::array kSettings{
     Setting{.name = "default.high_contrast", .label = "High contrast", .standard = "no", .help = "Screens show white on black, with what's pointed at in yellow", .box = Box::YesNo},
 };
 
-// `line` for a game of another size than 1280 x 720: its text sizes, padding and bars grown or shrunk to
-// fit (places and shares fit any size as they are).
+// `line` for a game `sy` times as high: its text sizes, padding and bars grown or shrunk to fit (places
+// and shares fit any size as they are).
 std::string scaled(const std::string& line, float sy);
 
 // A screen's settings, and its parts', as their forms have them: the setting, what the form calls it,
@@ -424,12 +427,10 @@ struct PartOption {
     ToolsSuggestions suggest;
     char is = 0;
     ToolsGroup group; // the heading it starts in the form
-    bool asStyle = false;   // a part's look: what it gets is its style's (its words say so, not "its base style")
 };
 
 inline const PartOption kScreenOptions[]{
     {.key = "story", .label = "Story while open", .box = Box::StoryWhileOpen, .choices = "waits goes_on", .group = "While open"},
-    {.key = "arrow_keys", .label = "Arrow-key navigation", .box = Box::YesNoSettings, .choices = "usual yes no", .labels = "When the story waits|Yes|No"},
     {.key = "action_on_open", .label = "Action on open", .box = Box::Action, .hint = "None", .is = 'a', .group = "Opening and closing"},
     {.key = "action_on_close", .label = "Action on close", .box = Box::Action, .hint = "None", .is = 'a'},
     {.key = "animation_on_open", .label = "Animation on open", .box = Box::Animation, .hint = "None"},
@@ -439,8 +440,6 @@ inline const PartOption kScreenOptions[]{
     {.key = "stop_voice_on_open", .label = "Stops voice on open", .box = Box::YesNo, .choices = "no yes"},
     {.key = "stop_voice_on_close", .label = "Stops voice on close", .box = Box::YesNo, .choices = "no yes"},
     {.key = "close_after", .label = "Closes itself after (seconds)", .box = Box::Seconds, .hint = "None"},
-    {.key = "keep", .label = "Keeps its line", .box = Box::YesNo, .choices = "no yes", .group = "As a textbox"},
-    {.key = "text_speed", .label = "Text speed", .box = Box::Speed, .hint = "1"},
 };
 
 inline const PartOption kPartOptions[]{
@@ -448,11 +447,11 @@ inline const PartOption kPartOptions[]{
     {.key = "confirm", .label = "Confirmation question", .box = Box::Text},
     {.key = "load_confirm", .label = "Confirm loading mid-game", .box = Box::Text},
     {.key = "delete_confirm", .label = "Confirm deleting", .box = Box::Text},
-    {.key = "auto", .label = "Auto-save tab says", .box = Box::Text},
-    {.key = "quick", .label = "Quick-save tab says", .box = Box::Text},
+    {.key = "auto", .label = "Auto-save tab says", .box = Box::Text, .hint = "auto"},
+    {.key = "quick", .label = "Quick-save tab says", .box = Box::Text, .hint = "quick"},
     {.key = "waiting", .label = "While waiting for a key", .box = Box::Text},
     {.key = "secret", .label = "Secret entries say", .box = Box::Text},
-    {.key = "key", .label = "Shortcut key", .box = Box::Key, .hint = "None"},
+    {.key = "keys", .label = "Keys", .box = Box::Key, .hint = "None"},
     {.key = "clickable", .label = "Clickable when", .box = Box::Condition, .hint = "Always", .is = 'c'},
     {.key = "chosen", .label = "Chosen when", .box = Box::Condition, .hint = "Never", .is = 'c'},
     {.key = "drag", .label = "Drag name", .box = Box::Name},
@@ -508,7 +507,6 @@ inline const PartOption kPartOptions[]{
     {.key = "empty_style", .label = "Empty slot style", .box = Box::Style, .hint = "Default"},
     {.key = "choice_style", .label = "Choice style", .box = Box::Style, .hint = "Default"},
     {.key = "button_style", .label = "Button style", .box = Box::Style, .hint = "Default"},
-    {.key = "chapter_style", .label = "Chapter style", .box = Box::Style, .hint = "Default"},
     {.key = "ending_style", .label = "Ending style", .box = Box::Style, .hint = "Default"},
     {.key = "unreached_style", .label = "Unreached style", .box = Box::Style, .hint = "Default"},
     {.key = "unread_style", .label = "Unread count style", .box = Box::Style, .hint = "Default"},
@@ -541,15 +539,22 @@ void showStyleValues(std::vector<StoryEditor::Field>& fields, const Style& style
 void showGameSettingValues(std::vector<StoryEditor::Field>& fields, const GameSettings& gameSettings);
 
 // Screen lines written in a game's pixels (for `width` x `height`), written in places and shares instead.
-std::vector<std::string> placesFromPixels(const std::vector<std::string>& lines, float width, float height);
+// `sizes`: the size a part without one of its own has (a text: its words), by line, so it's put with its top
+// left where the line has it (else as if it had none; Developer::ownSizes measures them).
+std::vector<std::string> placesFromPixels(const std::vector<std::string>& lines, float width, float height, const std::map<std::size_t, SDL_FPoint>& sizes = {});
 
 // Seconds as the editor writes them: at most two places, no zeros after them (0.5, 1.25, 2); and two
 // times the same to a hundredth.
 std::string secondsText(float seconds);
 inline bool sameMoment(float a, float b) { return std::abs(a - b) < 0.005f; }
 
-constexpr SDL_Color kPanel{16, 18, 28, 255}, kBar{30, 36, 56, 255}, kAccent{130, 200, 255, 255}, kButton{44, 52, 80, 255},
-    kButtonHover{66, 82, 126, 255}, kEdge{92, 112, 168, 255}, kChosen{70, 92, 150, 255}, kBox{8, 9, 14, 255}, kGood{140, 230, 160, 255},
+// An animation's change's usual easing, for what it changes (its key): a fade's is even, as a screen's fade is.
+inline std::string_view usualEase(std::string_view key) { return key == "fade" ? "linear" : "inout"; }
+
+// The tools' look: VNext's own indigo (its icon's, from #5a4dde to #231b6e, on its banner's #110e31), with
+// VNext's text colours (theme::text and theme::dim: the ones its screens use too).
+constexpr SDL_Color kPanel{20, 18, 48, 255}, kBar{31, 26, 76, 255}, kAccent{173, 162, 255, 255}, kButton{43, 37, 99, 255},
+    kButtonHover{59, 51, 146, 255}, kEdge{91, 81, 184, 255}, kChosen{77, 65, 196, 255}, kBox{12, 10, 34, 255}, kGood{140, 230, 160, 255},
     kBad{255, 140, 150, 255}, kWarn{255, 205, 120, 255}, kOptionArrow{210, 150, 255, 255};
 
 // The scene a mistake is in, if any.
@@ -558,11 +563,8 @@ std::optional<std::size_t> sceneOf(const StoryEditor& editor, const ScriptError&
 // A mistake on a setting line.
 bool inSettings(const StoryEditor& editor, const ScriptError& e);
 
-// Events as the game gets them, for the preview, Try it and the style sample to feed their screens.
-SDL_Event mouseEventAt(Uint32 type, float x, float y, bool twice = false);
-SDL_Event wheelEventAt(float turns, float x, float y);
-SDL_Event textEvent(const char* text);
-SDL_Event keyEvent(const SDL_KeyboardEvent& key);
+// The mouse moving to a place (in the game's pixels), as the game gets it: the Library's style sample is pointed at with it.
+SDL_Event mouseMotionAt(float x, float y);
 
 // The Library's files: each kind's list, what a file's form calls one, its folder and its file types.
 struct FileKind {

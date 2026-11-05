@@ -9,17 +9,16 @@
 #include "Script.hpp"
 #include "System.hpp"
 
-#include <algorithm>
 #include <cstdint>
-#include <format>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -38,9 +37,10 @@ inline constexpr float boxH = 32;            // a box typed into or picked from
 inline constexpr float rowGap = 8;           // between a form's rows
 inline constexpr float labelPart = 0.3f;     // a form's labels: this much of its width
 inline constexpr float partLabelPart = 0.4f; // a screen part's form: its labels are longer
+inline constexpr float labelMostPart = 0.5f; // ...wider when a label needs it (Developer::labelColumn), up to this much
 inline constexpr float buttonH = 30;         // a button on its own (+ New, Play, As text...)
 inline constexpr float toggleW = 96;         // the As text / As a form button
-inline constexpr float barButtonH = 26, barButtonGap = 4; // a bar of small buttons (the text format bar, New line's and New part's, a preview's choices)
+inline constexpr float barButtonH = 26, barButtonGap = 4; // a bar of small buttons (the text format bar, New line's and New part's)
 inline constexpr float swatch = 20;          // a colour's square in its box
 inline constexpr float popupPad = 4;         // around and between what a list shows
 inline constexpr float popupText = 14;       // what a popup's list says
@@ -66,6 +66,7 @@ inline constexpr float tabPad = 28, toolGap = 6, tabText = 16, toolText = 15; //
 inline constexpr float headingH = 22, headingText = 14; // a panel's heading ("Scenes", "Library", "Preview"...): its row, over its list
 inline constexpr float gap = 6;              // between a list and its button, between buttons, and the like
 inline constexpr float listItemH = 30;       // a row of a panel's list
+inline constexpr float scrollbarW = 6, scrollbarLeast = 28, scrollbarRoom = 12; // a scrollbar: how thick, its thumb at the least, and the room it takes from a list's rows
 inline constexpr float listIndent = 18;      // a row inside another (an option in its choice)
 inline constexpr float listPad = 10, listText = 15; // a row's text: in from its left, and its size
 inline constexpr float crossW = 24, crossArmedW = 64; // a row's x, and once clicked (to click again)
@@ -81,8 +82,8 @@ inline constexpr float listenW = 64;         // the voice row's Play
 inline constexpr float buttonText = 14, smallButtonText = 13;
 inline constexpr float buttonPad = 24;       // a button in a row of them: its label and this much
 inline constexpr float choicePad = 16;       // a choice's button: its label and this much
-inline constexpr float previewButtonW = 80;  // the least for a preview's buttons: Preview on, Try it, Sound off, Reset
-inline constexpr float previewHeadH = headingH + gap; // a preview's heading, with those buttons, and the gap under it (when it's off, the heading is all there is)
+inline constexpr float previewButtonW = 80;  // the least for a preview's buttons (an animation's Play)
+inline constexpr float previewHeadH = headingH + gap; // a preview's heading, with those buttons, and the gap under it
 // Texts.
 inline constexpr float noteText = 14;        // notes, help and problems
 inline constexpr float smallText = 13;       // small labels
@@ -90,13 +91,10 @@ inline constexpr float lineText = 16;        // a plain line of text, and a butt
 // A form's groups (headings that fold), and a label over its box.
 inline constexpr float groupHeadH = 24, groupStep = 26, groupGap = 6, groupIndent = 14, groupText = 15;
 inline constexpr float labelAboveH = 20;
-inline constexpr float pairBoxW = 110;       // two boxes on a row: each at least this wide (else each has a row)
-inline constexpr float runBoxW = 80;         // an action's boxes on a row: each at least this wide (else each has a row)
-inline constexpr float pairLabelPart = 0.28f; // the second's label: at most this much of the room after the first's, on two lines past that
 // The Settings tab, the Translate tab's table, the Map and the log.
 inline constexpr float settingRowH = 42, settingHeadH = 44, settingHeadNoteH = 22, settingOtherH = 24;
 inline constexpr float settingLabelW = 200, settingLabelPart = 0.22f, settingFieldW = 340, settingFieldPart = 0.32f, settingHelpGap = 16;
-inline constexpr float mapPadX = 20, mapPadY = 40, mapNoteY = 22;   // the Map: where its grid starts, and its note over the unreached column
+inline constexpr float mapPadX = 20, mapPadY = 40, mapNoteY = 22;   // the Map: where its grid starts (at least: under its help), and its note over the unreached column
 inline constexpr float tableRowH = 40, languageW = 360;
 inline constexpr float nodeW = 170, nodeH = 36, nodeGapX = 90, nodeGapY = 16, mapStep = 60;
 inline constexpr float logRowH = 21;
@@ -109,6 +107,7 @@ inline constexpr float sampleStylePart = 0.25f, sampleAtlasPart = 0.42f, sampleA
 inline constexpr float timelineLabelW = 110, timelineRulerH = 22, timelineRowH = 22, timelineDiamond = 12, timelineEdge = 6, timelineSnap = 6,
                        timelineTickW = 48, timelineSwatch = 12; // (and a colour's square on a bar)
 inline constexpr float popupShadow = 3, popupMargin = 8, popupGap = 2;
+inline constexpr float tipDelay = 0.5f, tipW = 420, tipPad = 6; // a tip (the whole of a text cut to fit): once the pointer rests on it this long (seconds), at most this wide, its text this far in
 } // namespace layout
 
 // The visual editor's view of a game: its script files as lines, the scenes in them, each
@@ -123,9 +122,9 @@ public:
     // phoneWord): a Message (a chat's line that sends something, types...), a Chat scene, and a Call (and its
     // Missed lines).
     // Other is any line without a form (a mistake).
-    enum class Kind : std::uint8_t { Line, Character, Background, Choice, Option, If, Else, Set, Jump, End, Music, Sound, Voice, Stop, Wait,
-                                     Effect, Weather, Camera, Movie, Screen, Notice, Textbox, NewPage, Together, Chapter,
-                                     Unlock, Message, Chat, Call, Missed, Ask, Game, Note, Other };
+    enum class Kind : std::uint8_t { Line, Character, Background, Choice, Option, If, Else, Set, Jump, Music, Sound, Voice, Stop, Wait, Time,
+                                     Effect, Weather, Camera, Movie, Screen, Together,
+                                     Message, Chat, Call, Missed, Game, Other };
     // The names a field lists (Expressions: of the character in the field's context; Records: the
     // endings, achievements, tips or gallery images, by the context's word). Shown: characters and
     // images; Backgrounds: images and colours; Bases: the names images start with (aiko for
@@ -135,7 +134,7 @@ public:
     // Conditions: the variables, and the words screens' conditions know; ImageFiles: images/NAME.png.
     enum class Pick : std::uint8_t { None, Characters, Shown, Images, Sounds, Places, Scenes, VariableNames, Expressions, Screens,
                                      Movies, Records, Fonts, Styles, Colours, ImagesOrColours, Bases, Channels, FontNames, Keys, Languages,
-                                     VoiceFolders, Settings, Controls, Conditions, ImageFiles, Animations };
+                                     VoiceFolders, Settings, Controls, Conditions, ImageFiles, Animations, TimeWords, TimeSpans, Textboxes };
     // Every box a form has is of a kind, defined once (kindOf): what it lists to pick from, the values it
     // suggests, the buttons it has instead of a box and what they say, and how its value is written. A
     // row says its box's kind and what its own empty box means, so boxes of a kind are the same in
@@ -147,13 +146,14 @@ public:
         Name,  // one word that names something: a style, a character, a part
         Image, // an image, or a colour (every image's box takes either)
         Shape,   // an image alone, for its shape: where it's darkest (a wipe's)
-        ImageFile, Colour, Sound, Movie, FontFile, Font, Style, Character, Shown, Expression, Scene, Screen, Variable,
+        ImageFile, Colour, Sound, Movie, FontFile, Font, Style, Character, Shown, Expression, Scene, Screen, Textbox, Variable,
         Setting, Animation, Key, Place, Channel, Record, VoiceFolder, Control, Base, Language,
         Across, Down, Layer, Speed, Zoom, Opacity, Wipe, Volume, Percent, Rotation, Seconds,
         Pixels, Count, Number, PerSecond, LineSpacing, TextSpeed, Pause, Wind, WidthHeight, Point, // (numbers: a size, how many, a rate...)
         FontStyle, MadeUpVoice, VariableValue, Action, Playing, KeySlot, SaveMode,      // (lists of words)
         YesNo, YesNoStyle, YesNoSettings, YesNoSame, Easing, Plays,
         Condition, Fit, TextAppears, MouthMoves, ImageScaling, HoldToSkip, WindowFill, Mouths, NewMessages, ChatMessages,
+        TimeKind, Clock, TimeStart, DayParts, TimeWhen, TimePasses, // (the game's time: its kind, clock, start and parts; a time line's when and how long)
         MessageKind, PhoneLine, // (the phone's lines: which one, what a message does)
         Side, FaceCopies, FaceMouth, Align, AlignVertically, Operation, Joiner, ShowHide, Visibility, SetVerb, Sent, Position, Repeat, Scroll, Effects, WeatherKind,
         Edges, ContainerFit, Stack, List,
@@ -188,8 +188,8 @@ public:
         std::string suggest; // values it often has, listed with the names: "|" between them, "value:what it is"
         bool hidden = false;      // words the form has no box for, kept as they are
         bool rich = false;        // text that can be bold, coloured, paused... (buttons for that show under it)
-        bool beside = false;      // on the row of the field before it, when there's room (an action's kind, and what it asks for)
         std::string group;   // the heading it starts (the fields after it are under it too, until the next; "+Name": folded at first)
+        std::string usual;   // the choice it is when none is written (in one box with a list, said in grey: as any box's default)
     };
     struct Scene {
         std::size_t file = 0, line = 0; // its scene line
@@ -217,7 +217,7 @@ public:
     [[nodiscard]] std::string_view phoneSceneOf(const Scene& scene) const;
     [[nodiscard]] const std::vector<Character>& characters() const;
     [[nodiscard]] std::vector<std::string> names(Pick pick, std::string_view context = {}) const;
-    [[nodiscard]] const std::vector<std::string>& variables() const; // the ones the scripts change or ask for
+    [[nodiscard]] const std::vector<std::string>& variables() const; // the ones the scripts change, or an input or a slider sets
     [[nodiscard]] const std::string& path(std::size_t file) const { return files_[file].path; } // "scripts/main.vnscript"
 
     // Rows as forms: the fields of a row (they can change with its values: a hidden character has no
@@ -251,7 +251,7 @@ public:
     std::vector<std::size_t> moveRowsTo(const Scene& scene, const std::vector<std::size_t>& lines, std::size_t slot, int depth); // (their new lines)
     [[nodiscard]] std::string textOfRows(const Scene& scene, const std::vector<std::size_t>& lines) const;
     // Whether a row can go before row `slot` (rows.size(): after the last) `depth` levels in: options
-    // only right under a choice or message, and nothing else there; never into itself.
+    // only right under a choice, and nothing else there; never into itself.
     [[nodiscard]] bool fits(const std::vector<Row>& rows, std::size_t item, std::size_t slot, int depth) const;
     // Moves a row (with what's inside it) there, as far in as `depth`: its new line.
     std::optional<std::size_t> moveRowTo(const Scene& scene, const Row& row, std::size_t slot, int depth);
@@ -300,11 +300,10 @@ public:
     bool jumpAtEnd(std::size_t scene, const std::string& to);
     // Each character's name and the name its images start with (aiko_happy is "show aiko happy").
     [[nodiscard]] std::vector<std::pair<std::string, std::string>> imageBases() const;
-    // Where the story goes from each scene: jump, call and option arrows (-> scene), by name.
+    // Where the story goes from each scene: its jumps, by name.
     struct Link {
         std::size_t from = 0;
         std::string to;
-        bool call = false;
         std::size_t line = 0; // (its line in the scene's file)
     };
     [[nodiscard]] const std::vector<Link>& links() const;
@@ -518,9 +517,6 @@ void applyBox(StoryEditor::Field& f);
 // An amount as a percent kind writes it: 50% from 0.5, 50 or 50%.
 [[nodiscard]] std::string percentText(std::string_view value);
 
-// What the developer tools keep from frame to frame (Developer*.cpp). In developer mode the player starts in
-// them, and F10 opens them over the game (the story waits meanwhile); without a game they're all the
-// player shows.
 // A translation file's text (a line in quotes) and the line with its translation under it, if any.
 struct TextPair {
     std::size_t original = 0;
@@ -530,6 +526,9 @@ struct TextPair {
 [[nodiscard]] bool untranslatedPair(const std::vector<std::string>& lines, const TextPair& p);
 void setTranslation(std::vector<std::string>& lines, const TextPair& p, const std::string& value);
 
+// What the developer tools keep from frame to frame (Developer*.cpp). In developer mode the player starts in
+// them, and F10 opens them over the game (the story waits meanwhile); without a game they're all the
+// player shows.
 struct DeveloperTools {
     enum class View : std::uint8_t { Story, Map, Screens, Library, Settings, Translate, Log, About };
     bool open = false;
@@ -570,6 +569,11 @@ struct DeveloperTools {
         bool moving = false;
     };
     std::optional<ListDrag> listDrag;
+    struct BarDrag {              // a scrollbar's thumb being dragged
+        const void* of = nullptr; // (what it scrolls: the place its scroll is kept)
+        float grab = 0.0f;        // where on the thumb it was caught
+    };
+    std::optional<BarDrag> barDrag;
     float rowsScroll = 0.0f, scenesScroll = 0.0f, charactersScroll = 0.0f, settingsScroll = 0.0f, formScroll = 0.0f, findScroll = 0.0f;
     float formHeight = 0.0f; // how tall the form was last frame (it scrolls no further than its ends)
     // The game's size changed in Settings: the size before (the screens are stretched to the new one
@@ -579,6 +583,7 @@ struct DeveloperTools {
     std::string find, replaceWith; // the Story tab's find box, and what Replace all puts in its place
     std::vector<std::size_t> moreRows;          // more lines of the scene chosen (Shift+click), by their lines
     std::optional<std::size_t> collapseTo;      // a chosen one pressed: only it stays chosen, unless it's dragged
+    std::optional<std::size_t> rowInSight;      // a line just added (by its line): the list scrolls to it
     // The Library tab: what's listed (a kind of definition, "variables", "voices", or the files:
     // "images", "sounds", "movies" or "fontfiles") and the one chosen (a file: also what's made from it, a sub-image or a font, by
     // its index in the editor's definitions, and the files whose list of those is open); files picked
@@ -681,50 +686,27 @@ struct DeveloperTools {
     std::string focusOwner; // the field (or "raw") the buffer belongs to, and its form when it started
     StoryEditor::Kind focusKind = StoryEditor::Kind::Other;
     std::vector<StoryEditor::Field> focusFields;
-    // The preview: the story played to the chosen line (or the scene's start) in a game of its own,
-    // silent, with its own copies of what the player has seen and kept, and drawn into `screen`.
-    std::unique_ptr<Game> preview;
-    std::optional<std::tuple<std::size_t, std::size_t, std::size_t>> previewOf; // editor version, scene, line
-    bool previewReached = false; // (else it's shown without what comes before it)
-    bool previewPlaying = false; // it was clicked on: it plays on from there
-    bool previewSound = false;   // it's heard (through `heard`, the player's own sound)
-    bool previewOn = true;       // (off: none is made or shown, and the form has its room)
-    bool previewHeld = false;    // the mouse went down on it: it gets the coming up too
-    SDL_FRect previewShown{};    // where it's drawn this frame
-    std::vector<std::string> previewOverlays; // the screens its buttons opened over it (the top last)
-    std::vector<std::string> previewLeaving;  // the ones its buttons closed, drawn while their animation_on_close= plays
-    std::string previewPending;               // one a button opened, opening once the screen under it has faded out
-    std::pair<ScreenView::Played, ScreenView::Played> previewPendingWith; // ...playing these (with NAME and close with NAME)
-    std::vector<std::string> previewScreens;  // the screens on it last frame (their action_on_open= and action_on_close= run as they come and go)
-    std::optional<std::pair<std::string, std::size_t>> previewAt; // playing on: the file and line it's at
-    std::optional<std::size_t> previewRow;                        // (the row lit for it in the list, kept in view)
-    struct PlaceDrag {           // the chosen line's character, dragged on it
-        float x = 0.0f, y = 0.0f;           // where the mouse was pressed
-        float across = 0.0f, up = 0.0f;     // where they were then (-1 to 1: the left edge to the right, the bottom to the top)
-        float perX = 0.0f, perY = 0.0f;     // how far those go for each pixel the mouse moves
-        bool moving = false;
-        std::size_t key = 0;                // (one step for undo)
-    };
-    std::optional<PlaceDrag> placeDrag;
-    Sound* heard = nullptr;
-    Uint64 previewTicks = 0;
-    Sound silence;               // (never started)
-    ReadLog previewRead;
-    Variables previewPersistent;
-    Flowchart previewFlowchart;
-    TexturePtr canvas; // (the Screens tab draws into it too)
+    Sound silence;               // (never started: what the tools' own games are heard through)
+    // Copies of what the player has seen and kept, for the games the tools play on their own (Play from
+    // this line's, the Screens tab's sample): nothing the player has changes.
+    ReadLog playRead;
+    Variables playPersistent;
+    Flowchart playFlowchart;
+    TexturePtr canvas; // what the Screens tab and the Library's samples draw into
     // The Screens tab: the screen open (its name: the game's own, or a built-in one), the part chosen
     // (its line; none: the screen's own settings), and a part being moved or resized.
     std::string screenName;
     std::optional<std::size_t> part;
     bool picking = false;  // + New screen: the screens to start from show
-    std::string screenTip; // the Screens tab's word of help for the moment (said as its form is drawn, shown under the preview's buttons the next frame)
+    std::string screenTip; // the Screens tab's word of help for the moment (said as its form is drawn, shown under the screen the next frame)
     bool addInto = false; // New part goes in the part chosen (else on the screen), as it was set for that part
     std::optional<std::size_t> addIntoOf;
-    bool trying = false;   // Try it: the screen works as in the game (what its buttons would do is said)
-    bool tryHeld = false;  // ...the mouse was pressed on it
-    Settings trySettings;  // ...and its setting buttons and sliders change these (the player's own stay as they are)
     bool held = false;     // the mouse button is down
+    // A text shown cut to fit (DeveloperUi::tip): the whole of the one the pointer is on, this frame's and
+    // the one before's, and since when (the tools' clock); drawTip() shows it once the pointer rests there.
+    std::string tip, tipBefore;
+    float tipSince = 0.0f;
+    std::map<std::string, float, std::less<>> formatSince; // (a text format bar button pointed at, and since when: what it does plays)
     struct Drag {
         std::size_t part = 0, element = 0; // its line, and its part of the screen as read
         bool resize = false;
@@ -839,13 +821,6 @@ struct DeveloperTools {
     std::optional<float> guideX, guideY;    // what the part being moved lines up with (on the canvas)
     std::unique_ptr<Game> sample; // the story at its first line (or choice), for the textboxes in screens
     bool sampleMade = false;
-    std::string tryScreen; // (tried: the screen whose action_on_open= ran; its action_on_close= runs when another is tried)
-    std::string triedStatus; // (what Try it said last: taken away when it stops)
-    std::vector<std::string> tryOverlays; // the screens the tried one's buttons opened over it (the top last), as in the game
-    std::vector<std::string> tryLeaving;  // (closed: drawn while their animation_on_close= plays)
-    bool tryClosing = false;              // the tried screen closed itself: its animation_on_close= plays, then Try it stops
-    std::string tryPending;               // one a button opened, opening once the screen under it has faded out
-    std::pair<ScreenView::Played, ScreenView::Played> tryPendingWith; // ...playing these (with NAME and close with NAME)
     std::unique_ptr<ScreenView> screenView; // the screen open, as the game draws it
     float screensScroll = 0.0f, partsScroll = 0.0f;
     // The Library's atlas: the expression its frame shows, and its eyes or mouth being dragged there.
@@ -888,25 +863,8 @@ struct DeveloperTools {
     std::unique_ptr<Script> styleScript;
     std::unique_ptr<ScreenView> styleView;
     std::pair<std::size_t, std::string> styleOf{SIZE_MAX, {}};
-    std::map<std::string, std::unique_ptr<ScreenView>, std::less<>> previewViews; // the preview's screens (Engine::view)
     // The games and views made from `script` (it's read again after every change).
     void dropPreviews() {
-        preview.reset();
-        previewOf.reset();
-        previewPlaying = false;
-        previewAt.reset();
-        previewRow.reset();
-        previewHeld = false;
-        previewOverlays.clear();
-        previewLeaving.clear();
-        previewPending.clear();
-        previewScreens.clear();
-        tryOverlays.clear();
-        tryLeaving.clear();
-        tryClosing = false;
-        tryPending.clear();
-        if (heard) heard->stopAll(0.2f);
-        heard = nullptr;
         sample.reset();
         sampleMade = false;
         screenView.reset();
@@ -914,7 +872,6 @@ struct DeveloperTools {
         styleView.reset();
         styleScript.reset();
         styleOf = {SIZE_MAX, {}};
-        previewViews.clear();
     }
     // Text the tools draw, laid out once and kept by what it is (DeveloperUi::block: its font, the width
     // it wraps at and its words), wherever in a frame it's drawn; one not drawn for a while goes.
@@ -952,11 +909,8 @@ public:
     // The game was read again (Reload, or Play after a change): Play, Play this scene or Play from this
     // line starts it; else they read the scripts again too.
     void reloaded();
-    // A screen as the previews and Try it show it: made from `from` (the editor's scripts) when first needed.
-    [[nodiscard]] ScreenView* previewScreen(std::string_view name, const Script& from);
     void loadReached();   // the script lines the game ran in the developer's plays (reached.txt), and
     void recordReached(); // the ones it ran since last frame
-    void recordReached(Game& game, const Script& script); // (the preview's too: a line run there has run)
     void loadStops(); // Stop here's lines (stops.txt, with the player's data)
     // Whether the story stops just before command `pc` of the game's scripts: a line with Stop here, or
     // the next line after Next line. And when it has: the developer tools, at that line.
@@ -976,10 +930,6 @@ public:
     void playFromLine(const std::string& scene, std::optional<std::size_t> line); // the game, as it is at that line (none: the scene's first)
 
 private:
-    void runTrying(const Commands& commands, const std::string& confirm = {}, const Variables& item = {}); // (as a tried screen's: what they'd do to the player's game is said, not done)
-    void tryScreenHook(const ScreenDef& def, bool opening); // (as a tried screen's: said, not done)
-    void runScreenHook(std::string_view screen, bool shown);               // its action_on_open= or action_on_close=, as the game runs them when it opens and closes
-    [[nodiscard]] ScreenView* previewView(std::string_view name); // the preview's and Try it's: the editor's screens, as they are now
     [[nodiscard]] std::string translationPath(const std::string& id) const; // a translation's file
     void saveTranslation();                             // the Translate tab's file, written
     [[nodiscard]] std::string translationSheet() const; // its spreadsheet's path (next to the game folder)
@@ -993,35 +943,22 @@ private:
     bool drawFindBar(const StoryFrame& f, float h);                // ...Find, and Replace with (true: replaced)
     bool drawRowList(const StoryFrame& f, const SDL_FRect& box);   // ...the list: chosen, moved, deleted (true: changed)
     bool storyClipboard(const StoryFrame& f);                      // ...copy, cut, paste, duplicate (true: changed)
-    void drawStoryForm(const StoryFrame& f); // the preview, and the chosen line's (or character's) form over it
-    void drawPreview(DeveloperUi& ui, const SDL_FRect& box, const StoryEditor::Scene& scene, const StoryEditor::Row* row);
-    void makePreview(const StoryEditor::Scene& scene, const StoryEditor::Row* row);
-    // The preview takes an event (in the game's coordinates) as the game would; and what its buttons
-    // did is done to it where it can be (the story goes on, a screen opens over it...), or said.
-    void previewEvent(const SDL_Event& e);
-    void previewDid();
-    void previewHooks(); // the action_on_open= and action_on_close= of the screens that came and went on it
-    // The story of `s` played as fast as it goes to a line of a scene (an option's: its choice's;
-    // none: the scene's first), in a game of its own (heard through `sound`) with copies of what the
-    // player has seen and kept. `reached` false: it never got there from the scene's start, so it
-    // starts at the line itself. None when the line has nothing to show.
-    // `before`: it stops just before the line's command, whatever it is (to start the game with it).
-    std::unique_ptr<Game> playedTo(const Script& s, const StoryEditor::Scene& scene, std::optional<std::size_t> line, Sound& sound, bool& reached,
-                                   bool before = false);
+    void drawStoryForm(const StoryFrame& f); // the chosen line's (or character's) form
+    std::unique_ptr<Game> playedTo(const Script& s, const StoryEditor::Scene& scene, std::optional<std::size_t> line); // (Play from this line's)
     void drawSettings(DeveloperUi& ui, const SDL_FRect& box);
     void drawScreens(DeveloperUi& ui, const SDL_FRect& area);
     struct ScreensFrame; // (that tab this frame: what its columns share)
     bool drawScreenLists(const ScreensFrame& f);   // the screens and the parts of the one open (true: changed, the rest next frame)
-    bool drawScreenPreview(ScreensFrame& f); // the screen: Try it, and parts chosen, moved and resized on it (true: changed)
+    bool drawScreenPreview(ScreensFrame& f); // the screen: parts chosen, moved and resized on it (true: changed)
     bool drawNewPart(ScreensFrame& f);       // New part, under it: where it goes, and a button for each kind (true: one added)
     void chooseOnScreen(ScreensFrame& f);    // ...parts chosen on it, and moving or resizing them started
     bool dragOnScreen(ScreensFrame& f);      // ...parts moved or resized, lined up; written once let go (true)
     bool screenKeys(ScreensFrame& f);        // ...copy, cut, paste, duplicate, and the arrows that nudge (true: changed)
-    void paintScreen(const ScreensFrame& f, bool canTry); // ...the screen drawn, with its heading (Try it, its sound) and the help under it
-    void runTryIt(const ScreensFrame& f);    // ...Try it, this frame
-    void stopTrying(); // ...and when it stops
+    void paintScreen(const ScreensFrame& f); // ...the screen drawn, with its heading and the help under it
     void drawScreenForm(const ScreensFrame& f);    // the form: the screens to start from, the chosen part's settings, or the screen's
     void drawNewScreenForm(const ScreensFrame& f); // ...+ New screen's: the screens to start from
+    // The sizes of the texts without one in screen lines written in pixels, for placesFromPixels (DeveloperScreens.cpp).
+    [[nodiscard]] std::map<std::size_t, SDL_FPoint> ownSizes(const std::vector<std::string>& lines, const std::vector<std::string>& needs, float width, float height, float scale);
     void drawBuiltInForm(const ScreensFrame& f);   // ...a built-in screen's
     void drawLineUpForm(const ScreensFrame& f);    // ...several parts': lined up, or spread out
     void drawPartForm(const ScreensFrame& f);      // ...a part's (or the screen's own)
@@ -1052,7 +989,7 @@ private:
     void drawNewAnimationForm(DeveloperUi& ui, const SDL_FRect& right); // + New animation: the ones to start from
     float drawTimeline(DeveloperUi& ui, const StoryEditor::Definition& def, const StoryEditor::Timeline& timeline, float x, float y, float w);
     void drawDefinition(DeveloperUi& ui, const std::string& kind, const StoryEditor::Definition& def, const SDL_FRect& right); // as a form
-    void drawRecordTitle(DeveloperUi& ui, std::string_view kind, const std::string& name, float x, float w, float& y); // in the gallery or music room
+    void drawRecordTitle(DeveloperUi& ui, std::string_view kind, const std::string& name, float x, float w, float& y, float labelW = 0.0f); // in the gallery or music room (0: its own labels' column)
     void drawTranslations(DeveloperUi& ui, const SDL_FRect& area);
     bool drawLanguages(DeveloperUi& ui, const SDL_FRect& left, const std::vector<std::string>& ids);   // ...the languages and their buttons (true: one did its work)
     void drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const std::vector<std::string>& ids); // ...the one open: its language and its texts
@@ -1108,7 +1045,13 @@ private:
     };
     std::optional<FormEdit> drawForm(DeveloperUi& ui, const std::string& id, const std::vector<StoryEditor::Field>& given, float x, float w,
                                      float labelW, float& y);
+    // A form's labels' column: `least` (its share of the form's width `w`), or wider when a label (of its
+    // fields', or `more`) needs it to show whole on its line, up to layout::labelMostPart of `w`. Every
+    // drawForm() of one form, and the rows it draws itself, take the one column.
+    static float labelColumn(DeveloperUi& ui, float least, float w, std::initializer_list<std::span<const StoryEditor::Field>> forms,
+                             std::initializer_list<std::string_view> more = {});
     void drawPopup(DeveloperUi& ui); // the list a field has open, over everything
+    void drawTip(DeveloperUi& ui);   // the whole of a text shown cut, in a little window by the pointer, over that
     struct PopupFrame;                    // (that list this frame: where, the value, what's picked)
     void drawColourWheel(PopupFrame& pop); // ...a colour box's: its code, wheel and bars
     std::optional<std::string> drawFormatBar(DeveloperUi& ui, const std::string& id, float x, float w, float& y);

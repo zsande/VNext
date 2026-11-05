@@ -2,6 +2,9 @@
 #include "DeveloperShared.hpp"
 #include "DeveloperUi.hpp"
 
+#include <ranges>
+#include <tuple>
+
 namespace vn {
 
 namespace {
@@ -301,12 +304,13 @@ void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const s
     ui.textAround(count, only.x - 12 * k - ui.width(count, layout::smallText), right.y + boxH / 2, layout::smallText, theme::dim);
     const SDL_FRect table{right.x, y + 6 * k, right.w, right.y + right.h - y - 6 * k};
     draw::rect(r, table, kBox);
-    const float rowH = layout::tableRowH * k, half = std::round((table.w - 30 * k) / 2);
     std::vector<const TextPair*> shown;
     for (const TextPair& p : pairs)
         if (!d.untranslatedOnly || untranslated(p)) shown.push_back(&p);
-    d.translateScroll = std::clamp(d.translateScroll - ui.wheelOver(table) * rowH * 2, 0.0f,
-                                   std::max(0.0f, static_cast<float>(shown.size()) * rowH - table.h + 12 * k));
+    const float rowH = layout::tableRowH * k, total = static_cast<float>(shown.size()) * rowH + 12 * k;
+    const float half = std::round((table.w - 30 * k - (total > table.h ? layout::scrollbarRoom * k : 0.0f)) / 2); // (each column: beside its scrollbar)
+    d.translateScroll = std::clamp(d.translateScroll - ui.wheelOver(table) * rowH * 2, 0.0f, std::max(0.0f, total - table.h));
+    ui.scrollbar(&d.translateScroll, ui.barInside(table), table.h, total, d.translateScroll);
     std::optional<DeveloperUi::Clip> clipped(std::in_place, ui, table, true);
     struct Typed {
         TextPair pair;
@@ -318,7 +322,7 @@ void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const s
         if (ry + rowH < table.y || ry > table.y + table.h) continue;
         const TextPair& p = *shown[i];
         const std::string original = unquote(trim(t.lines[p.original]));
-        ui.textAround(ui.fitted(original, layout::listText, half - 10 * k), table.x + 10 * k, ry + rowH / 2 - 3 * k, layout::listText, theme::text); // (one too long for its column ends with ...)
+        ui.textFitted(original, table.x + 10 * k, ry + rowH / 2 - 3 * k, layout::listText, theme::text, half - 10 * k); // (one too long for its column ends with ...)
         const std::string now = p.translated ? unquote(trim(t.lines[*p.translated])) : std::string{};
         const std::string id = std::format("tr:{}:{}", t.id, p.original);
         if (const auto v = ui.field(id, {table.x + half + 20 * k, ry + 2 * k, half, rowH - 10 * k}, now, layout::boxText))
@@ -476,4 +480,5 @@ void Developer::pruneTranslation() {
         }
     }
 }
+
 } // namespace vn

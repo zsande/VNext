@@ -5,23 +5,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <charconv>
-#include <climits>
 #include <cmath>
-#include <limits>
 #include <cstdlib>
-#include <expected>
 #include <numbers>
 #include <optional>
-#include <random>
-#include <ranges>
-#include <set>
-#include <span>
 #include <string>
 #include <string_view>
-#include <tuple>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace vn {
@@ -287,11 +276,6 @@ void Script::forEachText(const std::function<void(std::string& text, const TextP
         std::ranges::sort(out, {}, [](const auto& p) { return *p.first; });
         return out;
     };
-    auto commands = [&](Commands& list, const TextPlace& place) { // messages buttons and keys show
-        for (Command& c : list)
-            if (auto* ui = std::get_if<cmd::Ui>(&c); ui && ui->verb == "notice") f(ui->arg, place);
-    };
-
     f(gameSettings.title, {.what = "title"});
     for (Instruction& ins : code) {
         const TextPlace place{.line = &ins};
@@ -306,15 +290,6 @@ void Script::forEachText(const std::function<void(std::string& text, const TextP
                                if (!choice.note.empty()) f(choice.note, place);
                            }
                        },
-                       [&](cmd::Ask& c) {
-                           f(c.prompt, place);
-                           if (!c.fallback.empty()) f(c.fallback, place);
-                       },
-                       [&](cmd::Ui& c) {
-                           if (c.verb == "notice") f(c.arg, place);
-                       },
-                       [&](cmd::Chapter& c) { f(c.title, place); },
-                       [&](cmd::Mark& c) { f(c.title, place); },
                        [&](cmd::Message& c) {
                            if (!c.sender.empty()) f(c.sender, place);
                            if (!c.text.empty()) f(c.text, place);
@@ -341,12 +316,8 @@ void Script::forEachText(const std::function<void(std::string& text, const TextP
             static constexpr std::string_view kWords[]{"placeholder", "secret", "auto", "quick", "load_confirm", "delete_confirm", "waiting", "title"};
             for (std::string_view word : kWords)
                 if (auto it = el.props.find(word); it != el.props.end()) f(it->second, place);
-            commands(el.actions, place);
         }
-        commands(screen->actionOnOpen, place);
-        commands(screen->actionOnClose, place);
     }
-    for (Control& c : controls) commands(c.actions, {.what = "control", .name = c.name});
     for (std::size_t k = 0; k < lists.size(); ++k)
         for (Record& r : lists[k]) {
             f(r.title, {.what = kRecordKinds[k], .name = r.name});
