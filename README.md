@@ -1,12 +1,25 @@
 <h1 align="center"><img src=".github/banner.png" alt="VNext" width="800"></h1>
 
-**VNext is a free visual novel engine with the editor built right in, and your characters can even text and call the player.** Write your story as scenes and lines in simple forms, lay out your menus by dragging things around, and translate your game, all in one app. No programming is needed, and everything is also saved as plain, readable script files if you'd rather type.
+**Make a visual novel without writing a single line of code.** VNext is one free app for Windows, macOS and Linux: you write the story, design the menus and play the game in the same window, and your characters can even text and call the player.
 
-**[Download VNext](https://github.com/zsande/VNext/releases/latest)** for Windows, macOS or Linux. It's free, also for games you sell.
+**[Download VNext](https://github.com/zsande/VNext/releases/latest)**: one app, nothing else to install. It's free, also for games you sell.
 
-<p align="center"><img src=".github/phone.gif" width="320" alt="A chat in a VNext game: Kaede types a message to Haru, deletes it, sends “Hey.”, sees it read, and gets “k”, then an invitation to the summer festival"></p>
+<p align="center"><img src=".github/make-a-scene.gif" width="100%" alt="The VNext editor: a new line is added with a click, its words are typed in, Mika is picked as the speaker and “surprised” from pictures of her expressions, and Play from this line shows her saying it in the park"></p>
+
+## Why it's easy
+
+Most visual novel engines start with a scripting language to learn or a game engine to install. VNext starts with a window you click in.
+
+- **No code, ever.** A scene is a list of lines you add with a click: pick who speaks and their expression from pictures, then type what they say. Menus are pictures of the game you drag things around on. Everything is also saved as plain, readable script files, if you'd rather type.
+- **One app, nothing to set up.** The editor and the game are the same program: no game engine, plugins, Python or command line. Click any line and Play from this line shows it in the game; F10 takes you back to the editor.
+- **Menus come ready-made.** One click makes a title screen, a pause menu, saving and loading, settings, a history, a confirm question and a phone, already working and all yours to restyle.
+- **A finished game is two files.** Pack the game puts every picture, sound and line into one file, game.vnext (with licences.txt beside it). Put VNext next to it and that's your game; its players' saves go inside it too.
+- **Everywhere.** Make your game on Windows, macOS or Linux, and the same game.vnext plays on all three, with a mouse, a keyboard, a controller or a touch screen.
+- **Free.** Also for games you sell: no royalties, no account and no splash screen of ours (zlib licence).
 
 ## The phone
+
+<p align="center"><img src=".github/phone.gif" width="560" alt="A chat in a VNext game: next to a flustered Kaede, her phone shows her typing a message to Haru and deleting it, sending “hey”, Haru reading it and typing, his “k” and his invitation to the summer festival, her “...fine. if you insist.” and his heart"></p>
 
 Your characters text the player. Their messages type out as they write them, and they send images, stickers and voice messages, react, read what the player sends, and edit or delete what they just said. A choice in a chat shows its options on the phone, and the one picked goes out as the player's message. Calls ring until they're answered or declined, and when nobody picks up, the missed call has a story of its own. Players can text and call characters themselves, a badge on the textbox counts new messages, and controllers buzz when one comes. The phone has a lock screen with a passcode, wallpapers, apps, a clock, a date, signal and battery, all of which the story can change, and it's made of ordinary screen parts, so every bit of it can be restyled.
 
@@ -20,9 +33,13 @@ Your characters text the player. Their messages type out as they write them, and
 - **Sound**: music that fades in, out and from one song to the next and quietens while someone speaks, sounds and loops, and a voice file for every line, with the words keeping time with the voice.
 - **Screens**: a title screen, pause menu, saving and loading, settings, a history, a choice menu, questions, the phone, credits, a calendar and a box to type a name into, all ready-made and yours to restyle. Or build your own from parts (buttons, sliders, bars, text boxes, lists, scrolling boxes with scrollbars and fading edges), with styles, drag and drop, and animations made on a timeline.
 - **Extras**: a gallery, a music room, endings, achievements, tips, and a flowchart that takes players back to any choice.
-- **For players**: saves with pictures, autosave and quick save, rewind, skip, auto-play, a history that replays voices and goes back, and settings for text speed, text size, volumes, high contrast, text read aloud, language and every key, on keyboards, controllers and touch screens.
-- **Every language**: translations, with a spreadsheet for translators, right-to-left scripts, Japanese and Chinese line breaking, and the developer tools themselves in English, German, Spanish and Japanese.
-- **One file to share**: a finished game packs into game.vnext, which also keeps its players' saves and progress; with VNext next to it, it plays on Windows, macOS and Linux.
+- **For players**: saves with pictures, autosave and quick save, rewind, skip and auto-play (buttons on the textbox, and keys), a history that replays voices and goes back, and settings for text speed, text size, volumes, high contrast, text read aloud, language and every key and button. Every menu works with a mouse, a keyboard or a controller, with an on-screen keyboard for typing a name.
+- **Every language**: translations, with a spreadsheet for translators, right-to-left scripts, Japanese and Chinese line breaking, and the developer tools themselves can be translated too.
+
+<p align="center">
+  <img src=".github/game.png" width="48%" alt="A VNext game: Haru smiling in a park with falling petals, asking “So. Lanterns first, or food?”, with Skip, Auto and Phone buttons on the textbox">
+  <img src=".github/call.png" width="48%" alt="A VNext game: Mika calling the player, her incoming call on the phone with Decline and Answer, while Haru waits in the park">
+</p>
 
 ## The editor
 
@@ -35,8 +52,10 @@ Open VNext in developer mode and you get an editor that fits any window size, wi
 - **Settings** and **Translate**: the game's options, and its translations.
 - **Log**: what happened, where a click takes you to a line with a mistake. Mistakes are said in plain words, and every change can be undone.
 
+<p align="center"><img src=".github/design-a-screen.gif" width="100%" alt="The Screens tab: the title screen's New game button is dragged to a new place on the preview and renamed Start the story in its form, and Play shows the title screen with it there"></p>
+
 <p align="center">
-  <img src=".github/editor-story.png" width="48%" alt="The Story tab: a scene's lines, and the form of the chosen one, showing Haru at the centre of the park">
+  <img src=".github/editor-story.png" width="48%" alt="The Story tab: a scene's lines, and the form of the chosen one: Haru saying “Yo. You made it.”">
   <img src=".github/editor-chat.png" width="48%" alt="The Story tab on a chat: its phone lines, and the form of Haru's reaction">
   <img src=".github/editor-screens.png" width="48%" alt="The Screens tab: the phone's parts, the phone with an app button chosen, and the button's settings">
   <img src=".github/editor-map.png" width="48%" alt="The Map tab: eight scenes as boxes, with arrows from start to two endings">
