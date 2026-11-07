@@ -28,7 +28,7 @@ jobs:
     name: ${{ matrix.system }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -132,7 +132,7 @@ jobs:
       - name: The player to sign
         id: unsigned
         if: steps.version.outcome == 'success'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Unsigned-Windows
           path: dist/
@@ -184,12 +184,12 @@ jobs:
           esac
           ls -la unzipped
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: VNext-${{ matrix.system }}
           path: ${{ env.ZIP }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: Screenshots-${{ matrix.system }}
@@ -203,12 +203,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: source
           fetch-depth: 0 # (the commits and tags before it, for What's new)
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: VNext-*
           merge-multiple: true
