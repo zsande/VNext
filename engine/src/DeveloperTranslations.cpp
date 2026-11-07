@@ -1,4 +1,4 @@
-// The Translate tab: a translation's texts beside the game's, and translation sheets out and in.
+// The Library's translations: a translation's texts beside the game's, and translation sheets out and in.
 #include "DeveloperShared.hpp"
 #include "DeveloperUi.hpp"
 
@@ -86,7 +86,7 @@ std::pair<std::string, std::string> languageOf(std::string_view text) {
     return {std::string(text), {}};
 }
 
-// What the Translate tab says when texts the game doesn't show any more went from a file.
+// What the Library's translations says when texts the game doesn't show any more went from a file.
 std::string tookOut(std::size_t n) { return n == 1 ? "Took out 1 text the game doesn't show any more."_tr() : "Took out {} texts the game doesn't show any more."_tr(n); }
 
 } // namespace
@@ -125,7 +125,7 @@ void setTranslation(std::vector<std::string>& lines, const TextPair& p, const st
 // A translation's file: translations/ID.vnscript in the game folder.
 std::string Developer::translationPath(const std::string& id) const { return engine.gameRoot() + "translations/" + id + ".vnscript"; }
 
-// The translation open in the Translate tab, written to its file (its language, as listed, read again).
+// The translation open in the Library's translations, written to its file (its language, as listed, read again).
 void Developer::saveTranslation() {
     DeveloperTools& d = tools;
     const std::string text = joinedLines(d.translation.lines);
@@ -167,26 +167,25 @@ std::string Developer::importTranslationSheet() {
     for (const auto& row : csvRows(*text))
         if (row.size() >= 2 && !trim(row[1]).empty() && !(given.empty() && row[0] == "Text" && row[1] == "Translation")) given[row[0]] = std::string(trim(row[1]));
     auto& lines = d.translation.lines;
-    d.translateKey.clear();
-    d.translateUndo.push_back(d.translation);
-    d.translateRedo.clear();
     std::size_t imported = 0;
     for (const TextPair& p : textPairs(lines) | std::views::reverse) { // (from the end: the earlier lines stay where they are)
         const auto it = given.find(unquote(trim(lines[p.original])));
         if (it == given.end() || (p.translated && unquote(trim(lines[*p.translated])) == it->second)) continue;
+        if (imported++ == 0) rememberTranslation({}); // (one undo step for them all)
         setTranslation(lines, p, it->second);
-        ++imported;
     }
-    saveTranslation();
     d.failed = false;
-    return imported == 0 ? "'{}' has no translations the file doesn't have already."_tr(sheet) : "Imported {} translations from '{}'."_tr(imported, sheet);
+    if (imported == 0) return "'{}' has no translations the file doesn't have already."_tr(sheet);
+    saveTranslation();
+    return d.failed ? d.status : "Imported {} translations from '{}'."_tr(imported, sheet);
 }
 
-// The Translate tab: the game's translations (game/translations/NAME.vnscript), each text the game
-// shows with a box for its translation. New language makes a file with every text, Add new texts
-// adds the ones written since, and the texts the game doesn't show any more go as the scripts
-// change; every change is written to the file at once.
-void Developer::drawTranslations(DeveloperUi& ui, const SDL_FRect& area) {
+// The Library's translations: the game's translations (game/translations/NAME.vnscript), each text the game
+// shows with a box for its translation. New language makes a file with every text, Add new texts adds the ones
+// written since, and the texts the game doesn't show any more go as the scripts change; every change is written
+// to the file at once. Their files, by name (the one open let go once its file is gone), with the keys for undo
+// and redo taken, and the texts the game doesn't show any more taken out of the one open.
+std::vector<std::string> Developer::translationIds() {
     DeveloperTools& d = tools;
     std::vector<std::string> ids;
     for (const std::string& name : d.cachedFiles(engine.gameRoot() + "translations/", ".vnscript"))
@@ -196,28 +195,17 @@ void Developer::drawTranslations(DeveloperUi& ui, const SDL_FRect& area) {
     if (!t.id.empty() && !std::ranges::contains(ids, t.id)) t = {};
     translationKeys();
     pruneTranslation();
-    const auto columns = ui.columns(area, false); // (no form: the table takes the rest)
-    const SDL_FRect &left = columns.left, &right = columns.middle;
-    if (drawLanguages(ui, left, ids)) return; // (a button did its work: the rest next frame)
-    if (t.id.empty()) {
-        ui.text("A translation is a file in translations/ with every text the game shows, each with its translation under it. Make one with + New language, then pick its language."_tr,
-                right.x, right.y, layout::noteText, theme::dim, right.w);
-        return;
-    }
-    drawTranslation(ui, right, ids);
+    return ids;
 }
 
 // The translations' languages, and the buttons under them: a new language, the texts written since
 // added, and a spreadsheet for a translator, and the translations back from it (true: one did its work).
-bool Developer::drawLanguages(DeveloperUi& ui, const SDL_FRect& left, const std::vector<std::string>& ids) {
+bool Developer::drawLanguagesList(DeveloperUi& ui, const ListPart& at, const std::vector<std::string>& ids) {
     DeveloperTools& d = tools;
-    const float k = ui.k;
     using ListKind = DeveloperUi::ListEvent::Kind;
     const auto& t = d.translation;
-    const float headingH = layout::headingH * k, listButtonH = layout::buttonH * k, listGap = layout::gap * k;
-    ui.heading("Languages"_tr, left.x, left.y);
-    const SDL_FRect listBox{left.x, left.y + headingH, left.w, left.h - headingH - 4 * (listButtonH + listGap)};
-    const auto event = ui.editList("languages", listBox, d.kindsScroll,
+    const SDL_FRect& listBox = at.list;
+    const auto event = ui.editList("languages", listBox, d.languagesScroll,
                                    {.count = ids.size(),
                                     .label = [&](std::size_t i) { return languageLabel(ids[i]); },
                                     .chosen = [&](std::size_t i) { return ids[i] == t.id; },
@@ -227,35 +215,31 @@ bool Developer::drawLanguages(DeveloperUi& ui, const SDL_FRect& left, const std:
                                     .deletes = {},
                                     .moves = {}});
     if (event.kind == ListKind::Chosen && ids[event.item] != t.id) openTranslation(ids[event.item]);
-    float by = listBox.y + listBox.h + listGap;
-    if (ui.button({left.x, by, left.w, listButtonH}, "+ New language"_tr, false, true, layout::buttonText)) {
+    if (ui.button(at.rows[0], "+ New language"_tr, false, true, layout::buttonText)) {
         const std::string id = uniqueName("new_language", [&](const std::string& n) { return std::ranges::contains(ids, n); }); // (named after its language once that's picked)
         fillTranslation(id);
         return true;
     }
-    by += listButtonH + listGap;
-    if (ui.button({left.x, by, left.w, listButtonH}, "Add new texts"_tr, false, !t.id.empty(), layout::buttonText)) {
+    if (ui.button(at.rows[1], "Add new texts"_tr, false, !t.id.empty(), layout::buttonText)) {
         rememberTranslation({});
         fillTranslation(t.id);
         return true;
     }
     // A spreadsheet for a translator, and the translations back from it.
-    by += listButtonH + listGap;
-    if (ui.button({left.x, by, left.w, listButtonH}, "Export a spreadsheet"_tr, false, !t.id.empty(), layout::buttonText)) {
+    if (ui.button(at.rows[2], "Export a spreadsheet"_tr, false, !t.id.empty(), layout::buttonText)) {
         d.status = exportTranslationSheet();
         return true;
     }
-    by += listButtonH + listGap;
-    if (ui.button({left.x, by, left.w, listButtonH}, "Import a spreadsheet"_tr, false, !t.id.empty() && d.cachedExists(translationSheet()), layout::buttonText)) {
+    if (ui.button(at.rows[3], "Import a spreadsheet"_tr, false, !t.id.empty() && d.cachedExists(translationSheet()), layout::buttonText)) {
         d.status = importTranslationSheet();
         return true;
     }
     return false;
 }
 
-// The translation open: its language (the file takes its name), and its texts, each with a box for its
+// The translation open, as a form: its language (the file takes its name), and its texts, each with a box for its
 // translation.
-void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const std::vector<std::string>& ids) {
+void Developer::drawTranslationForm(DeveloperUi& ui, const SDL_FRect& right, const std::vector<std::string>& ids) {
     DeveloperTools& d = tools;
     SDL_Renderer* r = ui.r;
     const float k = ui.k;
@@ -270,14 +254,26 @@ void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const s
     std::string name, code;
     if (header) std::tie(name, code) = languageHeader(t.lines[*header]);
     const float boxH = layout::boxH * k, labelW = ui.width("Language"_tr, layout::labelText) + 16 * k;
+    std::vector<TextPair> pairs = textPairs(t.lines);
+    auto untranslated = [&](const TextPair& p) { return untranslatedPair(t.lines, p); };
+    const auto todo = std::ranges::count_if(pairs, untranslated);
     float y = right.y;
-    // One row: the language, picked from the world's, each with its code (typing narrows the list; a
-    // name typed that isn't listed is kept as it is, with the code its name says, if any), then how
-    // many texts there are and the button that shows only the untranslated ones.
+    // One row: the language, picked from the world's, each with its code (typing narrows the list; a name typed that
+    // isn't listed is kept as it is, with the code its name says, if any), then how many texts there are and the
+    // button that shows only the untranslated ones. The language's box gives way to the count (down to half the
+    // room), and the count is cut where even that's too little.
+    const float onlyW = std::max(ui.buttonWidth("Show every text"_tr, layout::smallButtonText, layout::widerButtonW), ui.buttonWidth("Only untranslated"_tr, layout::smallButtonText, layout::widerButtonW)); // (one size, either way)
+    const SDL_FRect only{right.x + right.w - onlyW, y + 1 * k, onlyW, boxH - 2 * k};
+    if (ui.button(only, d.untranslatedOnly ? "Show every text"_tr : "Only untranslated"_tr, d.untranslatedOnly, true, layout::smallButtonText)) d.untranslatedOnly = !d.untranslatedOnly;
+    const std::string count = pairs.size() == 1 ? "1 text, {} not translated yet"_tr(todo) : "{} texts, {} not translated yet"_tr(pairs.size(), todo);
+    const float fieldX = right.x + labelW, room = only.x - 12 * k - fieldX, countW = ui.width(count, layout::smallText);
+    const float fieldW = std::max(0.0f, std::clamp(room - countW - 12 * k, std::min(layout::languageW * k, room / 2), layout::languageW * k));
+    const float countRoom = only.x - 12 * k - (fieldX + fieldW + 12 * k); // (between the box and the button)
+    if (countW <= countRoom) ui.textAround(count, only.x - 12 * k - countW, y + boxH / 2, layout::smallText, theme::dim); // (against the button)
+    else ui.textFitted(count, fieldX + fieldW + 12 * k, y + boxH / 2, layout::smallText, theme::dim, countRoom);
     ui.textAround("Language"_tr, right.x, y + boxH / 2, layout::labelText, theme::dim);
     const StoryEditor::Field languageField{.name = "language", .value = code.empty() ? name : std::format("{} ({})", name, code), .box = Box::Language};
-    if (const auto v = ui.pickField("lang:language", {right.x + labelW, y, std::min(layout::languageW * k, right.w - labelW), boxH}, languageField, layout::boxText);
-        v && !languageOf(*v).first.empty()) { // (emptied: it keeps its language)
+    if (const auto v = ui.pickField("lang:language", {fieldX, y, fieldW, boxH}, languageField, layout::boxText); v && !languageOf(*v).first.empty()) { // (emptied: it keeps its language)
         auto [n, c] = languageOf(*v);
         if (c.empty()) c = n == name ? code : languageCode(n);
         rememberTranslation("lang:language" + std::to_string(d.focusCount));
@@ -285,8 +281,9 @@ void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const s
         if (header) t.lines[*header] = line;
         else t.lines.insert(t.lines.begin(), line);
         saveTranslation();
+        pairs = textPairs(t.lines); // (the language's line may have come first just now: the texts are a line further on)
     }
-    y += boxH + 8 * k;
+    y += boxH + layout::rowGap * k;
     if (d.focus != "lang:language" && !name.empty()) // (picked, not still typed: the file takes its name)
         if (const std::string want = translationFileName(name); !want.empty() && want != t.id && !std::ranges::contains(ids, want)) renameTranslation(t.id, want);
     // (a code that isn't the language's: a computer set to it wouldn't pick this translation)
@@ -294,14 +291,6 @@ void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const s
         y += ui.text("Computers set to {} say {}, not {}: with the code {} they'd start with this translation."_tr(name, known, code, known), right.x, y,
                      layout::noteText, kWarn, right.w).y + 8 * k;
 
-    const std::vector<TextPair> pairs = textPairs(t.lines); // (after the language's line: it may have come first just now)
-    auto untranslated = [&](const TextPair& p) { return untranslatedPair(t.lines, p); };
-    const auto todo = std::ranges::count_if(pairs, untranslated);
-    const float onlyW = std::max(ui.buttonWidth("Show every text"_tr, layout::smallButtonText, layout::widerButtonW), ui.buttonWidth("Only untranslated"_tr, layout::smallButtonText, layout::widerButtonW)); // (one size, either way)
-    const SDL_FRect only{right.x + right.w - onlyW, right.y + 1 * k, onlyW, boxH - 2 * k};
-    if (ui.button(only, d.untranslatedOnly ? "Show every text"_tr : "Only untranslated"_tr, d.untranslatedOnly, true, layout::smallButtonText)) d.untranslatedOnly = !d.untranslatedOnly;
-    const std::string count = pairs.size() == 1 ? "1 text, {} not translated yet"_tr(todo) : "{} texts, {} not translated yet"_tr(pairs.size(), todo);
-    ui.textAround(count, only.x - 12 * k - ui.width(count, layout::smallText), right.y + boxH / 2, layout::smallText, theme::dim);
     const SDL_FRect table{right.x, y + 6 * k, right.w, right.y + right.h - y - 6 * k};
     draw::rect(r, table, kBox);
     std::vector<const TextPair*> shown;
@@ -309,8 +298,8 @@ void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const s
         if (!d.untranslatedOnly || untranslated(p)) shown.push_back(&p);
     const float rowH = layout::tableRowH * k, total = static_cast<float>(shown.size()) * rowH + 12 * k;
     const float half = std::round((table.w - 30 * k - (total > table.h ? layout::scrollbarRoom * k : 0.0f)) / 2); // (each column: beside its scrollbar)
-    d.translateScroll = std::clamp(d.translateScroll - ui.wheelOver(table) * rowH * 2, 0.0f, std::max(0.0f, total - table.h));
-    ui.scrollbar(&d.translateScroll, ui.barInside(table), table.h, total, d.translateScroll);
+    d.translationScroll = std::clamp(d.translationScroll - ui.wheelOver(table) * rowH * 2, 0.0f, std::max(0.0f, total - table.h));
+    ui.scrollbar(&d.translationScroll, ui.barInside(table), table.h, total, d.translationScroll);
     std::optional<DeveloperUi::Clip> clipped(std::in_place, ui, table, true);
     struct Typed {
         TextPair pair;
@@ -318,7 +307,7 @@ void Developer::drawTranslation(DeveloperUi& ui, const SDL_FRect& right, const s
     };
     std::optional<Typed> typed; // (written once every row is drawn: a line added or taken away moves the rows after it)
     for (std::size_t i = 0; i < shown.size(); ++i) {
-        const float ry = table.y + 6 * k + static_cast<float>(i) * rowH - d.translateScroll;
+        const float ry = table.y + 6 * k + static_cast<float>(i) * rowH - d.translationScroll;
         if (ry + rowH < table.y || ry > table.y + table.h) continue;
         const TextPair& p = *shown[i];
         const std::string original = unquote(trim(t.lines[p.original]));
@@ -369,7 +358,7 @@ void Developer::openTranslation(const std::string& id) {
     if (const auto text = readTextFile(translationPath(id)))
         t.lines = linesOf(*text);
     while (!t.lines.empty() && blank(t.lines.back())) t.lines.pop_back();
-    d.translateScroll = 0.0f;
+    d.translationScroll = 0.0f;
     d.translateChecked = SIZE_MAX; // (checked against the game's texts again)
     d.focus.clear();
 }
@@ -423,7 +412,7 @@ void Developer::renameTranslation(const std::string from, const std::string& to)
     d.languageLabels.erase(translationPath(from));
 }
 
-// Undo (Cmd/Ctrl+Z) and redo in the Translate tab: each change a step (typing into one box: one, by its
+// Undo (Cmd/Ctrl+Z) and redo in the Library's translations: each change a step (typing into one box: one, by its
 // key), the file written again.
 void Developer::rememberTranslation(const std::string& key) {
     DeveloperTools& d = tools;
@@ -438,16 +427,13 @@ void Developer::translationKeys() {
     DeveloperTools& d = tools;
     auto& t = d.translation;
     std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) {
-        if (!(key.mod & (SDL_KMOD_GUI | SDL_KMOD_CTRL)) || (key.key != SDLK_Z && key.key != SDLK_Y)) return false;
-        const bool redo = key.key == SDLK_Y || (key.mod & SDL_KMOD_SHIFT);
+        const bool redo = d.isKey(key, ToolKey::Redo);
+        if (!redo && !d.isKey(key, ToolKey::Undo)) return false;
         auto& from = redo ? d.translateRedo : d.translateUndo;
         auto& to = redo ? d.translateUndo : d.translateRedo;
         d.focus.clear();
         d.translateKey.clear();
-        if (from.empty()) {
-            d.status = redo ? "Nothing to redo."_tr : "Nothing to undo."_tr;
-            return true;
-        }
+        if (from.empty()) return true;
         DeveloperTools::Translation step = std::move(from.back()); // (its file as it is now, the other way)
         from.pop_back();
         DeveloperTools::Translation now{.id = step.id, .lines = {}};
@@ -455,7 +441,7 @@ void Developer::translationKeys() {
         else if (const auto text = readTextFile(translationPath(step.id))) now.lines = linesOf(*text);
         to.push_back(std::move(now));
         t = std::move(step);
-        d.translateScroll = 0.0f;
+        d.translationScroll = 0.0f;
         saveTranslation();
         return true;
     });

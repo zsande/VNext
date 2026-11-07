@@ -1,5 +1,5 @@
 // The forms the tabs show (a row's, a screen part's, a definition's): their boxes, the bar that formats
-// text, and the list or colour wheel that opens under a box; and the Settings tab, one form.
+// text, and the list or colour wheel that opens under a box; and the Library's Settings, one form.
 #include "DeveloperShared.hpp"
 #include "DeveloperUi.hpp"
 
@@ -24,11 +24,9 @@ void hsvOf(SDL_Color c, float& h, float& sat, float& v) { // (a grey keeps the h
 
 std::string hexText(SDL_Color c) { return c.a == 255 ? std::format("#{:02x}{:02x}{:02x}", c.r, c.g, c.b) : std::format("#{:02x}{:02x}{:02x}{:02x}", c.r, c.g, c.b, c.a); }
 
-// An entry in a box's list: its value, what the list shows, what it is (said after it in grey: "value:what
-// it is" in a list of suggestions), and whether it's what the box empty means.
+// An entry in a box's list: its value, what the list shows, and whether it's what the box empty means.
 struct PopupEntry {
     std::string value, label;
-    std::string about;
     bool empty = false;
 };
 
@@ -39,23 +37,20 @@ std::vector<PopupEntry> popupEntries(DeveloperTools::Popup& p, const StoryEditor
                                      const std::string& typed, bool& byVariable) {
     std::vector<PopupEntry> entries;
     std::set<std::string> seen; // (each value once)
-    auto add = [&](std::string value, std::string label, std::string about, bool empty) {
+    auto add = [&](std::string value, std::string label, bool empty) {
         const std::string low = lower(value);
         if (seen.contains(low)) return;
-        if (!typed.empty() && !low.contains(typed) && !lower(label).contains(typed) && !lower(about).contains(typed)) return;
+        if (!typed.empty() && !low.contains(typed) && !lower(label).contains(typed)) return;
         seen.insert(low);
-        entries.push_back({std::move(value), std::move(label), std::move(about), empty});
+        entries.push_back({std::move(value), std::move(label), empty});
     };
-    for (const auto& [word, label] : DeveloperUi::choiceLabels(f)) add(std::string(word), label, {}, false); // (a field's choices: as their buttons say them)
-    for (const std::string_view entry : wordsOf(f.suggest, '|')) {
-        const auto [value, about] = suggestionOf(entry);
-        add(std::string(value), std::string(value), about.empty() ? std::string{} : std::string(tr(about)), false);
-    }
+    for (const auto& [word, label] : DeveloperUi::choiceLabels(f)) add(std::string(word), label, false); // (a field's choices: as their buttons say them)
+    for (const std::string_view entry : wordsOf(f.suggest, '|')) add(std::string(entry), std::string(entry), false);
     if (p.namesVersion != editor.version()) { // (found once, not every frame it's open)
         p.names = editor.names(f.pick, f.context);
         p.namesVersion = editor.version();
     }
-    for (const std::string& name : p.names) add(name, name, {}, false);
+    for (const std::string& name : p.names) add(name, name, false);
     // First, what the field empty means (unless the list is empty, or has it already): its hint; a box of
     // images without one: None, to empty it for what's usual; a colour's without one: transparent.
     const bool colourOnly = kind.wheel && !kind.images && f.hint.empty();
@@ -67,7 +62,7 @@ std::vector<PopupEntry> popupEntries(DeveloperTools::Popup& p, const StoryEditor
 
     if (f.box == StoryEditor::Box::Colour) { // (under the wheel: the game's own colours, and the words the box can be)
         std::vector<std::string> words;
-        for (const std::string_view entry : wordsOf(f.suggest, '|')) words.emplace_back(suggestionOf(entry).first);
+        for (const std::string_view entry : wordsOf(f.suggest, '|')) words.emplace_back(entry);
         const auto& own = editor.definitions("colour"); // (once, not a scan of the scripts for each entry)
         std::erase_if(entries, [&](const PopupEntry& e) {
             return !e.empty && !std::ranges::contains(words, e.value) && std::ranges::none_of(own, [&](const StoryEditor::Definition& c) { return lower(c.name) == lower(e.value); });
@@ -115,7 +110,7 @@ std::optional<Developer::FormEdit> Developer::drawForm(DeveloperUi& ui, const st
         if (!f.group.empty() && f.group != group) {
             group = f.group;
             y += first ? 0.0f : layout::groupGap * k;
-            ui.text(tr(group.starts_with('+') ? group.substr(1) : group), x, y, layout::groupText, kAccent);
+            ui.text(tr(group), x, y, layout::groupText, kAccent);
             y += layout::groupStep * k;
         }
         first = false;
@@ -236,7 +231,7 @@ std::optional<std::string> Developer::drawFormatBar(DeveloperUi& ui, const std::
         const std::string_view label = kLabels[i];
         const std::string bid = std::format("{}:format:{}", id, label);
         const RichText look = formatLook(label, engine.palette());
-        const bool fits = ui.width(look.text, layout::smallButtonText) <= b.w - 4 * k; // (else its words alone, cut to fit, as any button's)
+        const bool fits = ui.width(look.text, layout::smallButtonText) <= b.w - 2 * k; // (the room any button's words have; else its words alone, cut to fit, as any button's)
         const std::string_view words = fits ? std::string_view{} : tr(label);
         std::optional<std::string> picked;
         auto list = [&](const StoryEditor::Field& f) { picked = ui.listButton(bid, b, words, f); };
@@ -385,8 +380,6 @@ void Developer::drawPopup(DeveloperUi& ui) {
     const bool images = kind.images, sounds = kind.listen, people = f.pick == Pick::Characters || f.pick == Pick::Shown;
     const float pad = layout::popupPad * k, itemH = layout::itemH * k, cellW = layout::cellW * k, cellH = layout::cellH * k;
     float w = std::max(p.at.w, (images ? layout::imagesW : layout::listW) * k);
-    for (const PopupEntry& e : entries) // (an entry with what it is said after it: room for the longest, up to half the window)
-        if (!images && !e.about.empty()) w = std::max(w, std::min(ui.width(e.label, layout::popupText) + 12 * k + ui.width(e.about, layout::popupText) + 44 * k, d.size.x / 2));
     const float valueH = layout::codeH * k, discD = layout::wheelD * k; // (the colour's code, then its wheel: drawColourWheel)
     const float gridH = colours ? valueH + pad + itemH + pad + discD + pad : 0.0f; // (the code, the gradient buttons, the wheel)
     const float most = (colours ? layout::wheelMaxH : layout::listMaxH) * k, barRoom = layout::scrollbarRoom * k;
@@ -459,9 +452,8 @@ void Developer::drawPopup(DeveloperUi& ui) {
         if (chosen(e) || ui.over(row)) draw::rect(r, row, chosen(e) ? kChosen : kButtonHover);
         if (const auto colour = e.empty ? std::nullopt : colours ? parseColour(e.value, &engine.palette()) : people ? d.characterColour(engine.palette(), e.value) : std::nullopt)
             tx = ui.swatch(tx, row.y + row.h / 2, *colour); // (a colour, or a character's name colour: as its box shows it)
-        const float end = row.x + row.w - (sounds && !e.empty ? row.h : 0.0f) - 6 * k; // (each cut to fit: what it is in the room its name leaves)
-        const float aboutX = tx + ui.textFitted(e.label, tx, row.y + row.h / 2, layout::popupText, e.empty ? theme::dim : theme::text, end - tx) + 12 * k;
-        if (!e.about.empty() && end - aboutX > 24 * k) ui.textFitted(e.about, aboutX, row.y + row.h / 2, layout::popupText, theme::dim, end - aboutX);
+        const float end = row.x + row.w - (sounds && !e.empty ? row.h : 0.0f) - 6 * k; // (cut to fit)
+        ui.textFitted(e.label, tx, row.y + row.h / 2, layout::popupText, e.empty ? theme::dim : theme::text, end - tx);
         if (sounds && !e.empty) listenButton(ui, play, d.cachedSound(engine.assets(), lower(e.value)), true); // (heard, not picked)
         if (ui.click(row)) pop.clicked = colours ? pop.changed(e.value) : e.value; // (a gradient's: the colour the wheel is on)
     }
@@ -615,13 +607,14 @@ void Developer::drawColourWheel(PopupFrame& pop) {
     }
 }
 
-// The Settings tab: the game's setting lines as a form. An empty box, or the choice a setting starts
-// with, takes its line out of main.vnscript (it has its default again).
-void Developer::drawSettings(DeveloperUi& ui, const SDL_FRect& box) {
+// The Library's Settings: the game's setting lines as a form, its groups' headings and rows as every form's (the part's
+// title says Settings). An empty box, or the choice a setting starts with, takes its line out of main.vnscript (it
+// has its default again).
+void Developer::drawSettingsForm(DeveloperUi& ui, const SDL_FRect& right) {
     DeveloperTools& d = tools;
     StoryEditor& editor = d.editor;
     SDL_Renderer* r = ui.r;
-    const float k = ui.k, rowH = layout::settingRowH * k, headH = layout::settingHeadH * k, otherH = layout::settingOtherH * k;
+    const float k = ui.k, boxH = layout::boxH * k, rowGap = layout::rowGap * k;
     // The time's rows that apply to its kind: none of them without time, no start in real time (the computer's
     // clock and calendar), no clock with days and parts of the day.
     const std::string timeKind = lower(editor.setting("time").value_or("none"));
@@ -631,43 +624,34 @@ void Developer::drawSettings(DeveloperUi& ui, const SDL_FRect& box) {
         if (s.name == "time_parts" || s.name == "phone_follows_time" || s.name == "backgrounds_follow_time") return timeKind != "none";
         return true;
     };
-    // Mistakes on setting lines the form shows no row for (setting default..., setting text..., a time row its kind
-    // hides), at the top.
+    // Mistakes on setting lines the form shows no row for (setting default..., one that isn't a setting, a time row
+    // its kind hides), at the top.
     std::vector<const ScriptError*> others;
     for (const ScriptError& e : d.problems)
         if (inSettings(editor, e) && std::ranges::none_of(kSettings, [&](const Setting& s) {
                 return !s.name.empty() && shown(s) && editor.settingLine(s.name) == static_cast<std::size_t>(e.line - 1);
             }))
             others.push_back(&e);
-    const float headNoteH = layout::settingHeadNoteH * k; // (a heading's note, under it)
-    const float labelW = std::round(std::min(layout::settingLabelW * k, box.w * layout::settingLabelPart)), fieldW = std::round(std::min(layout::settingFieldW * k, box.w * layout::settingFieldPart));
-    const float boxH = layout::boxH * k;
-    auto height = [&](const Setting& s) { return !shown(s) ? 0.0f : s.name.empty() ? headH + (s.help.empty() ? 0.0f : headNoteH) : rowH; }; // (a heading, or a row: one line)
-    float total = static_cast<float>(others.size()) * otherH;
-    for (const Setting& s : kSettings) total += height(s);
-    float& scroll = d.settingsScroll;
-    const SDL_FRect bar = ui.barBeside(box); // (its scrollbar, in the margin at its right)
-    scroll -= ui.wheelOver({box.x, box.y, bar.x + bar.w - box.x, box.h}) * rowH * 2;
+    const float labelW = std::round(std::min(layout::settingLabelW * k, right.w * layout::settingLabelPart)), fieldW = std::round(std::min(layout::settingFieldW * k, right.w * layout::settingFieldPart));
+    // It scrolls (Page Up and Down and the arrows too, while nothing's typed into).
+    const SDL_FRect& formBox = right;
     if (d.focus.empty())
         std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) {
             switch (key.key) {
-            case SDLK_PAGEUP: scroll -= box.h * 0.9f; return true;
-            case SDLK_PAGEDOWN: scroll += box.h * 0.9f; return true;
-            case SDLK_UP: scroll -= rowH; return true;
-            case SDLK_DOWN: scroll += rowH; return true;
+            case SDLK_PAGEUP: d.formScroll -= formBox.h * 0.9f; return true;
+            case SDLK_PAGEDOWN: d.formScroll += formBox.h * 0.9f; return true;
+            case SDLK_UP: d.formScroll -= boxH + rowGap; return true;
+            case SDLK_DOWN: d.formScroll += boxH + rowGap; return true;
             default: return false;
             }
         });
-    scroll = std::clamp(scroll, 0.0f, std::max(0.0f, total - box.h));
-    ui.scrollbar(&d.settingsScroll, bar, box.h, total, scroll);
+    ui.scrollForm(formBox, boxH + rowGap);
 
-    const float fieldX = box.x + labelW, helpX = fieldX + fieldW + layout::settingHelpGap * k, helpW = std::max(0.0f, box.x + box.w - helpX);
-    const DeveloperUi::Clip clipped(ui, box, true);
-    float y = box.y - scroll;
-    for (const ScriptError* e : others) {
-        ui.text("main.vnscript line {}: {}"_tr(e->line, e->message), box.x, y + 4 * k, layout::noteText, kBad, box.w);
-        y += otherH;
-    }
+    const float fieldX = right.x + labelW, problemX = fieldX + fieldW + layout::settingProblemGap * k, problemW = std::max(0.0f, right.x + right.w - problemX);
+    const DeveloperUi::Clip clipped(ui, formBox, true);
+    float y = formBox.y - d.formScroll;
+    for (const ScriptError* e : others)
+        y += ui.text("main.vnscript line {}: {}"_tr(e->line, e->message), right.x, y, layout::noteText, kBad, right.w).y + 8 * k;
     // What an empty box means, as the other settings have it now: the time's start for its kind and clock, the
     // parts of the day on the clock chosen, and the phone's clock and date once it follows the time. Else the
     // setting's own default.
@@ -718,21 +702,24 @@ void Developer::drawSettings(DeveloperUi& ui, const SDL_FRect& box) {
         }
         return problem;
     };
+    bool first = true;
     for (const Setting& s : kSettings) {
-        const float top = y;
-        y += height(s);
-        if (!shown(s) || y < box.y || top > box.y + box.h) continue;
+        if (!shown(s)) continue;
+        const float top = y + (s.name.empty() && !first ? layout::groupGap * k : 0.0f);
+        y = top + (s.name.empty() ? layout::groupStep * k : boxH + rowGap);
+        first = false;
+        if (y < formBox.y || top > formBox.y + formBox.h) continue; // (out of sight)
         if (s.name.empty()) { // (a group's heading, as every form has them, and its settings in under it)
-            ui.text(tr(s.label), box.x, top + 16 * k, layout::groupText, kAccent);
-            if (!s.help.empty()) ui.textFitted(tr(s.help), box.x, top + headH - 2 * k + ui.measure("Ag", layout::smallText).y / 2, layout::smallText, theme::dim, box.w); // (one line)
+            ui.text(tr(s.label), right.x, top, layout::groupText, kAccent);
             continue;
         }
-        const float middle = top + rowH / 2;
-        ui.textFitted(tr(s.label), box.x + layout::groupIndent * k, middle, layout::labelText, theme::dim, labelW - (layout::groupIndent + 4) * k);
-        const ScriptError* problem = control(s, {fieldX, top + 5 * k, fieldW, boxH});
-        if (problem) draw::rect(r, {box.x, top + 6 * k, 4 * k, rowH - 12 * k}, kBad);
-        ui.textFitted(problem ? std::string_view(problem->message) : tr(s.help), helpX, middle, layout::smallText, problem ? kBad : theme::dim, helpW);
+        const float middle = top + boxH / 2, in = layout::groupIndent * k;
+        ui.textFitted(tr(s.label), right.x + in, middle, layout::labelText, theme::dim, labelW - in - 8 * k);
+        const ScriptError* problem = control(s, {fieldX, top, fieldW, boxH});
+        if (problem) draw::rect(r, {right.x, top, layout::markW * k, boxH}, kBad);
+        if (problem) ui.textFitted(problem->message, problemX, middle, layout::smallText, kBad, problemW);
     }
+    ui.formDrawn(formBox, y);
 }
 
 } // namespace vn

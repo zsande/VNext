@@ -357,19 +357,19 @@ private:
 // where it is now (empty where the system doesn't say: the Recycle Bin), or none when it can't be
 // moved (it stays where it is).
 std::optional<std::string> moveToTrash(const std::string& path);
+
 // What the system offers for writing and for players, where it has it (Apple.mm, Windows.cpp, and
 // Linux.cpp with Hunspell and speech-dispatcher; without them a word is always spelt right and nothing
-// is read aloud): whether a word is spelt right in a language
-// ("en", "es"...; empty: the system's own), what it may be instead, and a word to take as right from
-// now on; and reading text aloud (it stops what it was reading first; empty: it just stops).
+// is read aloud): whether a word is spelt right in a language ("en", "es"...; empty: the system's own),
+// what it may be instead, and a word to take as right from now on; and reading text aloud (it stops what
+// it was reading first; empty: it just stops).
 [[nodiscard]] bool spelledRight(std::string_view word, std::string_view language);
 [[nodiscard]] std::vector<std::string> spellings(std::string_view word, std::string_view language);
 void learnSpelling(std::string_view word);
 void speak(std::string_view words);
-// A movie the system plays (MP4, MOV and M4V: AVFoundation on a Mac, Media Foundation on Windows, GStreamer on
-// Linux where it's installed; elsewhere none): its
-// images in order, each with its time, and its sound. From a file (or, `data` given, from its
-// bytes: one in a pack).
+// A movie the system plays (MP4, MOV and M4V: AVFoundation on a Mac, Media Foundation on Windows,
+// GStreamer on Linux where it's installed; elsewhere none): its images in order, each with its time, and
+// its sound. From a file (or, `data` given, from its bytes: one in a pack).
 class SystemMovie {
 public:
     [[nodiscard]] static std::unique_ptr<SystemMovie> open(const std::string& path, const std::string* data);
@@ -527,7 +527,7 @@ struct Settings {
     // Skipping and going back
     bool skipUnread = false;       // false: skipping stops at text that hasn't been read yet
     bool skipAfterChoices = false; // false: making a choice ends skip mode
-    bool rollback = true;          // the mouse wheel / Back button goes back to earlier lines
+    bool rollback = true;          // going back to earlier lines (the rollback action, the history's Back buttons)
     bool skipMovies = true;        // clicks and skipping go past movies (unless the story says skip=no)
     // Seeing and hearing
     bool readAloud = false;    // the system reads the lines, choices and the buttons pointed at aloud
@@ -568,7 +568,7 @@ const SettingControl* findSettingControl(std::string_view name);
 // ---------------------------------------------------------------------------
 // (In this header, not the developer tools' own, so that the scripts' mistakes can be said in it too;
 // DeveloperShared.cpp has the code.)
-// The developer tools' texts are written in English, and shown in the language chosen for them (About):
+// The developer tools' texts are written in English, and shown in the language chosen for them (their language buttons):
 // a translation's text for each one (Developer::useToolsLanguage), else as written. A text in the code
 // is "..."_tr, shown in that language where it's used (as text, or with values put in its {}s as
 // std::format does: "Imported '{}'."_tr(name)); one kept in English, because the code tells it apart by

@@ -1,9 +1,21 @@
 // The games the developer tools play on their own, silently, with copies of what the player has seen
 // and kept: the story played to a line for Play from this line, and the Screens tab's sample under its
-// screens.
+// screens; and the canvas the tools' samples are drawn into.
 #include "DeveloperShared.hpp"
 
 namespace vn {
+
+// A game of the tools' own, heard through silence, with fresh copies of what the player has seen and kept
+// (so nothing the player has changes).
+std::unique_ptr<Game> Developer::silentGame(const Script& s) {
+    DeveloperTools& d = tools;
+    d.playRead = engine.readLog();
+    d.playPersistent = engine.persistent();
+    d.playFlowchart = engine.flowchart();
+    return std::make_unique<Game>(Context{engine.renderer(), engine.assets(), d.silence, engine.settings_, d.playRead, d.playPersistent, d.playFlowchart, engine.canvas(),
+                                          [this](std::string_view name) { return engine.builtin(name); }},
+                                  s);
+}
 
 // The story of `s` played silently, as fast as it goes, to just before a line of a scene (an option's:
 // its choice's; none: the scene's first), in a game of its own with copies of what the player has seen
@@ -30,14 +42,8 @@ std::unique_ptr<Game> Developer::playedTo(const Script& s, const StoryEditor::Sc
     for (std::size_t pc = 0; pc < s.code.size(); ++pc) // (not a jump or return ending what's under a line: the story isn't at that line then)
         if (there(pc) && !s.code[pc].tail && (!target || s.code[pc].line < s.code[*target].line)) target = pc;
     if (!target) return nullptr;
-    // (so nothing the player has changes)
-    d.playRead = engine.readLog();
-    d.playPersistent = engine.persistent();
-    d.playFlowchart = engine.flowchart();
     auto play = [&](std::size_t pc, bool& got) {
-        auto game = std::make_unique<Game>(Context{engine.renderer(), engine.assets(), d.silence, engine.settings_, d.playRead, d.playPersistent, d.playFlowchart, engine.canvas(),
-                                                   [this](std::string_view name) { return engine.builtin(name); }},
-                                           s);
+        auto game = silentGame(s);
         game->stopBefore(*target);
         game->start(pc);
         got = game->playTo(*target, there);
@@ -60,6 +66,8 @@ void Developer::playFromLine(const std::string& scene, std::optional<std::size_t
     if (!played || !played->canSave() || !engine.resume(played->save())) engine.newGame(scene);
 }
 
+// The tools' canvas (as big as the game's, made again when that changes), cleared to black and painted;
+// false when it can't be made.
 bool Developer::paintCanvas(const std::function<void()>& paint) {
     DeveloperTools& d = tools;
     SDL_Renderer* r = engine.renderer();
@@ -77,6 +85,8 @@ bool Developer::paintCanvas(const std::function<void()>& paint) {
     return true;
 }
 
+// The Screens tab's sample: the story played silently from its start to its first line (or its first
+// choice), for the screens to be seen over.
 void Developer::makeSample(bool choice) {
     DeveloperTools& d = tools;
     d.sample.reset();
@@ -84,12 +94,7 @@ void Developer::makeSample(bool choice) {
     const Script& s = *d.script;
     const auto start = s.findScene("start");
     if (!start) return;
-    d.playRead = engine.readLog();
-    d.playPersistent = engine.persistent();
-    d.playFlowchart = engine.flowchart();
-    d.sample = std::make_unique<Game>(Context{engine.renderer(), engine.assets(), d.silence, engine.settings_, d.playRead, d.playPersistent, d.playFlowchart, engine.canvas(),
-                                              [this](std::string_view name) { return engine.builtin(name); }},
-                                      s);
+    d.sample = silentGame(s);
     d.sample->start(*start);
     d.sample->playTo(SIZE_MAX, [&](std::size_t pc) {
         return choice ? std::holds_alternative<cmd::Menu>(s.code[pc].command) : std::holds_alternative<cmd::Say>(s.code[pc].command);

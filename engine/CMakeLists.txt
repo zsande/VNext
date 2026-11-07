@@ -154,14 +154,15 @@ file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/pl_mpeg.c CONTENT [=[
 
 add_executable(vnext
     src/Engine.cpp                # the player: window, menus, saving, settings, reload (and main)
-    src/Developer.cpp             # developer mode: the developer tools (opening them, their bar and tabs)
-    src/DeveloperStory.cpp        # ...the Story tab
+    src/Developer.cpp             # developer mode: the developer tools (opening them, their own buttons, the tab shown)
+    src/DeveloperStory.cpp        # ...the Story tab, and About
     src/DeveloperPreview.cpp      # ...the games they play on their own (Play from this line, the Screens tab's sample)
     src/DeveloperScreens.cpp      # ...the Screens tab
-    src/DeveloperMap.cpp          # ...the Map tab
+    src/DeveloperMap.cpp          # ...the Story tab's map
     src/DeveloperLibrary.cpp      # ...the Library tab
-    src/DeveloperTranslations.cpp # ...the Translate tab
-    src/DeveloperForms.cpp        # ...the forms, and the Settings tab
+    src/DeveloperTranslations.cpp # ...the Library's translations
+    src/DeveloperForms.cpp        # ...the forms, and the Library's Settings
+    src/DeveloperPanels.cpp       # ...the tabs' parts as sub-windows (Layout)
     src/DeveloperUi.cpp           # ...their widgets
     src/DeveloperShared.cpp       # ...the helpers the tabs share
     src/StoryEditor.cpp           # ...the editor: the scripts as forms

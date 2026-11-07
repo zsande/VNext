@@ -30,6 +30,9 @@ void outline(SDL_Renderer* r, const SDL_FRect& rect, SDL_Color c);
 void gradient(SDL_Renderer* r, const SDL_FRect& rc, SDL_Color top, SDL_Color bottom);
 void circle(SDL_Renderer* r, float cx, float cy, float radius, SDL_Color c);
 void quad(SDL_Renderer* r, SDL_FPoint a, SDL_FPoint b, SDL_FPoint c, SDL_FPoint d, SDL_Color colour);
+// A box with round corners `radius` across, smoothed over a pixel (on whole pixels, sharp along its straight
+// edges), or over `soft` pixels all round (a shadow's).
+void roundRect(SDL_Renderer* r, const SDL_FRect& given, float radius, SDL_Color c, float soft = 1.0f);
 SDL_Color hsv(float h, float s, float v, Uint8 alpha = 255);
 } // namespace draw
 
@@ -310,11 +313,23 @@ public:
         Variables item;
     };
     [[nodiscard]] std::optional<Pressed> takePressed();
-    // What a control's move, press, scroll and put back actions do to the screen on top that takes clicks.
+    // What a control's move, press, scroll and put back actions do on the screens the keys work on (Engine::keyViews):
+    // the move actions point at parts, the nearest that way on any of those screens.
     [[nodiscard]] bool takesClicks() const { return !targets_.empty(); }
-    void move(int dx, int dy);           // points at the next part that takes clicks that way (a slider pointed at: left and right change it)
-    void pressPointed();                 // the part pointed at, clicked
-    void scrollBy(std::string_view how); // up, down, to the top or to the end: its history, else the container that scrolls
+    [[nodiscard]] bool takesKeys();                          // it has a part the move actions can point at, or something to scroll
+    [[nodiscard]] std::optional<SDL_FRect> pointedRect() const; // where the part pointed at (by the keys or the pointer) is
+    [[nodiscard]] bool keysPoint() const;                     // the keys point at one of its parts (press presses it)
+    [[nodiscard]] bool typing() const { return keyboard_.has_value(); } // an input's keyboard is up (only its keys are pointed at)
+    // How far the nearest part that way from the part at `from` is (the distance on, with what's off to the side
+    // counting double; one in line with it first), for comparing screens; none when there's none.
+    [[nodiscard]] std::optional<float> toward(const SDL_FRect& from, int dx, int dy) const;
+    void pointToward(const SDL_FRect& from, int dx, int dy); // ...pointed at by the keys (scrolled into view)
+    bool pointFirst();                   // nothing pointed at yet: the first part (false: it has none)
+    bool adjustPointed(int dx);          // a slider pointed at: left and right change it (false: no slider is)
+    void letGo();                        // the keys point at nothing here any more (another screen's part took them)
+    void keysRest() { keyFocus_ = false; } // ...the part they pressed stays pointed at, for them to move on from, but press goes on (the story's screens)
+    void pressPointed();                 // the part the keys point at, clicked
+    bool scrollBy(std::string_view how); // up, down, to the top or to the end: its history, else the container that scrolls (false: nothing does)
     void putBack();                      // what's being dragged, back where it was
     // What the buttons that came to be chosen because of their chosen= set (set VARIABLE to VALUE,
     // setting NAME VALUE), to put in effect as if they were clicked: a choice that shows is the one that
@@ -385,8 +400,9 @@ private:
 
     enum class Look : std::uint8_t { Idle, Hover, Selected, Disabled };
     // What can be clicked: a part, or one of its items (a choice, a tab, a save...), or a small
-    // button on an item: a save's delete button, a history line's "hear it again" and "go back".
-    enum class Button : std::uint8_t { None, Delete, Voice, Back };
+    // button on an item: a save's delete button, a history line's "hear it again" and "go back", a key
+    // of an input's keyboard (its item: which key).
+    enum class Button : std::uint8_t { None, Delete, Voice, Back, Key };
     struct Spot {
         std::size_t element = 0;
         int item = 0;
@@ -397,7 +413,9 @@ private:
     struct Target {
         Spot spot;
         SDL_FRect rect;
-        bool reachable; // the move actions go to it (a history line's small buttons: only the pointer)
+        bool reachable;       // the move actions go to it
+        bool hidden = false;  // scrolled out of its list's box: the move actions go to it (it scrolls into view), the pointer can't
+        bool presses = true;  // pressing it does something (an ending in a list doesn't: the keys go to it to scroll the list, the pointer doesn't)
     };
     // Lists and grids (choices, saves, the gallery, endings, the flowchart...): columns= item_width= item_height=
     // spacing= (or spacing_across= and spacing_down=), with these defaults (an itemW of 0: the part's width shared out).
@@ -523,6 +541,18 @@ private:
     bool handleInput(const SDL_Event& e);
     // The input box that takes typing: the one clicked last (typing_), else the first shown.
     [[nodiscard]] std::optional<std::size_t> typedInto();
+    void typeInto(std::size_t index, std::string_view typed); // letters added to what it holds (up to its most_letters=)
+    void eraseLast(std::size_t index);                        // ...its last letter taken away
+    // An input's keyboard, for typing with a controller (or by clicking its keys): its rows of letters, and
+    // Shift, Space, Delete and Done, on a panel under the box (over it, without the room there), in the box's
+    // style. It comes up when the box is pressed with the keys, and by itself while a controller is in use
+    // (until it's put away: Done, or typing on a real keyboard). typeKey(): one of its keys pressed.
+    void openKeyboard(std::size_t index);
+    void drawKeyboard(SDL_Renderer* r, std::size_t index, const Shift& by, float alpha);
+    void typeKey(std::size_t index, int key);
+    std::optional<std::size_t> keyboard_; // the input whose keyboard is up
+    bool keyboardShut_ = false;           // ...put away: it doesn't come up by itself again until the screen opens again
+    bool capital_ = false;                // the next letter a capital (Shift; at the start of an empty box)
     void adjustSlider(std::size_t element, int delta);
     [[nodiscard]] SDL_FRect sliderBox(std::size_t element) const;
     void box(SDL_Renderer* r, const SDL_FRect& rect, const Style& s, Look look, float alpha);
@@ -562,7 +592,14 @@ private:
     void setFocus(const Target& t);
     void activate(const Target& t, std::optional<float> mouseX);
     void clicked(const Element& el); // its click_sound
-    void navigate(int dx, int dy);
+    // The move actions: what they can point at (with an input's keyboard up, only its keys), and the nearest
+    // of those that way from the part at `from` (`score`: how far; see toward()).
+    [[nodiscard]] bool keyReachable(const Target& t) const;
+    [[nodiscard]] const Target* nearest(const SDL_FRect& from, int dx, int dy, float* score = nullptr) const;
+    void pointByKeys(const Target& t); // pointed at by the keys, and scrolled into view
+    // What scrolls when the keys scroll: its history, else the container that scrolls with the part pointed at in
+    // it, else the first one shown.
+    [[nodiscard]] std::optional<std::size_t> scroller();
     void slide(std::size_t element, float x);
     void run(const Element& el);
     bool scrollWidgets(const SDL_Event& e);
@@ -583,6 +620,7 @@ private:
     std::uint64_t drawnFrame_ = 0; // the frame it was last drawn in
     std::vector<Target> targets_; // from the last draw, topmost last
     std::optional<Spot> focus_;
+    bool keyFocus_ = false;               // ...pointed at by the keys (a controller's d-pad...), not the pointer
     std::optional<std::size_t> typing_;   // the input box clicked last
     std::optional<std::size_t> dragging_; // a slider being dragged
     // A button with drag= the player holds: it follows the pointer once moved (from where on it they

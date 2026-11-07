@@ -151,7 +151,6 @@ void setValues(Stage::ObjectState& s, const std::array<float, 8>& v) {
     s.tint = {u8(v[5]), u8(v[6]), u8(v[7]), 255};
 }
 
-
 } // namespace
 
 void Stage::setBackground(std::string key, std::shared_ptr<const Animation> entrance, bool done) {
@@ -639,7 +638,6 @@ void Stage::update(float dt) {
         }
     }
     std::erase_if(objects_, [](const Object& o) { return o.leaving && !o.animations.going(); }); // (hidden: gone once its animation ends)
-
 }
 
 void Stage::finish() {
@@ -1533,6 +1531,7 @@ void Game::sayLine(const cmd::Say& c, std::size_t here, bool fast) {
     voiced_ = voiced;
     textFollowsVoice_ = voiced && follows.value_or(gameSettings().textFollowsVoices);
     menuPrompt_ = false;
+    saidAt_ = here;
     lineRead_ = !ctx_.read.insert(c.id).second;
     addToPage();
     addHistory(std::move(entry));
@@ -1564,6 +1563,7 @@ void Game::sayAgain(std::size_t page) {
     noWait_ = false;
     lineVoice_ = {};
     menuPrompt_ = false;
+    saidAt_ = here;
     page_.resize(std::min(page_.size(), page));
     waitFor(Wait::Say, here);
 }
@@ -1778,11 +1778,10 @@ void Game::nextLine() {
 
 // The message a chat scene waits for comes now (someone just typing stops).
 void Game::hurry() {
-    PhoneData& phone = ownPhone();
-    const auto it = std::ranges::find(phone.messages, chatWait_, &MessageItem::number);
-    if (it == phone.messages.end() || it->typing <= 0.0f) return;
+    const auto it = std::ranges::find(phone_.messages, chatWait_, &MessageItem::number);
+    if (it == phone_.messages.end() || it->typing <= 0.0f) return;
     it->typing = 0.0f;
-    if (it->kind == MessageItem::Kind::Typing) phone.messages.erase(it);
+    if (it->kind == MessageItem::Kind::Typing) phone_.messages.erase(it);
     else arrive(*it);
 }
 
@@ -1976,14 +1975,7 @@ const cmd::Menu* Game::menu() const {
 namespace {
 constexpr SDL_Color kOwnColour{230, 230, 235, 255}; // (the phone owner's own messages)
 constexpr std::string_view kRinging = "phone ringing"; // (the sound channel a call rings on)
-// A message proper: not someone typing, nor a change to one, nor the line saying a chat scene's over.
-bool isMessage(MessageItem::Kind kind) {
-    using Kind = MessageItem::Kind;
-    return kind == Kind::Text || kind == Kind::Image || kind == Kind::Sticker || kind == Kind::Voice;
-}
 } // namespace
-
-const PhoneData& Game::phone() const { return phone_; }
 
 Game::Person Game::person(const std::string& character, const std::string& sender) const {
     if (const CharacterDef* def = character.empty() ? nullptr : script_.character(character)) return {.name = def->name, .character = def->key, .colour = def->nameColour};
@@ -2003,7 +1995,7 @@ void Game::sendMessage(const cmd::Message& c, std::size_t here) {
     if (c.kind == Kind::End) return change(c); // (the scene's over: its line at once)
     const bool scene = !skipping() && !chat_.empty();
     const bool typed = gameSettings().chatMessages == ChatMessages::Typed;
-    if (c.kind != Kind::Text && c.kind != Kind::Image && c.kind != Kind::Sticker && c.kind != Kind::Voice && c.kind != Kind::Typing) {
+    if (!isMessage(c.kind) && c.kind != Kind::Typing) { // (a change to one)
         if (scene && typed) { // (after a moment, as if they thought it over)
             change_ = c;
             changeIn_ = 1.0f;
@@ -2017,7 +2009,6 @@ void Game::sendMessage(const cmd::Message& c, std::size_t here) {
         return;
     }
     if (c.kind == Kind::Typing && skipping()) return; // (skipping: nobody waits for it)
-    PhoneData& phone = ownPhone();
     const Person who = person(c.character, c.sender); // (the player's own: who it goes to)
     const std::string& with = who.name;
     const std::string from = c.mine ? std::string{} : who.name;
@@ -2028,12 +2019,12 @@ void Game::sendMessage(const cmd::Message& c, std::size_t here) {
     // one after another: each after the ones still coming there.
     float after = 0.0f;
     if (replying_ && !skipping())
-        for (const MessageItem& other : phone.messages)
+        for (const MessageItem& other : phone_.messages)
             if (other.with == with) after = std::max(after, other.typing);
     if (c.kind == Kind::Typing) {
         m.typing = after + (c.seconds > 0.0f ? c.seconds : 2.0f);
     } else if (!c.mine && ((scene && typed) || (replying_ && !skipping())) && gameSettings().phoneTyping > 0.0f) {
-        for (const MessageItem& other : phone.messages)
+        for (const MessageItem& other : phone_.messages)
             if (other.with == with && other.from == from) m.typing = std::max(m.typing, other.typing);
         const std::size_t letters = c.kind == Kind::Text ? utf8::length(m.text) : 12; // (an image: as long as a few words)
         m.typing = std::max(m.typing, after) + 0.8f + static_cast<float>(letters) / gameSettings().phoneTyping * static_cast<float>(randomNumber(75, 125)) / 100.0f;
@@ -2041,9 +2032,9 @@ void Game::sendMessage(const cmd::Message& c, std::size_t here) {
         m.typing = after + 0.4f;
     }
     const std::uint32_t number = messageCount_ + 1;
-    addMessage(phone, std::move(m));
+    addMessage(std::move(m));
     if (!scene) return;
-    if (const MessageItem& added = phone.messages.back(); added.number == number && added.typing > 0.0f) { // a chat scene: until it comes...
+    if (const MessageItem& added = phone_.messages.back(); added.number == number && added.typing > 0.0f) { // a chat scene: until it comes...
         chatWait_ = number;
         wait_ = Wait::Chat; // (a save made meanwhile goes on after it: the phone has it, coming)
     } else if (!typed) { // ...or, each after a click, until one
@@ -2055,12 +2046,11 @@ void Game::sendMessage(const cmd::Message& c, std::size_t here) {
 // Deletes it, edits it, reacts, reads it: a change to a chat's messages.
 void Game::change(const cmd::Message& c) {
     using Kind = cmd::Message::Kind;
-    PhoneData& phone = ownPhone();
     const Person who = person(c.character, c.sender);
     const std::string& with = who.name;
     const std::string from = c.mine ? std::string{} : who.name;
     auto last = [&](auto&& which) -> MessageItem* { // (the newest there that has come, and isn't deleted)
-        for (auto it = phone.messages.rbegin(); it != phone.messages.rend(); ++it)
+        for (auto it = phone_.messages.rbegin(); it != phone_.messages.rend(); ++it)
             if (it->with == with && it->typing <= 0.0f && isMessage(it->kind) && !it->deleted && which(*it)) return &*it;
         return nullptr;
     };
@@ -2078,23 +2068,23 @@ void Game::change(const cmd::Message& c) {
         if (MessageItem* m = last([&](const MessageItem& item) { return item.from != from; })) m->reaction = fillValues(c.text, lookup_);
         break;
     case Kind::Read: // someone has read the owner's messages there (the owner reading theirs: they're seen)
-        for (MessageItem& m : phone.messages)
+        for (MessageItem& m : phone_.messages)
             if (m.with == with && m.typing <= 0.0f) {
                 if (!from.empty() && m.from.empty()) m.seen = true;
                 else if (from.empty() && !m.from.empty()) m.read = true;
             }
         break;
     case Kind::End: // (a chat scene over: a line saying so)
-        addMessage(phone, {.kind = c.kind, .with = with, .read = true});
+        addMessage({.kind = c.kind, .with = with, .read = true});
         break;
     default:
         break;
     }
 }
 
-void Game::addMessage(PhoneData& phone, MessageItem m) {
+void Game::addMessage(MessageItem m) {
     m.number = ++messageCount_;
-    MessageItem& added = phone.messages.emplace_back(std::move(m));
+    MessageItem& added = phone_.messages.emplace_back(std::move(m));
     if (added.typing <= 0.0f) arrive(added);
     else if (!added.from.empty() && !skipping() && hasPhone() && !gameSettings().phoneTypingSound.empty())
         ctx_.sound.playSound(ctx_.assets.sound(gameSettings().phoneTypingSound));
@@ -2108,9 +2098,7 @@ void Game::arrive(MessageItem& m) {
     m.date = toString(variable("phone_date"));
     if (!isMessage(m.kind)) return;
     learnTips(m.text);
-    if (m.kind == MessageItem::Kind::Image) {
-        have(RecordKind::Gallery, m.file);
-    }
+    if (m.kind == MessageItem::Kind::Image) have(RecordKind::Gallery, m.file);
     const bool fast = skipping();
     if (gameSettings().phoneHistory && !unlogged_) { // (as a line, the owner's own as a choice made)
         const std::string words = m.text.empty() ? m.file : richText(m.text, lookup_, &script_.palette).text;
@@ -2151,7 +2139,7 @@ void Game::updatePhone(float dt) {
         else arrive(m);
     }
     if (!putAway_.empty()) { // (a chat= scene over: once its messages have come, and the last could be read)
-        if (std::ranges::any_of(phone().messages, [&](const MessageItem& m) { return m.with == putAway_ && m.typing > 0.0f; })) putAwayIn_ = 2.0f;
+        if (std::ranges::any_of(phone_.messages, [&](const MessageItem& m) { return m.with == putAway_ && m.typing > 0.0f; })) putAwayIn_ = 2.0f;
         else if ((putAwayIn_ -= dt) <= 0.0f) {
             putAway_.clear();
             requests_.push_back(cmd::Ui{.verb = "hide phone", .arg = "chat"});
@@ -2207,7 +2195,7 @@ void Game::pickOnPhone(std::size_t option) {
         for (TextSpan& span : chosen.spans) span.begin += 2, span.end += 2; // after "> "
         addHistory({.speaker = "", .colour = SDL_Color{150, 150, 165, 255}, .text = "> " + chosen.text, .choice = true, .spans = std::move(chosen.spans)});
     } else {
-        addMessage(ownPhone(), {.with = p.who, .colour = kOwnColour, .text = fillValues(picked.text, lookup_), .read = true});
+        addMessage({.with = p.who, .colour = kOwnColour, .text = fillValues(picked.text, lookup_), .read = true});
     }
     talk(picked.target, p.call ? std::string{} : p.who, p.call);
 }
@@ -2307,7 +2295,7 @@ void Game::endCall(bool missed) {
 }
 
 void Game::logCall(const CallNow& c, bool missed) {
-    ownPhone().calls.push_back({.who = c.who, .colour = c.colour, .outgoing = c.outgoing, .missed = missed, .busy = c.busy, .seen = !missed || c.outgoing,
+    phone_.calls.push_back({.who = c.who, .colour = c.colour, .outgoing = c.outgoing, .missed = missed, .busy = c.busy, .seen = !missed || c.outgoing,
                                 .time = toString(variable("phone_clock")), .date = toString(variable("phone_date")), .seconds = missed || c.busy ? 0 : static_cast<int>(std::lround(c.time))});
 }
 
@@ -2318,6 +2306,7 @@ void Game::callPerson(std::string_view who) {
     const Person p = personNamed(who); // (it rings a while, then it's answered if they have a call scene, else busy)
     call_ = CallNow{.who = p.name, .character = p.character, .colour = p.colour, .outgoing = true, .talks = phoneSceneOf(script_, p.name, true).has_value()};
     if (!gameSettings().phoneCallingSound.empty()) ctx_.sound.playChannel(std::string(kRinging), ctx_.assets.sound(gameSettings().phoneCallingSound), true, 1.0f, 0.0f);
+    requests_.push_back(cmd::Ui{.verb = "show phone", .arg = "call"}); // (on the call, from a key or a button outside it too)
 }
 
 bool Game::choiceOnPhone() const {
@@ -2351,20 +2340,19 @@ void Game::runAside(std::size_t target) {
 }
 
 void Game::readMessages(std::string_view with) {
-    for (MessageItem& m : ownPhone().messages)
+    for (MessageItem& m : phone_.messages)
         if (with.empty() || m.with == with) m.read = m.read || m.typing <= 0.0f;
 }
 
 std::vector<Game::Chat> Game::chats() const {
-    const PhoneData& phone = this->phone();
     std::vector<Chat> out;
     auto entry = [&](const std::string& name) -> Chat& {
         if (const auto it = std::ranges::find(out, name, &Chat::name); it != out.end()) return *it;
         const Person p = personNamed(name);
         return out.emplace_back(Chat{.name = name, .colour = p.colour, .character = p.character});
     };
-    for (std::size_t i = 0; i < phone.messages.size(); ++i) {
-        const MessageItem& m = phone.messages[i];
+    for (std::size_t i = 0; i < phone_.messages.size(); ++i) {
+        const MessageItem& m = phone_.messages[i];
         Chat& c = entry(m.with);
         if (m.typing > 0.0f) c.typing = c.typing || !m.from.empty();
         else if (m.kind != MessageItem::Kind::End) c.last = i; // (a chat scene's end isn't its newest message)
@@ -2375,12 +2363,14 @@ std::vector<Game::Chat> Game::chats() const {
 }
 
 void Game::seeCalls() {
-    for (CallItem& c : ownPhone().calls) c.seen = true;
+    for (CallItem& c : phone_.calls) c.seen = true;
 }
+
 int Game::unseenMessages() const {
-    return static_cast<int>(std::ranges::count_if(phone().messages, [](const MessageItem& m) { return !m.read && m.typing <= 0.0f && !m.from.empty() && isMessage(m.kind); }));
+    return static_cast<int>(std::ranges::count_if(phone_.messages, [](const MessageItem& m) { return !m.read && m.typing <= 0.0f && !m.from.empty() && isMessage(m.kind); }));
 }
-int Game::unseenCalls() const { return static_cast<int>(std::ranges::count(phone().calls, false, &CallItem::seen)); }
+
+int Game::unseenCalls() const { return static_cast<int>(std::ranges::count(phone_.calls, false, &CallItem::seen)); }
 
 std::string Game::expressionOf(std::string_view character) const {
     const auto it = expressions_.find(character);
@@ -2412,7 +2402,7 @@ void Game::choose(std::size_t index) {
     addHistory({.speaker = "", .colour = SDL_Color{150, 150, 165, 255}, .text = "> " + chosen.text, .choice = true, .spans = std::move(chosen.spans)});
     if (!m->phone.empty()) { // a chat's choice: the option picked is sent there, as the player's (the history has it already, as a choice)
         unlogged_ = true;
-        addMessage(ownPhone(), {.with = m->phone, .colour = kOwnColour, .text = fillValues(picked.text, lookup_), .read = true});
+        addMessage({.with = m->phone, .colour = kOwnColour, .text = fillValues(picked.text, lookup_), .read = true});
         unlogged_ = false;
     }
     if (wait_ != Wait::Menu) { // one up while the story goes on: its lines, then back where the story was (or past its lines)
@@ -2517,7 +2507,7 @@ void Game::update(float dt) {
         if (change_) {
             if ((changeIn_ -= dt) > 0.0f && !fast) break;
             change(*std::exchange(change_, std::nullopt));
-        } else if (const auto& messages = phone().messages; !fast && std::ranges::any_of(messages, [&](const MessageItem& m) {
+        } else if (const auto& messages = phone_.messages; !fast && std::ranges::any_of(messages, [&](const MessageItem& m) {
                        return m.number == chatWait_ && m.typing > 0.0f;
                    })) {
             break;
@@ -2728,7 +2718,7 @@ void Game::draw(const Font& labelFont) {
 // Save / load
 // ---------------------------------------------------------------------------
 
-std::string Game::save() const {
+std::string Game::save(bool history) const {
     auto located = [&](std::size_t pc) {
         auto [label, offset] = script_.locate(pc);
         return std::format("{} {} {}", label.empty() ? "-" : label, offset, pc);
@@ -2758,7 +2748,7 @@ std::string Game::save() const {
     for (const CallItem& c : phone_.calls)
         out += std::format("pcall {} {} {} {} {} {} {} {} {} {} {}\n", c.outgoing ? 1 : 0, c.missed ? 1 : 0, c.busy ? 1 : 0, c.seen ? 1 : 0, c.seconds, c.colour.r,
                            c.colour.g, c.colour.b, field(c.who), field(c.time), field(c.date));
-    if (!chat_.empty()) out += "pscene " + field(chat_) + "\n";
+    if (!chat_.empty()) out += std::format("pscene {} {}\n", field(chat_), wait_ == Wait::Chat && !change_ ? chatWait_ : 0); // (and the message it waits for)
     if (call_ && call_->talking && call_->at) // (one ringing rings again: its command is done again)
         out += std::format("pcallnow {} {} {} {} {} {} {} {}\n", call_->outgoing ? 1 : 0, std::lround(call_->time * 1000.0f), call_->colour.r, call_->colour.g,
                            call_->colour.b, field(call_->who), field(call_->character), located(*call_->at));
@@ -2766,6 +2756,20 @@ std::string Game::save() const {
         const PageLine& p = page_[i];
         out += std::format("page {} {} {} {} {}\n", p.colour.r, p.colour.g, p.colour.b, escape(p.speaker.empty() ? "-" : p.speaker), escape(p.text));
     }
+    // The history (but the line on screen: it's said again), each line's words, looks and voice; and a choice's
+    // question, the line on screen with it.
+    if (history)
+        for (std::size_t i = 0; i + (wait_ == Wait::Say ? 1 : 0) < history_.size(); ++i) {
+            const HistoryEntry& h = history_[i];
+            out += std::format("hist {} {} {} {} {} {} {} {} {} {} {}", h.colour.r, h.colour.g, h.colour.b, h.choice ? 1 : 0, std::lround(h.voiceVolume * 1000.0f),
+                               std::lround(h.madeUpVoice * 1000.0f), std::lround(h.madeUpVoiceSpeed * 1000.0f), field(h.speaker), field(h.voice), field(h.text),
+                               h.spans.size());
+            for (const TextSpan& s : h.spans)
+                out += std::format(" {} {} {} {} {}", s.begin, s.end, s.colour ? std::format("#{:02x}{:02x}{:02x}{:02x}", s.colour->r, s.colour->g, s.colour->b, s.colour->a) : "-",
+                                   static_cast<unsigned>(s.style), field(s.ruby));
+            out += "\n";
+        }
+    if (wait_ == Wait::Menu && menuPrompt_ && saidAt_ < script_.code.size()) out += std::format("prompt {}\n", located(saidAt_));
     if (const cmd::Weather& w = stage_.weather(); !w.kind.empty())
         out += std::format("weather {} {} {} {} {} {} {}\n", w.kind, std::lround(w.amount * 1000.0f), std::lround(w.speed * 1000.0f),
                            std::lround(w.wind * 1000.0f), w.behind ? 1 : 0,
@@ -2796,8 +2800,7 @@ std::string Game::save() const {
 }
 
 std::expected<std::string, std::string> Game::load(std::string_view data) {
-    auto note = restore(data, std::nullopt);
-    if (note) past_.clear();
+    auto note = restore(data, std::nullopt); // (a game of its own: rollback goes back as far as the line it goes on at)
     autosave_ = false; // reaching a choice by loading is not a new decision point
     return note;
 }
@@ -2805,12 +2808,12 @@ std::expected<std::string, std::string> Game::load(std::string_view data) {
 void Game::remember() {
     if (gameSettings().rollbackLines <= 0 || asking()) return; // (a chat= or call= scene's lines: the story's line is the place to go back to)
     const bool line = wait_ == Wait::Say;
-    past_.push_back({save(), historyDropped_ + history_.size() - (line && !history_.empty() ? 1 : 0), !(line && noWait_), ctx_.persistent});
+    past_.push_back({save(false), historyDropped_ + history_.size() - (line && !history_.empty() ? 1 : 0), !(line && noWait_), ctx_.persistent});
     if (past_.size() > static_cast<std::size_t>(gameSettings().rollbackLines) + 1) past_.erase(past_.begin());
 }
 
 bool Game::canRollback() const {
-    if (!ctx_.settings.rollback || (wait_ != Wait::Say && wait_ != Wait::Menu) || past_.size() < 2) return false;
+    if (!ctx_.settings.rollback || asking() || (wait_ != Wait::Say && wait_ != Wait::Menu) || past_.size() < 2) return false; // (not in a chat= or call= scene's lines: once it's over)
     return std::any_of(past_.begin(), past_.end() - 1, [](const Moment& m) { return m.stop; });
 }
 
@@ -2822,7 +2825,7 @@ bool Game::rollback() {
 }
 
 std::optional<std::size_t> Game::momentOf(std::size_t entry) const {
-    if (!ctx_.settings.rollback || (wait_ != Wait::Say && wait_ != Wait::Menu)) return std::nullopt;
+    if (!ctx_.settings.rollback || asking() || (wait_ != Wait::Say && wait_ != Wait::Menu)) return std::nullopt;
     const std::size_t counted = historyDropped_ + entry; // a line's entry is its moment's history; a choice's, its menu's
     for (std::size_t i = 0; i + 1 < past_.size(); ++i)
         if (past_[i].stop && past_[i].history == counted) return i;
@@ -2885,11 +2888,14 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     PhoneData phone;
     PhoneData* ph = nullptr; // (once its line is read: its things come after it)
     std::string chatScene;
+    std::uint32_t chatWaits = 0; // (the message the chat scene waits for, still coming)
     std::uint32_t messageCount = 0, arrivals = 0;
     std::optional<CallNow> callNow;
     std::map<std::string, std::string, std::less<>> expressions;
     std::optional<LineVoice> voice;
     std::vector<PageLine> page;
+    std::vector<HistoryEntry> history;
+    std::optional<std::size_t> prompt;
     cmd::Weather weather;
     cmd::Effect effect;
     std::string cameraOwn, cameraPlayed;
@@ -2933,8 +2939,7 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
             l.face = none(unescape(face));
             l.reveal = static_cast<float>(l.length);
             others.push_back(std::move(l));
-        }
-        else if (key == "call") {
+        } else if (key == "call") {
             if (auto pc = resolve(ls)) stack.push_back(*pc);
         } else if (key == "variable") {
             std::string name, value;
@@ -2949,11 +2954,13 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
             while (ls >> field)
                 if (field.starts_with("animation=")) backgroundAnimation = unescape(field.substr(10));
                 else if (field.starts_with("played=")) backgroundPlayed = unescape(field.substr(7));
-        }
-        else if (key == "flowchartpoint") ls >> flowchartNode >> flowchartOption;
-        else if (key == "music") music = rest;
-        else if (key == "musicvol") musicVolume = static_cast<float>(toInt(rest)) / 1000.0f;
-        else if (key == "loop") {
+        } else if (key == "flowchartpoint") {
+            ls >> flowchartNode >> flowchartOption;
+        } else if (key == "music") {
+            music = rest;
+        } else if (key == "musicvol") {
+            musicVolume = static_cast<float>(toInt(rest)) / 1000.0f;
+        } else if (key == "loop") {
             std::string channel, file;
             long volume = 1000;
             ls >> channel >> volume;
@@ -3004,7 +3011,7 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
             ph->calls.push_back(std::move(c));
         } else if (key == "pscene") {
             std::string with;
-            ls >> with;
+            ls >> with >> chatWaits;
             chatScene = unfield(with);
         } else if (key == "pcallnow") {
             int outgoing = 0, r = 0, g = 0, b = 0;
@@ -3018,6 +3025,28 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
             std::string character, expression;
             ls >> character >> expression;
             expressions.insert_or_assign(unescape(character), unescape(expression));
+        } else if (key == "hist") {
+            int r = 0, g = 0, b = 0, choice = 0;
+            long volume = 1000, madeUp = 0, madeUpSpeed = 1000;
+            std::string speaker, voiceFile, text;
+            std::size_t spans = 0;
+            if (!(ls >> r >> g >> b >> choice >> volume >> madeUp >> madeUpSpeed >> speaker >> voiceFile >> text >> spans)) continue;
+            HistoryEntry h{.speaker = unfield(speaker), .colour = {static_cast<Uint8>(r), static_cast<Uint8>(g), static_cast<Uint8>(b), 255}, .text = unfield(text),
+                           .choice = choice != 0, .voice = unfield(voiceFile), .voiceVolume = static_cast<float>(volume) / 1000.0f,
+                           .madeUpVoice = static_cast<float>(madeUp) / 1000.0f, .madeUpVoiceSpeed = static_cast<float>(madeUpSpeed) / 1000.0f};
+            for (std::size_t i = 0; i < spans; ++i) {
+                TextSpan s;
+                std::string colour, ruby;
+                unsigned style = 0;
+                if (!(ls >> s.begin >> s.end >> colour >> style >> ruby)) break;
+                if (colour != "-") s.colour = parseColour(colour);
+                s.style = static_cast<TTF_FontStyleFlags>(style);
+                s.ruby = unfield(ruby);
+                h.spans.push_back(std::move(s));
+            }
+            history.push_back(std::move(h));
+        } else if (key == "prompt") {
+            prompt = resolve(ls);
         } else if (key == "page") {
             int r = 0, g = 0, b = 0;
             std::string speaker, text;
@@ -3091,12 +3120,15 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     phone_ = std::move(phone);
     messageCount_ = messageCount;
     arrivals_ = arrivals;
+    const bool phoneUp = !chat_.empty() || call_; // (the story's chat scene or call: rolling back to before it puts the phone away)
     chat_ = chatScene;
+    chatWait_ = chatWaits;
     call_ = callNow;
     change_.reset();
     stopRinging();
     if (!chat_.empty()) requests_.push_back(cmd::Ui{.verb = "show phone", .arg = "chat", .phone = chat_}); // (on with it)
     if (call_) requests_.push_back(cmd::Ui{.verb = "show phone", .arg = "call"});
+    if (phoneUp && chat_.empty() && !call_) requests_.push_back(cmd::Ui{.verb = "hide phone"});
     expressions_ = std::move(expressions);
     music_ = music;
     musicVolume_ = musicVolume;
@@ -3113,9 +3145,12 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
             ctx_.sound.playChannel(channel, ctx_.assets.sound(loop.file), true, loop.volume, 0.5f);
     loops_ = std::move(loops);
 
-    // Rollback keeps the entries before its line (counting those let go); a load starts afresh.
-    if (!keepHistory) historyDropped_ = 0;
-    history_.resize(std::min(history_.size(), keepHistory && *keepHistory > historyDropped_ ? *keepHistory - historyDropped_ : 0));
+    // Rollback keeps the entries before its line (counting those let go); a load has the save's.
+    if (keepHistory) history_.resize(std::min(history_.size(), *keepHistory > historyDropped_ ? *keepHistory - historyDropped_ : 0));
+    else {
+        historyDropped_ = 0;
+        history_ = std::move(history);
+    }
     choiceItems_.clear();
     trigger_ = trigger;
     if (const cmd::Menu* m = trigger && trigger->at < script_.code.size() ? std::get_if<cmd::Menu>(&script_.code[trigger->at].command) : nullptr)
@@ -3135,8 +3170,23 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     if (voice && !skipping()) ctx_.sound.playVoice(ctx_.assets.sound(voice->file), voice->volume);
     pc_ = resumePc_ = *resume;
     if (random) random_ = *random;
-    wait_ = Wait::None;
-    run();
+    // A choice with its question on screen: that line back as it was, all there at once, then the choice.
+    if (const auto* asks = prompt && *prompt < script_.code.size() ? std::get_if<cmd::Say>(&script_.code[*prompt].command) : nullptr) {
+        const CharacterDef* def = asks->character.empty() ? nullptr : script_.character(asks->character);
+        say(def ? def->name : asks->speaker, def ? def->nameColour : gameSettings().narrationColour, asks->text, def);
+        reveal_ = static_cast<float>(length_);
+        passedStops_ = stops_.size();
+        noWait_ = false;
+        saidAt_ = *prompt;
+    } else {
+        text_.clear(); // (none: no question with it, nor one left from before rolling back)
+    }
+    if (std::ranges::any_of(phone_.messages, [&](const MessageItem& m) { return chatWait_ && m.number == chatWait_ && m.typing > 0.0f; }))
+        wait_ = Wait::Chat; // (a chat scene's message still coming: on once it's come)
+    else {
+        wait_ = Wait::None;
+        run();
+    }
     return note;
 }
 

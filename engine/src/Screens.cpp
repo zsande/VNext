@@ -612,6 +612,58 @@ void quad(SDL_Renderer* r, SDL_FPoint a, SDL_FPoint b, SDL_FPoint c, SDL_FPoint 
     SDL_RenderGeometry(r, nullptr, v.data(), 4, idx.data(), 6);
 }
 
+void roundRect(SDL_Renderer* r, const SDL_FRect& given, float radius, SDL_Color c, float soft) {
+    // A crisp one's straight edges are rects (as sharp as any, with any renderer: the software one puts a
+    // shape's points on whole pixels, which would blur a soft edge there), only its corners smoothed; it's on
+    // whole pixels too, so its rects and corners meet.
+    const bool crisp = soft <= 1.0f;
+    SDL_FRect box = given;
+    if (crisp) {
+        const float left = std::round(given.x), top = std::round(given.y);
+        box = {left, top, std::round(given.x + given.w) - left, std::round(given.y + given.h) - top};
+        radius = std::round(radius);
+    }
+    if (box.w <= 0.0f || box.h <= 0.0f) return;
+    radius = std::clamp(radius, crisp ? 0.0f : soft / 2, std::max(crisp ? 0.0f : soft / 2, std::min(box.w, box.h) / 2));
+    if (crisp) {
+        rect(r, {box.x + radius, box.y, box.w - 2 * radius, box.h}, c);
+        rect(r, {box.x, box.y + radius, radius, box.h - 2 * radius}, c);
+        rect(r, {box.x + box.w - radius, box.y + radius, radius, box.h - 2 * radius}, c);
+        if (radius <= 0.0f) return;
+    }
+    const int steps = std::clamp(static_cast<int>(std::ceil(radius)), 2, 16); // (each corner's)
+    const SDL_FColor in = toF(c), out{in.r, in.g, in.b, 0.0f};
+    const std::array<SDL_FPoint, 4> centres{{{box.x + radius, box.y + radius},
+                                             {box.x + box.w - radius, box.y + radius},
+                                             {box.x + box.w - radius, box.y + box.h - radius},
+                                             {box.x + radius, box.y + box.h - radius}}};
+    std::vector<SDL_Vertex> v;
+    std::vector<int> idx;
+    // A corner's round edge, two points each step: one half `soft` inside it (all there), one half outside (none).
+    auto edge = [&](std::size_t corner, int i) {
+        const float a = std::numbers::pi_v<float> * (1.0f + (static_cast<float>(corner) + static_cast<float>(i) / static_cast<float>(steps)) / 2.0f);
+        const SDL_FPoint to{std::cos(a), std::sin(a)}, at = centres[corner];
+        v.push_back({{at.x + to.x * (radius - soft / 2), at.y + to.y * (radius - soft / 2)}, in, {}});
+        v.push_back({{at.x + to.x * (radius + soft / 2), at.y + to.y * (radius + soft / 2)}, out, {}});
+    };
+    auto fan = [&](int middle, int a, int b) { idx.insert(idx.end(), {middle, a, b, a, a + 1, b + 1, a, b + 1, b}); }; // (the inside, then the soft edge)
+    if (crisp) // (each corner alone, from its centre)
+        for (std::size_t corner = 0; corner < centres.size(); ++corner) {
+            const int middle = static_cast<int>(v.size());
+            v.push_back({centres[corner], in, {}});
+            for (int i = 0; i <= steps; ++i) edge(corner, i);
+            for (int i = 0; i < steps; ++i) fan(middle, middle + 1 + 2 * i, middle + 3 + 2 * i);
+        }
+    else { // (all of it as one shape, from its middle)
+        v.push_back({{box.x + box.w / 2, box.y + box.h / 2}, in, {}});
+        for (std::size_t corner = 0; corner < centres.size(); ++corner)
+            for (int i = 0; i <= steps; ++i) edge(corner, i);
+        const int n = 4 * (steps + 1);
+        for (int i = 0; i < n; ++i) fan(0, 1 + 2 * i, 1 + 2 * ((i + 1) % n));
+    }
+    SDL_RenderGeometry(r, nullptr, v.data(), static_cast<int>(v.size()), idx.data(), static_cast<int>(idx.size()));
+}
+
 SDL_Color hsv(float h, float s, float v, Uint8 alpha) {
     h = std::fmod(h, 1.0f) * 6.0f;
     const int i = static_cast<int>(h);
@@ -880,7 +932,7 @@ void ScreenView::layout() {
         // A container with fit=parts and no width (or height): as wide (high) as its biggest part that way
         // (one with a size of its own: not a share of the box, nor a container filling it); the parts are
         // placed within that by their places. One whose parts go one after another (and an item's box
-        // without item_height=): as far as they go. News: placed again.
+        // without item_height=): as far as they go. When a size changes, everything is placed again.
         bool changed = false;
         for (std::size_t i = 0; i < n; ++i) {
             const Element& el = elements[i];
@@ -1042,9 +1094,20 @@ void ScreenView::drawScrollbar(SDL_Renderer* r, std::size_t index, float alpha) 
     }
 }
 
-// Scrolls the containers `t` is in so it shows.
+// Scrolls `t` into view: in a list that scrolls its items itself (the gallery, a history, the flowchart...), and in
+// the containers it's in.
 void ScreenView::reveal(const Target& t) {
     if (t.spot.element >= def_->elements.size()) return;
+    if (const Element& el = def_->elements[t.spot.element]; el.kind != ElementKind::Container && el.dragDirection() != 0.0f) {
+        ElementState& st = state_[t.spot.element];
+        const SDL_FRect& box = rectOf(t.spot.element);
+        const float way = el.dragDirection(); // (scrolling on moves its items up; a history's, down)
+        if (t.rect.y < box.y) st.scroll += way * (box.y - t.rect.y);
+        else if (t.rect.y + t.rect.h > box.y + box.h) st.scroll -= way * (t.rect.y + t.rect.h - box.y - box.h);
+        if (t.rect.x < box.x) st.scrollX -= box.x - t.rect.x;
+        else if (t.rect.x + t.rect.w > box.x + box.w) st.scrollX += t.rect.x + t.rect.w - box.x - box.w;
+        st.glideX = st.glideY = 0.0f;
+    }
     for (int p = def_->elements[t.spot.element].parent; p >= 0; p = def_->elements[static_cast<std::size_t>(p)].parent) {
         const auto at = static_cast<std::size_t>(p);
         const Element& box = def_->elements[at];
@@ -1217,7 +1280,10 @@ void ScreenView::reset() {
     closing_.reset();
     chosen_.clear();
     focus_.reset();
+    keyFocus_ = false;
     typing_.reset();
+    keyboard_.reset();
+    keyboardShut_ = false;
     dragging_.reset();
     playing_.reset();
     held_.reset();
@@ -1459,7 +1525,7 @@ void ScreenView::text(SDL_Renderer* r, TextBlock& block, std::string_view str, c
 
 const ScreenView::Target* ScreenView::targetAt(float x, float y) const {
     for (const auto& t : targets_ | std::views::reverse)
-        if (pointInRect(x, y, t.rect)) {
+        if (!t.hidden && t.presses && pointInRect(x, y, t.rect)) {
             const auto cut = t.spot.element < def_->elements.size() ? cutBy(t.spot.element) : std::nullopt; // (cut off past a container's edges: not there)
             if (!cut || pointInRect(x, y, *cut)) return &t;
         }
@@ -1607,6 +1673,21 @@ void ScreenView::draw(SDL_Renderer* r, float alpha) {
             }
         }
         closeTo(n);
+        if (keyboard_ && *keyboard_ < n && drawn_[*keyboard_]) drawKeyboard(r, *keyboard_, shifts[*keyboard_], alpha * shifts[*keyboard_].opacity); // (over the rest)
+        else keyboard_.reset();
+        if (keyFocus_ && focus_ && focus_->button != Button::None && !focusedTarget()) // (its small button gone, as a deleted save's: the item it was on)
+            if (const Spot item{focus_->element, focus_->item}; std::ranges::contains(targets_, item, &Target::spot)) focus_ = item;
+        if (const Target* t = keyFocus_ ? focusedTarget() : nullptr; t && t->spot.element < n && !t->hidden) { // what the keys point at: a ring round it,
+            const SDL_Color c = withAlpha(textColour(styleOf(t->spot.element), Look::Hover), alpha * whole.opacity); // plain to see whatever its pointed look
+            const float k = std::max(2.0f, std::round(std::min(engine_.canvas().w, engine_.canvas().h) / 360.0f)), gap = k * 2.0f;
+            std::optional<RenderClip> clip; // (in a box that cuts off its edges: only what of it shows there; the wheel may have scrolled it away)
+            if (const auto cut = t->spot.element == keyboard_ ? std::nullopt : cutBy(t->spot.element, &shifts)) clip.emplace(r, *cut);
+            const SDL_FRect o{t->rect.x - gap, t->rect.y - gap, t->rect.w + 2.0f * gap, t->rect.h + 2.0f * gap};
+            draw::rect(r, {o.x, o.y, o.w, k}, c);
+            draw::rect(r, {o.x, o.y + o.h - k, o.w, k}, c);
+            draw::rect(r, {o.x, o.y + k, k, o.h - 2.0f * k}, c);
+            draw::rect(r, {o.x + o.w - k, o.y + k, k, o.h - 2.0f * k}, c);
+        }
         if (whole.fade > 0.0f) draw::rect(r, {0.0f, 0.0f, engine_.canvas().w, engine_.canvas().h}, withAlpha(whole.fadeColour, whole.fade * alpha)); // (fade=: over everything)
     };
     if (whole.wipe >= 0.999f) parts();
@@ -1994,15 +2075,15 @@ void ScreenView::drawRecords(SDL_Renderer* r, std::size_t index, float alpha) {
     for (std::size_t i = 0; i < list.size(); ++i) {
         const Script::Record& rec = list[i];
         const SDL_FRect rr = g.cell(rectOf(index), i, st.scroll);
-        if (!overlaps(rr, rectOf(index))) continue;
         const bool have = engine_.has(kind, i);
         const bool clickable = have && takesClicks;
+        targets_.push_back({{index, static_cast<int>(i)}, rr, true, !inside(rr, rectOf(index)), clickable}); // (scrolled away, or not to click: the keys still go to it)
+        if (!overlaps(rr, rectOf(index))) continue;
         const bool current = have && ((song && !playing.empty() && playing == engine_.assets().sound(rec.name)) || (tip && engine_.tip() == i));
         const Look look = current ? Look::Selected : clickable && focused(index, static_cast<int>(i)) ? Look::Hover : Look::Idle;
         const bool fresh = tip && engine_.newTip(i);
         const Style& bs = !have ? lockedStyle : fresh ? el.substyle("unread_style") : s;
         box(r, rr, bs, look, boxAlpha(bs, alpha));
-        if (clickable && inside(rr, rectOf(index))) targets_.push_back({{index, static_cast<int>(i)}, rr, true});
         const SDL_FRect inner{rr.x + s.padding, rr.y + s.padding, rr.w - 2 * s.padding, rr.h - 2 * s.padding};
         if (images) { // the image, cut to fit the card, with its title on a strip at the bottom
             if (!have) continue; // (its locked look, nothing on it)
@@ -2045,11 +2126,11 @@ void ScreenView::drawRecords(SDL_Renderer* r, std::size_t index, float alpha) {
     drawScrollbar(r, index, alpha);
 }
 
-// The flowchart: every point reached (choices and endings) as a tree, each
-// under the place the player first came from, with the option picked there above it. A choice's
-// options not tried yet hang under it as stubs: locked ones say what they need, and ones that
-// opened since (their condition is true now) get a mark. Clicking a place goes back to it; a stub
-// goes to its choice. It moves with the mouse wheel and by dragging, and starts at the current place.
+// The flowchart: every point reached (choices and endings) as a tree, each under the place the player
+// first came from, with the option picked there above it. A choice's options not tried yet hang under it
+// as stubs: locked ones say what they need, and ones that opened since (their condition is true now) get
+// a mark. Clicking a place goes back to it; a stub goes to its choice. It moves with the mouse wheel and
+// by dragging, and starts at the current place.
 void ScreenView::drawFlowchart(SDL_Renderer* r, std::size_t index, float alpha) {
     const Element& el = def_->elements[index];
     const Style& s = styleOf(index);
@@ -2198,9 +2279,11 @@ void ScreenView::drawFlowchart(SDL_Renderer* r, std::size_t index, float alpha) 
     for (std::size_t j = 0; j < items.size(); ++j) {
         const Item& item = items[j];
         const SDL_FRect b = boxAt(item);
-        if (!overlaps(b, rectOf(index))) continue;
         const bool stub = item.node < 0;
         const Flowchart::Node* n = stub ? nullptr : &nodes[static_cast<std::size_t>(item.node)];
+        st.ids[j] = stub ? nodes[static_cast<std::size_t>(items[static_cast<std::size_t>(item.parent)].node)].id : n->id;
+        targets_.push_back({{index, static_cast<int>(j)}, b, true, !inside(b, rectOf(index))}); // (scrolled away: the keys can still go to it)
+        if (!overlaps(b, rectOf(index))) continue;
         const Style& bs = stub ? el.substyle("unreached_style") : n->kind == Flowchart::Kind::Ending ? el.substyle("ending_style") : s;
         const Look look = n && n->id == current ? Look::Selected : focused(index, static_cast<int>(j)) ? Look::Hover : Look::Idle;
         box(r, b, bs, look, boxAlpha(bs, alpha));
@@ -2219,8 +2302,6 @@ void ScreenView::drawFlowchart(SDL_Renderer* r, std::size_t index, float alpha) 
             const float cx = b.x + b.w - 9.0f, cy = b.y + 9.0f, k = 5.0f;
             draw::quad(r, {cx, cy - k}, {cx + k, cy}, {cx, cy + k}, {cx - k, cy}, withAlpha(SDL_Color{255, 200, 90, 255}, alpha));
         }
-        st.ids[j] = stub ? nodes[static_cast<std::size_t>(items[static_cast<std::size_t>(item.parent)].node)].id : n->id;
-        if (inside(b, rectOf(index))) targets_.push_back({{index, static_cast<int>(j)}, b, true});
     }
     drawScrollbar(r, index, alpha);
 }
@@ -2257,10 +2338,6 @@ std::string clockOf(float seconds) {
 }
 // Dots for someone typing, one more every third of a second.
 std::string typingDots(float now) { return std::string(" . . .").substr(0, 2 * (1 + static_cast<std::size_t>(now * 3.0f) % 3)); }
-bool proper(MessageItem::Kind kind) { // (a message, not someone typing nor joining or leaving)
-    using Kind = MessageItem::Kind;
-    return kind == Kind::Text || kind == Kind::Image || kind == Kind::Sticker || kind == Kind::Voice;
-}
 std::string hexOf(SDL_Color c) { return std::format("#{:02x}{:02x}{:02x}", c.r, c.g, c.b); }
 std::string initialOf(std::string_view name) { return name.empty() ? std::string{} : upper(name.substr(0, utf8::offset(name, 1))); }
 int flag(bool b) { return b ? 1 : 0; }
@@ -2448,7 +2525,7 @@ std::vector<ScreenView::ListItem> ScreenView::listItems(const Element& list, std
             const MessageItem* last = c.last ? &messages[*c.last] : nullptr;
             std::string newest;
             if (c.typing) newest = typingDots(now());
-            else if (last && !last->deleted && proper(last->kind)) newest = last->text;
+            else if (last && !last->deleted && isMessage(last->kind)) newest = last->text;
             Variables v{{"chat.name", c.name}, {"chat.text", std::move(newest)}, {"chat.time", last ? last->time : std::string{}},
                         {"chat.unread", c.unread}, {"chat.typing", flag(c.typing)}, {"chat.open", flag(c.name == engine_.openChat())}};
             someone(v, "chat", c.name, c.character, {}, c.colour);
@@ -2461,7 +2538,7 @@ std::vector<ScreenView::ListItem> ScreenView::listItems(const Element& list, std
         const auto& messages = game.messages();
         std::size_t last = SIZE_MAX, lastOwn = SIZE_MAX;
         for (std::size_t i = 0; i < messages.size(); ++i)
-            if (messages[i].with == with && proper(messages[i].kind) && messages[i].typing <= 0.0f) {
+            if (messages[i].with == with && isMessage(messages[i].kind) && messages[i].typing <= 0.0f) {
                 last = i;
                 if (messages[i].from.empty()) lastOwn = i;
             }
@@ -2715,33 +2792,35 @@ void ScreenView::drawHistory(SDL_Renderer* r, std::size_t index, float alpha) {
     float y = rectOf(index).y + rectOf(index).h - total + st.scroll;
     for (std::size_t i = 0; i < entries.size(); ++i) {
         const float h = std::max(st.items[i].size().y, st.extra[i].size().y);
-        if (y + h >= rectOf(index).y && y <= rectOf(index).y + rectOf(index).h) {
+        const bool seen = y + h >= rectOf(index).y && y <= rectOf(index).y + rectOf(index).h;
+        if (seen) {
             const Style& ts = entries[i].choice ? choiceStyle : textStyle;
             st.items[i].drawIn(r, {rectOf(index).x, y, nameW, 0}, 1.0f, 0.0f, withAlpha(entries[i].colour, alpha * nameStyle.opacity),
                                TextBlock::kAll, nameStyle.shadow);
             st.extra[i].draw(r, textX, y, withAlpha(ts.colour, alpha * ts.opacity), TextBlock::kAll, ts.shadow);
-            float bx = rectOf(index).x + rectOf(index).w - room - kButton;
-            const float by = y + std::max(0.0f, (std::min(h, 40.0f) - kButton) * 0.5f);
-            auto button = [&](Button which) {
-                const SDL_FRect b{bx, by, kButton, kButton};
-                bx -= kButton + kButtonGap;
-                const bool hot = focused(index, static_cast<int>(i), which);
-                box(r, b, buttonStyle, hot ? Look::Hover : Look::Idle, boxAlpha(buttonStyle, alpha));
-                const Style::State& over = buttonStyle.pointed;
-                const SDL_Color c = withAlpha(hot && over.colour ? *over.colour : buttonStyle.colour, alpha * buttonStyle.opacity);
-                const float cx = b.x + b.w * 0.5f, cy = b.y + b.h * 0.5f, k = 7.0f;
-                if (which == Button::Back) { // |<  go back
-                    draw::rect(r, {cx - k, cy - k, 2.5f, 2 * k}, c);
-                    draw::quad(r, {cx - k + 3.5f, cy}, {cx + k, cy - k}, {cx + k, cy + k}, {cx - k + 3.5f, cy}, c);
-                } else { // >  play
-                    draw::quad(r, {cx - k * 0.7f, cy - k}, {cx + k, cy}, {cx + k, cy}, {cx - k * 0.7f, cy + k}, c);
-                }
-                if (inside(b, rectOf(index))) targets_.push_back({{index, static_cast<int>(i), which}, b, false});
-            };
-            if (backs && game.canRollbackTo(i)) button(Button::Back);
-            else if (backs) bx -= kButton + kButtonGap; // (keeps the voice buttons in one column)
-            if (voices && entries[i].voiced()) button(Button::Voice);
         }
+        float bx = rectOf(index).x + rectOf(index).w - room - kButton;
+        const float by = y + std::max(0.0f, (std::min(h, 40.0f) - kButton) * 0.5f);
+        auto button = [&](Button which) { // (scrolled away: the keys can still go to it)
+            const SDL_FRect b{bx, by, kButton, kButton};
+            bx -= kButton + kButtonGap;
+            targets_.push_back({{index, static_cast<int>(i), which}, b, true, !inside(b, rectOf(index))});
+            if (!seen) return;
+            const bool hot = focused(index, static_cast<int>(i), which);
+            box(r, b, buttonStyle, hot ? Look::Hover : Look::Idle, boxAlpha(buttonStyle, alpha));
+            const Style::State& over = buttonStyle.pointed;
+            const SDL_Color c = withAlpha(hot && over.colour ? *over.colour : buttonStyle.colour, alpha * buttonStyle.opacity);
+            const float cx = b.x + b.w * 0.5f, cy = b.y + b.h * 0.5f, k = 7.0f;
+            if (which == Button::Back) { // |<  go back
+                draw::rect(r, {cx - k, cy - k, 2.5f, 2 * k}, c);
+                draw::quad(r, {cx - k + 3.5f, cy}, {cx + k, cy - k}, {cx + k, cy + k}, {cx - k + 3.5f, cy}, c);
+            } else { // >  play
+                draw::quad(r, {cx - k * 0.7f, cy - k}, {cx + k, cy}, {cx + k, cy}, {cx - k * 0.7f, cy + k}, c);
+            }
+        };
+        if (backs && game.canRollbackTo(i)) button(Button::Back);
+        else if (backs) bx -= kButton + kButtonGap; // (keeps the voice buttons in one column)
+        if (voices && entries[i].voiced()) button(Button::Voice);
         y += h + gap;
     }
     drawScrollbar(r, index, alpha);
@@ -2857,7 +2936,8 @@ void ScreenView::drawSlots(SDL_Renderer* r, std::size_t index, float alpha) {
                          withAlpha(textStyle.colour, alpha * textStyle.opacity), TextBlock::kAll, textStyle.shadow);
         targets_.push_back({{index, static_cast<int>(i)}, rr, true});
 
-        if (deletable && card.info.exists && pointInRect(mouse_.x, mouse_.y, rr)) {
+        const bool keysOn = keyFocus_ && focus_ && focus_->element == index && focus_->item == static_cast<int>(i); // (it or its delete button)
+        if (deletable && card.info.exists && (pointInRect(mouse_.x, mouse_.y, rr) || keysOn)) {
             const SDL_FRect d{thumb.x + thumb.w - 34, thumb.y + 6, 28, 28};
             const bool hot = focused(index, static_cast<int>(i), Button::Delete);
             draw::rect(r, d, withAlpha(hot ? SDL_Color{190, 60, 70, 235} : SDL_Color{0, 0, 0, 170}, alpha));
@@ -2865,7 +2945,7 @@ void ScreenView::drawSlots(SDL_Renderer* r, std::size_t index, float alpha) {
             const SDL_Color c = withAlpha({240, 240, 245, 255}, alpha);
             draw::quad(r, {cx - k - t, cy - k + t}, {cx - k + t, cy - k - t}, {cx + k + t, cy + k - t}, {cx + k - t, cy + k + t}, c);
             draw::quad(r, {cx + k - t, cy - k - t}, {cx + k + t, cy - k + t}, {cx - k + t, cy + k + t}, {cx - k - t, cy + k - t}, c);
-            targets_.push_back({{index, static_cast<int>(i), Button::Delete}, d, false});
+            targets_.push_back({{index, static_cast<int>(i), Button::Delete}, d, true});
         }
     }
 }
@@ -2962,7 +3042,7 @@ void ScreenView::activate(const Target& t, std::optional<float> mouseX) {
         break;
     case ElementKind::Flowchart: // a point (or an option not tried yet: its choice)
         if (const auto& ids = state_[t.spot.element].ids; item < ids.size() && !ids[item].empty())
-            engine_.goToPlace(ids[item], def_->elements[t.spot.element].option("confirm"));
+            engine_.goToPlace(ids[item], def_->elements[t.spot.element].confirm);
         break;
     case ElementKind::History:
         if (t.spot.button == Button::Back) engine_.historyBack(item);
@@ -2970,13 +3050,18 @@ void ScreenView::activate(const Target& t, std::optional<float> mouseX) {
         break;
     case ElementKind::Slots:
         if (t.spot.button == Button::Delete) engine_.slotDelete(item, el.option("delete_confirm"));
-        else engine_.slotPressed(item, el.option("confirm"), el.option("load_confirm"));
+        else engine_.slotPressed(item, el.confirm, el.option("load_confirm"));
         break;
     case ElementKind::Slider:
         if (mouseX) {
             dragging_ = t.spot.element;
             slide(t.spot.element, *mouseX);
         }
+        break;
+    case ElementKind::Input: // a key of its keyboard: typed; the box pressed with the keys: its keyboard comes up (clicked: typed into)
+        typing_ = t.spot.element;
+        if (t.spot.button == Button::Key) typeKey(t.spot.element, t.spot.item);
+        else if (!mouseX) openKeyboard(t.spot.element);
         break;
     default:
         break;
@@ -2997,30 +3082,88 @@ void ScreenView::slide(std::size_t element, float x) {
     if (toInt(engine_.game().variable(el.option("variable"))) != value) engine_.game().setVariable(el.option("variable"), value);
 }
 
-void ScreenView::navigate(int dx, int dy) {
+// What the move actions can point at: what takes clicks there (and the items of a list that scrolls, to scroll it), and
+// with an input's keyboard up, only its keys.
+bool ScreenView::keyReachable(const Target& t) const {
+    return t.reachable && (!keyboard_ || (t.spot.element == *keyboard_ && t.spot.button == Button::Key));
+}
+
+const ScreenView::Target* ScreenView::nearest(const SDL_FRect& from, int dx, int dy, float* score) const {
     const Target* current = focusedTarget();
     const Target* best = nullptr;
     float bestScore = 0.0f;
+    const SDL_FPoint a = centre(from);
     for (const auto& t : targets_) {
-        if (!t.reachable || &t == current) continue;
-        if (!current) {
-            best = &t; // nothing pointed at yet: start at the first part that takes clicks
-            break;
-        }
-        const SDL_FPoint a = centre(current->rect), b = centre(t.rect);
+        if (!keyReachable(t) || &t == current) continue;
+        const SDL_FPoint b = centre(t.rect);
         const float along = dx != 0 ? (b.x - a.x) * static_cast<float>(dx) : (b.y - a.y) * static_cast<float>(dy);
         const float across = dx != 0 ? std::abs(b.y - a.y) : std::abs(b.x - a.x);
         if (along <= 1.0f) continue;
-        const float score = along + across * 2.0f;
-        if (!best || score < bestScore) {
+        // (one in line with it first: in its row, moving across; in its column, moving up or down; else one past it
+        // that way, not one beside it in the next row)
+        const bool inLine = dx != 0 ? t.rect.y < from.y + from.h && t.rect.y + t.rect.h > from.y : t.rect.x < from.x + from.w && t.rect.x + t.rect.w > from.x;
+        const bool past = dx > 0 ? t.rect.x >= from.x + from.w - 1.0f : dx < 0 ? t.rect.x + t.rect.w <= from.x + 1.0f
+                        : dy > 0 ? t.rect.y >= from.y + from.h - 1.0f : t.rect.y + t.rect.h <= from.y + 1.0f;
+        if (!inLine && !past) continue;
+        const float s = along + across * 2.0f + (inLine ? 0.0f : 1e6f);
+        if (!best || s < bestScore) {
             best = &t;
-            bestScore = score;
+            bestScore = s;
         }
     }
-    if (best) {
-        setFocus(*best);
-        reveal(*best);
-    }
+    if (score) *score = bestScore;
+    return best;
+}
+
+void ScreenView::pointByKeys(const Target& t) {
+    const Target hit = t; // (a copy: it's one of the targets)
+    setFocus(hit);
+    keyFocus_ = true;
+    reveal(hit);
+}
+
+bool ScreenView::takesKeys() {
+    return std::ranges::any_of(targets_, [&](const Target& t) { return keyReachable(t); }) || scroller().has_value();
+}
+
+std::optional<SDL_FRect> ScreenView::pointedRect() const {
+    if (const Target* t = focusedTarget()) return t->rect;
+    return std::nullopt;
+}
+
+bool ScreenView::keysPoint() const { return keyFocus_ && focusedTarget(); }
+
+std::optional<float> ScreenView::toward(const SDL_FRect& from, int dx, int dy) const {
+    float score = 0.0f;
+    if (!nearest(from, dx, dy, &score)) return std::nullopt;
+    return score;
+}
+
+void ScreenView::pointToward(const SDL_FRect& from, int dx, int dy) {
+    if (const Target* t = nearest(from, dx, dy)) pointByKeys(*t);
+}
+
+bool ScreenView::pointFirst() {
+    const Target* first = nullptr; // (the first one in sight: one scrolled away only when there's none)
+    for (const auto& t : targets_)
+        if (keyReachable(t) && (!first || (first->hidden && !t.hidden))) {
+            first = &t;
+            if (!t.hidden) break;
+        }
+    if (first) pointByKeys(*first);
+    return first != nullptr;
+}
+
+bool ScreenView::adjustPointed(int dx) {
+    const Target* t = focusedTarget();
+    if (!t || t->spot.element >= def_->elements.size() || def_->elements[t->spot.element].kind != ElementKind::Slider) return false;
+    adjustSlider(t->spot.element, dx);
+    return true;
+}
+
+void ScreenView::letGo() {
+    focus_.reset();
+    keyFocus_ = false;
 }
 
 void ScreenView::adjustSlider(std::size_t element, int delta) {
@@ -3038,37 +3181,34 @@ void ScreenView::adjustSlider(std::size_t element, int delta) {
     if (!el.actions.empty()) run(el);
 }
 
-void ScreenView::move(int dx, int dy) {
-    if (const Target* t = focusedTarget(); t && dx != 0 && t->spot.element < def_->elements.size() && def_->elements[t->spot.element].kind == ElementKind::Slider)
-        return adjustSlider(t->spot.element, dx);
-    navigate(dx, dy);
-}
-
 void ScreenView::pressPointed() {
-    if (const Target* t = focusedTarget()) {
+    if (!keyFocus_) return; // (what the pointer is on, a click presses)
+    if (const Target* t = focusedTarget(); t && t->presses) {
         const Target hit = *t; // (activate() may change the targets)
         activate(hit, std::nullopt);
     }
 }
 
-void ScreenView::scrollBy(std::string_view how) {
-    const bool up = how == "up", down = how == "down", top = how == "to the top";
-    for (std::size_t i = 0; i < def_->elements.size(); ++i) // its history: up goes back to older lines
-        if (def_->elements[i].kind == ElementKind::History && live(i)) {
-            float& scroll = state_[i].scroll;
-            scroll = up ? scroll + 60.0f : down ? scroll - 60.0f : top ? 1e9f : 0.0f;
-            return;
-        }
-    std::optional<std::size_t> box; // else the container that scrolls with the part pointed at in it, or the first one
+std::optional<std::size_t> ScreenView::scroller() {
+    for (std::size_t i = 0; i < def_->elements.size(); ++i)
+        if (def_->elements[i].kind == ElementKind::History && live(i)) return i;
     if (const Target* t = focusedTarget(); t && t->spot.element < def_->elements.size())
-        for (int p = def_->elements[t->spot.element].parent; p >= 0 && !box; p = def_->elements[static_cast<std::size_t>(p)].parent)
-            if (isBox(def_->elements[static_cast<std::size_t>(p)].kind) && def_->elements[static_cast<std::size_t>(p)].scrolls()) box = static_cast<std::size_t>(p);
-    for (std::size_t i = 0; i < def_->elements.size() && !box; ++i)
-        if (isBox(def_->elements[i].kind) && def_->elements[i].scrolls() && live(i)) box = i;
-    if (!box) return;
+        for (int p = def_->elements[t->spot.element].parent; p >= 0; p = def_->elements[static_cast<std::size_t>(p)].parent)
+            if (isBox(def_->elements[static_cast<std::size_t>(p)].kind) && def_->elements[static_cast<std::size_t>(p)].scrolls()) return static_cast<std::size_t>(p);
+    for (std::size_t i = 0; i < def_->elements.size(); ++i)
+        if (isBox(def_->elements[i].kind) && def_->elements[i].scrolls() && live(i)) return i;
+    return std::nullopt;
+}
+
+bool ScreenView::scrollBy(std::string_view how) {
+    const auto box = scroller();
+    if (!box) return false;
+    const bool up = how == "up", down = how == "down", top = how == "to the top";
     ElementState& st = state_[*box];
     st.glideX = st.glideY = 0.0f;
-    st.scroll = up ? st.scroll - 60.0f : down ? st.scroll + 60.0f : top ? 0.0f : 1e9f; // (kept within it as it's laid out)
+    if (def_->elements[*box].kind == ElementKind::History) st.scroll = up ? st.scroll + 60.0f : down ? st.scroll - 60.0f : top ? 1e9f : 0.0f; // (up: to older lines)
+    else st.scroll = up ? st.scroll - 60.0f : down ? st.scroll + 60.0f : top ? 0.0f : 1e9f; // (kept within it as it's laid out)
+    return true;
 }
 
 void ScreenView::putBack() { held_.reset(); }
@@ -3239,6 +3379,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
         if (held_ && std::hypot(mouse_.x - pressed_.x, mouse_.y - pressed_.y) > 6.0f) heldMoved_ = true;
         if (const Target* t = targetAt(e.motion.x, e.motion.y)) setFocus(*t);
         else focus_.reset();
+        keyFocus_ = false; // (the pointer's now)
         break;
 
     case SDL_EVENT_MOUSE_BUTTON_UP: // a button is clicked when the mouse comes up on it; let go of what's dragged: on a part that takes it, or back where it was
@@ -3280,6 +3421,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
             if (const Target* t = targetAt(e.button.x, e.button.y)) {
                 const Target hit = *t; // (activate() may change the targets)
                 setFocus(hit);
+                keyFocus_ = false;
                 mouse_ = {e.button.x, e.button.y};
                 const Element& el = def_->elements[hit.spot.element];
                 if (el.kind == ElementKind::Button && hit.spot.button == Button::None && el.option("drag").empty() && !(held_ && !el.drop.empty())) {
@@ -3318,7 +3460,8 @@ void ScreenView::drawInput(SDL_Renderer* r, std::size_t index, float alpha) {
     const Style& s = styleOf(index);
     ElementState& st = state_[index];
     const bool on = enabled(el);
-    const Look look = on ? Look::Hover : Look::Disabled;
+    const bool typed = on && typedInto() == index;
+    const Look look = !on ? Look::Disabled : typed || focused(index) ? Look::Hover : Look::Idle;
     box(r, rectOf(index), s, look, boxAlpha(s, alpha));
 
     const std::string value = engine_.game().typedValue(var);
@@ -3327,8 +3470,9 @@ void ScreenView::drawInput(SDL_Renderer* r, std::size_t index, float alpha) {
     const SDL_Color colour = empty ? withAlpha(textColour(s, look), 0.5f) : textColour(s, look);
     text(r, st.text, shown, rectOf(index), s, colour, alpha * s.opacity);
 
-    if (on && typedInto() == index) {
+    if (typed) {
         engine_.wantTextInput();
+        if (engine_.padInUse() && !keyboard_ && !keyboardShut_ && !tools_) openKeyboard(index); // (a controller: its keyboard, by itself)
         if (std::fmod(now(), 1.0f) < 0.6f) { // blinking caret after the text
             Font& font = styleFont(s);
             const float w = empty ? 0.0f : font.measure(value), h = font.lineHeight();
@@ -3338,6 +3482,7 @@ void ScreenView::drawInput(SDL_Renderer* r, std::size_t index, float alpha) {
             draw::rect(r, {left + w + 2, top, 2, h}, withAlpha(textColour(s, Look::Hover), alpha * s.opacity));
         }
     }
+    if (on) targets_.push_back({{index}, rectOf(index), true});
 }
 
 std::optional<std::size_t> ScreenView::typedInto() {
@@ -3355,26 +3500,16 @@ bool ScreenView::handleInput(const SDL_Event& e) {
     if (e.type != SDL_EVENT_TEXT_INPUT && e.type != SDL_EVENT_KEY_DOWN) return false;
     if (const auto i = typedInto()) {
         const Element& el = def_->elements[*i];
-        const std::string var = el.option("variable");
-        std::string value = engine_.game().typedValue(var);
-        const int max = static_cast<int>(number(el, "most_letters", 64.0f));
         if (e.type == SDL_EVENT_TEXT_INPUT) {
-            std::string typed = e.text.text ? e.text.text : "";
-            std::erase_if(typed, [](char c) { return c == '\n' || c == '\r' || c == '{' || c == '}'; });
-            for (std::size_t n = 0; n < typed.size();) { // add codepoints until the limit
-                const auto len = utf8::offset(std::string_view(typed).substr(n), 1);
-                if (max > 0 && static_cast<int>(utf8::length(value)) >= max) break;
-                value += typed.substr(n, len);
-                n += std::max<std::size_t>(len, 1);
+            typeInto(*i, e.text.text ? e.text.text : "");
+            if (keyboard_) { // (typed on a real keyboard: the one on the screen goes)
+                keyboard_.reset();
+                keyboardShut_ = true;
             }
-            engine_.game().setVariable(var, value);
             return true;
         }
         if (e.key.key == SDLK_BACKSPACE) {
-            if (!value.empty()) {
-                value.erase(utf8::offset(value, utf8::length(value) - 1));
-                engine_.game().setVariable(var, value);
-            }
+            eraseLast(*i);
             return true;
         }
         if ((e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER) && !e.key.repeat && !el.actions.empty()) {
@@ -3386,6 +3521,142 @@ bool ScreenView::handleInput(const SDL_Event& e) {
         return e.key.key >= SDLK_SPACE && e.key.key <= SDLK_TILDE && !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI | SDL_KMOD_ALT));
     }
     return false;
+}
+
+void ScreenView::typeInto(std::size_t index, std::string_view text) {
+    const Element& el = def_->elements[index];
+    const std::string var = el.option("variable");
+    std::string value = engine_.game().typedValue(var);
+    const int max = static_cast<int>(number(el, "most_letters", 64.0f));
+    std::string typed(text);
+    std::erase_if(typed, [](char c) { return c == '\n' || c == '\r' || c == '{' || c == '}'; });
+    for (std::size_t n = 0; n < typed.size();) { // add codepoints until the limit
+        const auto len = utf8::offset(std::string_view(typed).substr(n), 1);
+        if (max > 0 && static_cast<int>(utf8::length(value)) >= max) break;
+        value += typed.substr(n, len);
+        n += std::max<std::size_t>(len, 1);
+    }
+    engine_.game().setVariable(var, value);
+}
+
+void ScreenView::eraseLast(std::size_t index) {
+    const std::string var = def_->elements[index].option("variable");
+    std::string value = engine_.game().typedValue(var);
+    if (value.empty()) return;
+    value.erase(utf8::offset(value, utf8::length(value) - 1));
+    engine_.game().setVariable(var, value);
+}
+
+namespace {
+
+// An input's keyboard: four rows of ten keys (as they are without Shift), then Shift, Space, Delete and Done.
+constexpr std::array<std::string_view, 4> kKeyRows{"1234567890", "qwertyuiop", "asdfghjkl'", "zxcvbnm,.-"};
+constexpr int kLetterKeys = 40, kShiftKey = 40, kSpaceKey = 41, kDeleteKey = 42, kDoneKey = 43, kKeys = 44;
+
+char keyLetter(int key, bool capital) {
+    const char c = kKeyRows[static_cast<std::size_t>(key / 10)][static_cast<std::size_t>(key % 10)];
+    return capital && c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
+}
+
+// A thick line from `a` to `b`, `t` across.
+void stroke(SDL_Renderer* r, SDL_FPoint a, SDL_FPoint b, float t, SDL_Color c) {
+    const float dx = b.x - a.x, dy = b.y - a.y, len = std::max(0.001f, std::hypot(dx, dy));
+    const SDL_FPoint n{-dy / len * t * 0.5f, dx / len * t * 0.5f};
+    draw::quad(r, {a.x + n.x, a.y + n.y}, {b.x + n.x, b.y + n.y}, {b.x - n.x, b.y - n.y}, {a.x - n.x, a.y - n.y}, c);
+}
+
+} // namespace
+
+void ScreenView::openKeyboard(std::size_t index) {
+    keyboard_ = index;
+    typing_ = index;
+    capital_ = engine_.game().typedValue(def_->elements[index].option("variable")).empty(); // (a name starts with a capital)
+    focus_ = Spot{index, 10, Button::Key}; // (on its first letter)
+    keyFocus_ = true;
+}
+
+void ScreenView::typeKey(std::size_t index, int key) {
+    const Element& el = def_->elements[index];
+    if (key == kShiftKey) {
+        capital_ = !capital_;
+    } else if (key == kSpaceKey) {
+        typeInto(index, " ");
+    } else if (key == kDeleteKey) {
+        eraseLast(index);
+        if (engine_.game().typedValue(el.option("variable")).empty()) capital_ = true;
+    } else if (key == kDoneKey) { // as Enter in the box: what it does; with nothing to do, the keyboard goes (the keys on the box again)
+        keyboard_.reset();
+        keyboardShut_ = true;
+        focus_ = Spot{index};
+        if (!el.actions.empty()) run(el);
+    } else if (key >= 0 && key < kLetterKeys) {
+        const char c = keyLetter(key, capital_);
+        typeInto(index, std::string_view(&c, 1));
+        capital_ = false;
+    }
+}
+
+void ScreenView::drawKeyboard(SDL_Renderer* r, std::size_t index, const Shift& by, float alpha) {
+    const Style& s = styleOf(index);
+    const Canvas& c = engine_.canvas();
+    const SDL_FRect in{rectOf(index).x + by.x, rectOf(index).y + by.y, rectOf(index).w, rectOf(index).h};
+    // (ten keys and their gaps, with the panel's edges, in nine tenths of the width at most)
+    const float u = std::min(c.h / 15.0f, c.w * 0.9f / 11.8f), gap = u * 0.12f, edge = u * 0.3f;
+    const float w = 10.0f * u + 9.0f * gap + 2.0f * edge, h = 5.0f * u + 4.0f * gap + 2.0f * edge;
+    const float x = std::clamp(in.x + (in.w - w) * 0.5f, 0.0f, std::max(0.0f, c.w - w));
+    float y = in.y + in.h + gap * 2.0f;
+    if (y + h > c.h) y = in.y - gap * 2.0f - h; // (no room under the box: over it)
+    if (y < 0.0f) y = std::max(0.0f, c.h - h);  // (nor there: at the bottom)
+    const SDL_FRect panel{x, y, w, h};
+    auto keyAt = [&](int key) {
+        int row = key / 10, col = key % 10, span = 1;
+        if (key >= kLetterKeys) { // (the bottom row: Shift, Space four keys wide, Delete, Done)
+            static constexpr int kFrom[]{0, 2, 6, 8}, kSpan[]{2, 4, 2, 2};
+            row = 4;
+            col = kFrom[key - kLetterKeys];
+            span = kSpan[key - kLetterKeys];
+        }
+        return SDL_FRect{panel.x + edge + static_cast<float>(col) * (u + gap), panel.y + edge + static_cast<float>(row) * (u + gap),
+                         static_cast<float>(span) * u + static_cast<float>(span - 1) * gap, u};
+    };
+    const float a = boxAlpha(s, alpha);
+    draw::rect(r, panel, withAlpha(s.background.a > 0 ? s.background : SDL_Color{12, 10, 34, 255}, a * 0.97f));
+    if (s.border.a > 0) draw::outline(r, panel, withAlpha(s.border, a));
+    targets_.push_back({{index, -1, Button::Key}, panel, false}); // (the panel itself: a click between its keys is its)
+    ElementState& st = state_[index];
+    st.items.resize(kLetterKeys);
+    Style letter = s;
+    letter.align = letter.alignVertically = Align::Centre;
+    letter.padding = 0.0f;
+    for (int k = 0; k < kKeys; ++k) {
+        const SDL_FRect kr = keyAt(k);
+        const bool pointed = focused(index, k, Button::Key);
+        const Look look = k == kShiftKey && capital_ ? Look::Selected : pointed ? Look::Hover : Look::Idle;
+        box(r, kr, s, look, a);
+        const SDL_Color ink = withAlpha(textColour(s, look), alpha * s.opacity);
+        const float cx = kr.x + kr.w * 0.5f, cy = kr.y + kr.h * 0.5f, k5 = u * 0.2f, t = std::max(2.0f, u * 0.06f);
+        if (k < kLetterKeys) {
+            text(r, st.items[static_cast<std::size_t>(k)], std::string(1, keyLetter(k, capital_)), kr, letter, textColour(s, look), alpha * s.opacity);
+        } else if (k == kShiftKey) { // an arrow up
+            draw::quad(r, {cx, cy - k5 * 1.2f}, {cx + k5, cy}, {cx + k5, cy}, {cx - k5, cy}, ink);
+            draw::rect(r, {cx - k5 * 0.4f, cy, k5 * 0.8f, k5 * 0.9f}, ink);
+        } else if (k == kSpaceKey) { // a bar with its ends up
+            draw::rect(r, {cx - k5 * 1.6f, cy + k5 * 0.5f, k5 * 3.2f, t}, ink);
+            draw::rect(r, {cx - k5 * 1.6f, cy - k5 * 0.1f, t, k5 * 0.6f + t}, ink);
+            draw::rect(r, {cx + k5 * 1.6f - t, cy - k5 * 0.1f, t, k5 * 0.6f + t}, ink);
+        } else if (k == kDeleteKey) { // a tag pointing back, with a cross on it
+            const Style::State* state = stateOf(s, look);
+            const SDL_Color under = withAlpha(state && state->background ? *state->background : s.background.a > 0 ? s.background : SDL_Color{12, 10, 34, 255}, alpha);
+            draw::quad(r, {cx - k5 * 1.4f, cy}, {cx - k5 * 0.6f, cy - k5 * 0.8f}, {cx - k5 * 0.6f, cy + k5 * 0.8f}, {cx - k5 * 1.4f, cy}, ink);
+            draw::rect(r, {cx - k5 * 0.6f, cy - k5 * 0.8f, k5 * 1.9f, k5 * 1.6f}, ink);
+            stroke(r, {cx - k5 * 0.2f, cy - k5 * 0.4f}, {cx + k5 * 0.6f, cy + k5 * 0.4f}, t, under);
+            stroke(r, {cx - k5 * 0.2f, cy + k5 * 0.4f}, {cx + k5 * 0.6f, cy - k5 * 0.4f}, t, under);
+        } else { // Done: a tick
+            stroke(r, {cx - k5, cy}, {cx - k5 * 0.3f, cy + k5 * 0.7f}, t * 1.3f, ink);
+            stroke(r, {cx - k5 * 0.3f, cy + k5 * 0.7f}, {cx + k5, cy - k5 * 0.7f}, t * 1.3f, ink);
+        }
+        targets_.push_back({{index, k, Button::Key}, kr, true});
+    }
 }
 
 void ScreenView::drawBar(SDL_Renderer* r, std::size_t index, float alpha) {

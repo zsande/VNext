@@ -129,13 +129,29 @@ std::optional<std::size_t> DeveloperUi::groupedButtons(std::span<const ButtonGro
     return clicked;
 }
 
-DeveloperUi::Columns DeveloperUi::columns(const SDL_FRect& area, bool form) const {
-    const float gap = layout::columnGap * k;
+float DeveloperUi::newButtonsH(std::span<const ButtonGroup> groups, float w) { return layout::headingH * k + grouped(groups, w).h; }
+
+std::optional<std::size_t> DeveloperUi::newButtons(std::string_view title, std::span<const ButtonGroup> groups, const SDL_FRect& box,
+                                                   std::span<const std::size_t> chosen, bool enabled) {
+    heading(title, box.x, box.y, box.w);
+    return groupedButtons(groups, grouped(groups, box.w), box.x, box.y + layout::headingH * k, chosen, enabled);
+}
+
+ListPart DeveloperUi::listPart(std::string_view title, const SDL_FRect& box, std::size_t rows) {
+    const float headingH = layout::headingH * k, buttonH = layout::buttonH * k, gap = layout::gap * k;
+    heading(title, box.x, box.y, box.w);
+    ListPart at;
+    at.list = {box.x, box.y + headingH, box.w, std::max(0.0f, box.h - headingH - static_cast<float>(rows) * (gap + buttonH))};
+    for (float y = at.list.y + at.list.h; at.rows.size() < rows; y += gap + buttonH) at.rows.push_back({box.x, y + gap, box.w, buttonH});
+    return at;
+}
+
+DeveloperUi::Columns DeveloperUi::columns(const SDL_FRect& area) const {
     const float leftW = std::round(std::clamp(area.w * layout::sidePart, layout::sideLeast * k, layout::sideMost * k));
-    const float formW = form ? std::round(std::clamp(area.w * layout::formPart, layout::formLeast * k, layout::formMost * k)) : 0.0f;
+    const float formW = std::round(std::clamp(area.w * layout::formPart, layout::formLeast * k, layout::formMost * k));
     const SDL_FRect left{area.x, area.y, leftW, area.h};
-    const SDL_FRect middle{left.x + leftW + gap, area.y, std::max(0.0f, area.w - leftW - gap - (form ? formW + gap : 0.0f)), area.h};
-    return {left, middle, {middle.x + middle.w + gap, area.y, formW, area.h}};
+    const SDL_FRect middle{left.x + leftW, area.y, std::max(0.0f, area.w - leftW - formW), area.h};
+    return {left, middle, {middle.x + middle.w, area.y, formW, area.h}};
 }
 
 void DeveloperUi::formTitle(std::string_view title, float x, float y, SDL_Color colour, float room) {
@@ -221,7 +237,7 @@ std::optional<std::size_t> DeveloperUi::list(const SDL_FRect& box, float& scroll
         textFitted(label(i), item.x + layout::listPad * k, item.y + item.h / 2, layout::listText, faint && faint(i) ? theme::dim : theme::text, item.w - 2 * layout::listPad * k);
         if (over(box) && click(item)) clicked = i;
     }
-    if (count == 0) text("Empty"_tr, box.x + layout::listPad * k, box.y + 5 * k, layout::listText, theme::dim);
+    if (count == 0) textAround("Empty"_tr, box.x + layout::listPad * k, box.y + itemH / 2, layout::listText, theme::dim); // (as editList's)
     return clicked;
 }
 
@@ -456,13 +472,6 @@ std::optional<std::string> DeveloperUi::choices(const std::string& id, const SDL
     return clicked;
 }
 
-bool DeveloperUi::tab(const SDL_FRect& box, std::string_view label, bool chosen, bool wrong, float size) {
-    if (!chosen && over(box)) draw::rect(r, box, kButton);
-    if (chosen) draw::rect(r, {box.x + 8 * k, box.y + box.h - 3 * k, box.w - 16 * k, 3 * k}, wrong ? kBad : kAccent);
-    textIn(label, box, size, wrong ? kBad : chosen ? kAccent : over(box) ? theme::text : theme::dim);
-    return click(box);
-}
-
 void DeveloperUi::textAround(std::string_view s, float x, float middle, float size, SDL_Color colour, float wrap) {
     TextBlock& b = block(font(size), s, wrap);
     b.draw(r, x, middle - b.size().y / 2, colour);
@@ -536,11 +545,36 @@ std::optional<std::string> DeveloperUi::field(const std::string& id, const SDL_F
             d.typed.clear();
         }
         std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) {
-            const bool command = key.mod & (SDL_KMOD_GUI | SDL_KMOD_CTRL), shift = key.mod & SDL_KMOD_SHIFT;
+            const bool shift = key.mod & SDL_KMOD_SHIFT;
             auto moveTo = [&](std::size_t to) { // (Shift: choosing as it goes)
                 d.caret = to;
                 if (!shift) d.anchor = to;
             };
+            // (the tools' select all, paste, copy and cut keys, as their controls have them; the rest are a box's own)
+            if (d.isKey(key, ToolKey::SelectAll)) {
+                d.anchor = 0;
+                d.caret = d.buffer.size();
+                return true;
+            }
+            if (d.isKey(key, ToolKey::Paste)) {
+                if (const SdlOwned<char> pasted{SDL_GetClipboardText()}) {
+                    std::string text = pasted.get();
+                    std::erase(text, '\r');
+                    std::ranges::replace(text, '\n', ' ');
+                    put(text);
+                }
+                return true;
+            }
+            if (const bool cut = d.isKey(key, ToolKey::Cut); cut || d.isKey(key, ToolKey::Copy)) {
+                const auto [from, to] = chosen();
+                SDL_SetClipboardText((from == to ? d.buffer : d.buffer.substr(from, to - from)).c_str()); // (nothing chosen: all of it)
+                if (cut) {
+                    if (from == to) d.anchor = 0, d.caret = d.buffer.size();
+                    eraseChosen();
+                    changed = d.buffer;
+                }
+                return true;
+            }
             switch (key.key) {
             case SDLK_BACKSPACE:
                 if (eraseChosen()) changed = d.buffer;
@@ -568,32 +602,6 @@ std::optional<std::string> DeveloperUi::field(const std::string& id, const SDL_F
                 return true;
             case SDLK_TAB:
             case SDLK_ESCAPE: d.focus.clear(); return true;
-            case SDLK_A:
-                if (!command) return false;
-                d.anchor = 0;
-                d.caret = d.buffer.size();
-                return true;
-            case SDLK_V:
-                if (!command) return false;
-                if (const SdlOwned<char> pasted{SDL_GetClipboardText()}) {
-                    std::string text = pasted.get();
-                    std::erase(text, '\r');
-                    std::ranges::replace(text, '\n', ' ');
-                    put(text);
-                }
-                return true;
-            case SDLK_C:
-            case SDLK_X: {
-                if (!command) return false;
-                const auto [from, to] = chosen();
-                SDL_SetClipboardText((from == to ? d.buffer : d.buffer.substr(from, to - from)).c_str()); // (nothing chosen: all of it)
-                if (key.key == SDLK_X) {
-                    if (from == to) d.anchor = 0, d.caret = d.buffer.size();
-                    eraseChosen();
-                    changed = d.buffer;
-                }
-                return true;
-            }
             default: return false;
             }
         });
@@ -807,7 +815,7 @@ SDL_FRect DeveloperUi::barInside(const SDL_FRect& box) const {
 }
 
 SDL_FRect DeveloperUi::barBeside(const SDL_FRect& box) const {
-    return {box.x + box.w + (layout::margin - layout::scrollbarW) / 2 * k, box.y, layout::scrollbarW * k, box.h};
+    return {box.x + box.w + (layout::formBarRoom - layout::scrollbarW) / 2 * k, box.y, layout::scrollbarW * k, box.h};
 }
 
 void DeveloperUi::formDrawn(const SDL_FRect& box, float y) {
@@ -842,7 +850,7 @@ bool PreviewHead::button(std::string_view label, bool chosen, bool enabled) {
     return clicked;
 }
 
-void PreviewHead::title(std::string_view text) { // (as every panel's heading, in the room the buttons leave)
+void PreviewHead::title(std::string_view text) { // (as every part's heading, in the room the buttons leave)
     const float k = ui_.k;
     ui_.heading(text, row_.x, row_.y, right_ - row_.x - layout::gap * k);
 }

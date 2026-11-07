@@ -6,9 +6,9 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
-#include <limits>
 #include <cstdlib>
 #include <expected>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -204,8 +204,6 @@ std::string headOf(std::string_view text) {
     return head;
 }
 
-bool capitalised(std::string_view text) { return startsWithCapital(text); }
-
 std::string_view afterWords(std::string_view text, std::size_t count) {
     for (std::size_t i = 0; i < count; ++i) {
         const auto space = text.find_first_of(" \t");
@@ -298,8 +296,8 @@ constexpr auto kCommands = std::to_array<CommandWord>({
     {"fullscreen", true, true}, {"screenshot", true, true}, {"quit", true, true},
     // Buttons and keys only.
     {"start", false, true}, {"continue", false, true}, {"close", false, true}, {"answer call", false, true}, {"decline call", false, true}, {"hang up", false, true},
-    {"answer", false, true}, {"phone call", false, true}, {"send", false, true}, {"like", false, true}, {"keypad", false, true}, {"unlock", false, true},
-    {"quick load", false, true}, {"skip", false, true}, {"auto", false, true},
+    {"answer", false, true}, {"phone call", false, true}, {"send", false, true}, {"keypad", false, true}, {"unlock", false, true},
+    {"quick load", false, true}, {"skip", false, true}, {"auto", false, true}, {"tools", false, true},
     {"next line", false, true}, {"rollback", false, true}, {"reload", false, true}, {"yes", false, true}, {"no", false, true},
     {"next page", false, true}, {"previous page", false, true}, {"delete save", false, true}, {"next image", false, true},
     {"previous image", false, true}, {"setting", false, true}, {"reset settings", false, true}, {"reset controls", false, true},
@@ -512,10 +510,11 @@ private:
 
     cmd::Jump& jumpAt(std::size_t pc) { return std::get<cmd::Jump>(s_.code[pc].command); }
 
-    std::optional<Expr> formula(const Line& line, std::string_view src) {
+    // `missing`: what's said when there's nothing there, in the words of the line's form (else the plain one).
+    std::optional<Expr> formula(const Line& line, std::string_view src, std::string missing = {}) {
         src = trim(src);
         if (src.empty()) {
-            error(line, "A value or a condition is missing."_tr());
+            error(line, missing.empty() ? "A value or a condition is missing."_tr() : std::move(missing));
             return std::nullopt;
         }
         auto e = Expr::parse(src);
@@ -711,7 +710,7 @@ private:
             const Line& line = lines[i];
             const std::string head = headOf(line.text);
             const std::string second = lower(firstWord(afterWords(line.text, 1)));
-            const bool exact = !capitalised(line.text);
+            const bool exact = !startsWithCapital(line.text);
             const bool hasBlock = !line.children.empty();
             if (const auto phone = head == "scene" && hasBlock && phase_ == Phase::Story ? phoneSceneFor(line) : std::nullopt) {
                 phoneScene(line, *phone->first, phone->second);
@@ -750,7 +749,7 @@ private:
             if (phase_ == Phase::Story) {
                 if (isElse && !trim(afterWords(line.text, 1)).empty() && trim(afterWords(line.text, 1)) != ":")
                     error(line, "'else' takes nothing after it."_tr());
-                if (!isElse) branch = emit(cmd::Jump{.unless = formula(line, condition)}, line);
+                if (!isElse) branch = emit(cmd::Jump{.unless = formula(line, condition, "What to check is missing."_tr())}, line);
                 if (line.children.empty())
                     error(line, "Nothing is indented under this line."_tr());
             }
@@ -759,7 +758,7 @@ private:
             bool more = false;
             if (!isElse && i + 1 < lines.size()) {
                 const std::string next = headOf(lines[i + 1].text);
-                more = next == "else" && (!capitalised(lines[i + 1].text) || !lines[i + 1].children.empty());
+                more = next == "else" && (!startsWithCapital(lines[i + 1].text) || !lines[i + 1].children.empty());
             }
             if (phase_ == Phase::Story) {
                 if (more) exits.push_back(emit(cmd::Jump{}, line, true));
@@ -1016,7 +1015,7 @@ private:
         switch (m.kind) {
         case Kind::Text:
             m.text = unquote(after);
-            if (m.text.empty()) return error(line, "{} doesn't say anything."_tr(who.empty() ? std::string("me") : who)), Parsed::Bad;
+            if (m.text.empty()) return error(line, who.empty() ? "The player doesn't say anything."_tr() : "{} doesn't say anything."_tr(who)), Parsed::Bad;
             break;
         case Kind::Image: { // sends [sticker | voice] NAME [: caption]
             std::string_view what = after, caption;
@@ -1030,7 +1029,8 @@ private:
             }
             m.file = unquote(what);
             m.text = unquote(caption);
-            if (m.file.empty() || m.file.find(' ') != std::string::npos)
+            if (m.file.empty()) return error(line, m.kind == Kind::Voice ? "Which voice file to send is missing."_tr() : "Which image to send is missing."_tr()), Parsed::Bad;
+            if (m.file.find(' ') != std::string::npos)
                 return error(line, "'sends' needs an image's name after it, or sticker or voice and a name."_tr()), Parsed::Bad;
             if (m.kind != Kind::Voice) m.file = imageName(m.file);
             break;
@@ -1045,13 +1045,13 @@ private:
             }
             break;
         case Kind::Edit: // edits it: words
-            if (!after.starts_with(':') || trim(after.substr(1)).empty())
-                return error(line, "'edits it' needs the new words after a colon."_tr()), Parsed::Bad;
+            if (after.empty() || (after.starts_with(':') && trim(after.substr(1)).empty())) return error(line, "What to change it to is missing."_tr()), Parsed::Bad;
+            if (!after.starts_with(':')) return error(line, "'edits it' needs the new words after a colon."_tr()), Parsed::Bad;
             m.text = unquote(after.substr(1));
             break;
         case Kind::React:
             m.text = unquote(after);
-            if (m.text.empty()) return error(line, "'reacts' needs the reaction after it."_tr()), Parsed::Bad;
+            if (m.text.empty()) return error(line, "Which reaction is missing."_tr()), Parsed::Bad;
             break;
         default: // deletes it, reads it
             if (!after.empty()) return error(line, "'{}' doesn't belong in this line."_tr(after)), Parsed::Bad;
@@ -1185,7 +1185,7 @@ private:
     // -- Story lines ---------------------------------------------------------------
 
     void statement(const Line& line) {
-        const bool lenient = capitalised(line.text);
+        const bool lenient = startsWithCapital(line.text);
         const std::string verb = commandOf(line.text, true);
         if (verb == "scene") {
             if (!attempt(lenient, [&] { scene(line); })) say(line);
@@ -1464,6 +1464,11 @@ private:
             ui.arg = std::format("{} {}", setting, *n);
             return finished(ui);
         }
+        if (verb == "tools") { // tools WHAT: one of the developer tools' own keys (a control's): nothing in the game
+            ui.arg = lower(std::string(trim(rest)));
+            if (!std::ranges::contains(kToolsVerbs, ui.arg)) return fail(line, "'{}' isn't one of the developer tools' keys."_tr(ui.arg));
+            return ui;
+        }
         if (verb == "start" && !c.done()) ui.arg = lower(*c.next());
         if (verb == "open chat" || verb == "phone call" || verb == "open image") { // open chat WHO, phone call WHO, open image NAME (in a list: {chat.name}...)
             ui.arg = unquote(rest, true);
@@ -1567,9 +1572,7 @@ private:
         if (!word) return error(line, "'at' needs a place on the stage."_tr()), false;
         if (auto n = stageCoordinate(*word, false)) props.x = *n;
         else if (auto it = places_.find(lower(*word)); it != places_.end()) props.x = it->second;
-        else {
-            return error(line, "There's no place called '{}'."_tr(*word)), false;
-        }
+        else return error(line, "There's no place called '{}'."_tr(*word)), false;
         return true;
     }
 
@@ -1648,7 +1651,10 @@ private:
             } else if (!set.variable.empty() && value.empty()) {
                 return fail(line, "What to set {} to is missing."_tr(set.variable));
             } else if (!set.variable.empty()) {
-                return fail(line, "'set' needs a name, 'to' and a value."_tr());
+                const std::string low = lower(rest);
+                if (const auto to = low.find(" to "); to != std::string::npos) // ("set my score to 1": a name that's more than a word)
+                    return fail(line, "'{}' can't be a variable name (one word of letters, numbers and _)."_tr(trim(std::string_view(low).substr(0, to))));
+                return fail(line, "The word 'to' after '{}' is missing."_tr(set.variable));
             }
         } else if (verb == "toggle") {
             set.variable = lower(rest);
@@ -1665,8 +1671,7 @@ private:
                               : verb == "toggle"   ? "Which variable to toggle is missing."_tr()
                                                    : "Which variable to set is missing."_tr());
         if (!isVariable(set.variable))
-            return fail(line, "'{}' can't be a variable name (one word of letters, numbers and _)."_tr(
-                                          set.variable));
+            return fail(line, "'{}' can't be a variable name (one word of letters, numbers and _)."_tr(set.variable));
         for (std::size_t k = 0; k < kRecordKinds.size(); ++k) // (a record's, persistent.ending.NAME: one the game lists)
             if (const std::string head = std::format("persistent.{}.", kRecordKinds[k]); set.variable.starts_with(head)) {
                 const auto kind = static_cast<RecordKind>(k);
@@ -1675,7 +1680,9 @@ private:
             }
         wrote(set.variable);
         if (set.op != '!') {
-            set.value = formula(line, value);
+            set.value = formula(line, value, set.op == '+'   ? "What to add to {} is missing."_tr(set.variable)
+                                             : set.op == '-' ? "What to subtract from {} is missing."_tr(set.variable)
+                                                             : "What to set {} to is missing."_tr(set.variable));
             if (!set.value) return std::nullopt;
         }
         return set;
@@ -1879,7 +1886,7 @@ private:
         for (const auto& group : order)
             for (const Line* line : defs_)
                 if (const std::string kind = headOf(line->text); kind == group[0] || kind == group[1]) {
-                    const bool lenient = capitalised(line->text) && line->children.empty();
+                    const bool lenient = startsWithCapital(line->text) && line->children.empty();
                     if (!attempt(lenient, [&] { define(*line, kind); })) asText_.insert(line);
                 }
         startTime();
@@ -1939,9 +1946,7 @@ private:
             s_.palette.insert_or_assign(lower(*name), *col);
         } else if (kind == "variable") { // variable NAME [VALUE] ["what it's for"]
             const auto name = c.next();
-            const bool valid = name && !name->empty() && (letterByte((*name)[0]) || (*name)[0] == '_') &&
-                               std::ranges::all_of(*name, [](char ch) { return letterOrDigitByte(ch) || ch == '_' || ch == '.'; });
-            if (!valid) return error(line, "A variable line needs the variable's name: one word (letters, numbers and _)."_tr());
+            if (!name || !isVariable(*name)) return error(line, "A variable line needs the variable's name: one word (letters, numbers and _)."_tr());
             Value start = 0;
             if (!c.done()) {
                 const ScriptWord& w = c.peek();
@@ -2399,15 +2404,21 @@ private:
             float lo, hi;
         };
         static constexpr std::array numbers{
-            Number{"skip_time", &GameSettings::skipTime, 0.0f, 10.0f},     Number{"auto_letter_delay", &GameSettings::autoLetterDelay, 0.0f, 10.0f},
-            Number{"character_height", &GameSettings::characterHeight, 0.05f, 10.0f}, Number{"move_time", &GameSettings::moveTime, 0.0f, 60.0f},
-
+            Number{"skip_time", &GameSettings::skipTime, 0.0f, 10.0f},
+            Number{"auto_letter_delay", &GameSettings::autoLetterDelay, 0.0f, 10.0f},
+            Number{"character_height", &GameSettings::characterHeight, 0.05f, 10.0f},
+            Number{"move_time", &GameSettings::moveTime, 0.0f, 60.0f},
             Number{"music_crossfade", &GameSettings::musicCrossfade, 0.0f, 60.0f},
-            Number{"glide_speed", &GameSettings::glideSpeed, 0.0f, 10.0f},      Number{"glide_distance", &GameSettings::glideDistance, 0.05f, 10.0f},
-            Number{"scrollbar_thickness", &GameSettings::scrollbarThickness, 1.0f, 64.0f}, Number{"fading_edges", &GameSettings::fadingEdges, 0.0f, 1000.0f},
-            Number{"typing_sound_gap", &GameSettings::typingSoundGap, 0.01f, 10.0f},    Number{"typing_sound_volume", &GameSettings::typingSoundVolume, 0.0f, 1.0f},
-            Number{"made_up_voice_speed", &GameSettings::madeUpVoiceSpeed, 0.25f, 4.0f}, Number{"seconds_between_blinks", &GameSettings::secondsBetweenBlinks, 0.5f, 60.0f},
-            Number{"mouth_speed", &GameSettings::mouthSpeed, 0.5f, 20.0f},     Number{"phone_typing", &GameSettings::phoneTyping, 0.0f, 100.0f},
+            Number{"glide_speed", &GameSettings::glideSpeed, 0.0f, 10.0f},
+            Number{"glide_distance", &GameSettings::glideDistance, 0.05f, 10.0f},
+            Number{"scrollbar_thickness", &GameSettings::scrollbarThickness, 1.0f, 64.0f},
+            Number{"fading_edges", &GameSettings::fadingEdges, 0.0f, 1000.0f},
+            Number{"typing_sound_gap", &GameSettings::typingSoundGap, 0.01f, 10.0f},
+            Number{"typing_sound_volume", &GameSettings::typingSoundVolume, 0.0f, 1.0f},
+            Number{"made_up_voice_speed", &GameSettings::madeUpVoiceSpeed, 0.25f, 4.0f},
+            Number{"seconds_between_blinks", &GameSettings::secondsBetweenBlinks, 0.5f, 60.0f},
+            Number{"mouth_speed", &GameSettings::mouthSpeed, 0.5f, 20.0f},
+            Number{"phone_typing", &GameSettings::phoneTyping, 0.0f, 100.0f},
             Number{"music_under_voices", &GameSettings::musicUnderVoices, 0.0f, 1.0f},
         };
         struct Whole {
@@ -2683,8 +2694,7 @@ private:
             for (auto& kv : props) scaleBuiltIn(kv);
 
         // Base style: style=NAME, else the style named after the element kind, else "default".
-        std::string styleName(spec->style.empty() ? "default" : spec->style);
-        if (!styleLines_.contains(styleName)) styleName = "default";
+        std::string styleName(partStyle(spec->name, [&](std::string_view name) { return styleLines_.contains(name); }));
         for (const auto& [k, v] : props)
             if (k == "style") {
                 styleName = lower(v);
@@ -2800,9 +2810,18 @@ private:
     }
 
     void bindings() {
+        const std::size_t first = s_.controls.size();
         for (const auto& c : controlLines_)
             s_.controls.push_back({.name = c.name, .keys = c.keys, .actions = actions(*c.line, c.action), .inMenus = c.inMenus,
                                    .condition = c.condition.empty() ? std::nullopt : formula(*c.line, c.condition)});
+        // A key the game gives one of its own controls isn't a built-in one's (on screens, or in the story, as they are): a
+        // game's "a" for its map stays the map's, and auto-forward keeps its controller button.
+        auto builtIn = [&](std::size_t i) { return controlLines_[i].line->file < builtinFiles_; };
+        for (std::size_t i = 0; i < controlLines_.size(); ++i)
+            if (builtIn(i))
+                for (std::size_t j = 0; j < controlLines_.size(); ++j)
+                    if (!builtIn(j) && s_.controls[first + j].onScreens() == s_.controls[first + i].onScreens())
+                        std::erase_if(s_.controls[first + i].keys, [&](const KeyChord& k) { return std::ranges::contains(s_.controls[first + j].keys, k); });
     }
 
     // -- Scenes -----------------------------------------------------------------------
@@ -2856,6 +2875,11 @@ bool partTakes(std::string_view kind, std::string_view key) {
     return spec != kKinds.end() && std::ranges::contains(spec->options, key);
 }
 
+std::string_view partStyle(std::string_view kind, const std::function<bool(std::string_view)>& hasStyle) {
+    const auto spec = std::ranges::find(kKinds, kind, &KindSpec::name);
+    return spec != kKinds.end() && !spec->style.empty() && hasStyle(spec->style) ? spec->style : "default";
+}
+
 // ---------------------------------------------------------------------------
 // Script
 // ---------------------------------------------------------------------------
@@ -2875,6 +2899,21 @@ std::optional<std::size_t> Script::findScene(std::string_view name) const {
 const CharacterDef* Script::character(std::string_view key) const {
     auto it = characters.find(key);
     return it != characters.end() ? &it->second : nullptr;
+}
+
+std::optional<std::size_t> toolsVerbOf(const Control& control) {
+    if (control.actions.size() != 1) return std::nullopt;
+    const auto* ui = std::get_if<cmd::Ui>(&control.actions.front());
+    if (!ui || ui->verb != "tools") return std::nullopt;
+    const auto it = std::ranges::find(kToolsVerbs, std::string_view(ui->arg));
+    return it != kToolsVerbs.end() ? std::optional(static_cast<std::size_t>(it - kToolsVerbs.begin())) : std::nullopt;
+}
+
+bool Control::onScreens() const {
+    return !actions.empty() && std::ranges::all_of(actions, [](const Command& a) {
+        const auto* ui = std::get_if<cmd::Ui>(&a);
+        return ui && (ui->verb.starts_with("move ") || ui->verb.starts_with("scroll ") || ui->verb == "press");
+    });
 }
 
 const Control* Script::control(std::string_view name) const {
@@ -2940,12 +2979,40 @@ std::string Script::where(const Instruction& ins) const {
 // ---------------------------------------------------------------------------
 // The built-in screens
 // ---------------------------------------------------------------------------
-// The player's built-in screens: just what a story needs to play (its lines and its choices). A
-// game's own screens and controls replace these, and add the rest (a title screen, menus...).
+// The player's built-in screens: just what a story needs to play (its lines, with Skip, Auto and quick saves, a Phone
+// button when the game has a phone and a Menu button when it has a pause menu, side by side at the right; its choices,
+// and a moment's "Saved"), and its keys: the next line, skipping and auto-forward, quick saving and loading, and on
+// screens, pointing at what's there (the arrow keys, a controller's d-pad or stick) and pressing it; then the developer
+// tools' own (tools WHAT: the keys of their buttons, which do nothing in the game). A game's own screens and controls
+// replace these, and add the rest (a title screen, menus...).
 
 std::string_view defaultUi() {
     return R"vnext(
 control next_line keys="space mouse_left return kp_enter pad_a" action="next line"
+control skip keys="tab pad_rb" action=skip
+control auto keys="a pad_lb" action=auto
+control quick_save keys="f5" action="quick save; open saved" when=can_save
+control quick_load keys="f9" action="quick load" when=has_quick_save
+control move_up keys="up pad_up" action="move up" in_menus=yes
+control move_down keys="down pad_down" action="move down" in_menus=yes
+control move_left keys="left pad_left" action="move left" in_menus=yes
+control move_right keys="right pad_right" action="move right" in_menus=yes
+control press keys="return space kp_enter pad_a" action=press in_menus=yes
+control tools_undo keys="cmd+z ctrl+z" action="tools undo"
+control tools_redo keys="cmd+shift+z ctrl+shift+z cmd+y ctrl+y" action="tools redo"
+control tools_cut keys="cmd+x ctrl+x" action="tools cut"
+control tools_copy keys="cmd+c ctrl+c" action="tools copy"
+control tools_paste keys="cmd+v ctrl+v" action="tools paste"
+control tools_duplicate keys="cmd+d ctrl+d" action="tools duplicate"
+control tools_delete keys="delete backspace" action="tools delete"
+control tools_select_all keys="cmd+a ctrl+a" action="tools select all"
+control tools_reload keys="cmd+r ctrl+r" action="tools reload"
+control tools_quit keys="cmd+q ctrl+q" action="tools quit"
+control tools_story keys="cmd+1 ctrl+1" action="tools story"
+control tools_screens keys="cmd+2 ctrl+2" action="tools screens"
+control tools_library keys="cmd+3 ctrl+3" action="tools library"
+control tools_play keys="f10" action="tools play"
+control tools_stop_here keys="f9" action="tools stop here"
 
 style choice size=24 align=centre align_vertically=centre background=#2b2563 border=#5b51b8 pointed_background=#3b3392 chosen_background=#4d41c4 unclickable_colour=#9696a5 shadow=no
 
@@ -2953,7 +3020,7 @@ style textbox_panel border=#5b51b8 opacity_follows=yes shadow=no
 style namebox size=28 background=#2b2563 padding=20 colour=speaker opacity_follows=yes shadow=no
 style dialogue size=28 text_size_follows=yes shadow=no
 style indicator colour=#ada2ff shadow=no
-style textbox_phone size=20 align=centre align_vertically=centre background=#2b2563 border=#5b51b8 pointed_background=#3b3392 shadow=no
+style textbox_button size=20 align=centre align_vertically=centre background=#2b2563 border=#5b51b8 pointed_background=#3b3392 chosen_background=#4d41c4 unclickable_colour=#9696a5 shadow=no
 style textbox_unread size=15 colour=#0c0a22 align=centre align_vertically=centre shadow=no
 
 screen textbox story=goes_on
@@ -2961,12 +3028,24 @@ screen textbox story=goes_on
     namebox x=-0.9 y=-0.3947 height=0.0639 bar=3
     dialogue x=0 y=-0.4667 width=0.8875
     indicator x=0.8938 y=-0.8305 width=0.0141 height=0.0167
-    button "Phone" x=0.8889 y=-0.3947 width=0.1 height=0.0639 style=textbox_phone action="open phone" when=phone_button
-    image #ada2ff x=0.9138 y=-0.3236 width=0.0219 height=0.0389 when="phone_button and phone_unread is more than 0"
-    text "{phone_unread}" x=0.9138 y=-0.3236 width=0.0219 height=0.0389 style=textbox_unread when="phone_button and phone_unread is more than 0"
+    container x=0 y=-0.3947 width=0.9 height=0.0639
+        container x=1 y=0 height=1 fit=parts stack=across spacing_across=0.0069
+            container width=0.1111 height=1 when=phone_button
+                button "Phone" x=0 y=0 width=1 height=1 style=textbox_button action="open phone"
+                image #ada2ff x=1.358 y=1.4302 width=0.219 height=0.6088 when="phone_unread is more than 0"
+                text "{phone_unread}" x=1.358 y=1.4302 width=0.219 height=0.6088 style=textbox_unread when="phone_unread is more than 0"
+            button "Menu" width=0.1111 height=1 style=textbox_button action="open pause" when=menu_button
+            button "Skip" width=0.1111 height=1 style=textbox_button action=skip chosen=skip
+            button "Auto" width=0.1111 height=1 style=textbox_button action=auto chosen=auto
+            button "Q.Save" width=0.1111 height=1 style=textbox_button action="quick save; open saved" clickable=can_save
+            button "Q.Load" width=0.1111 height=1 style=textbox_button action="quick load" clickable=has_quick_save
 
 screen choice story=goes_on
-    choices x=0 y=0.7333 width=0.5625 height=0.5833 item_height=0.075 spacing_across=0.0109 spacing_down=0.0194
+    choices x=0 y=0.7333 width=0.5625 height=0.5833 item_height=0.075 spacing_across=0.0109 spacing_down=0.0194 position=bottom
+
+screen saved story=goes_on close_after=1.5
+    container x=0.95 y=0.92 width=0.14 height=0.0639 style=textbox_button
+        text "Saved" x=0 y=0 width=1 height=1 style=textbox_button
 )vnext";
 }
 

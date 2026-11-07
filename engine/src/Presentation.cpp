@@ -311,8 +311,8 @@ void Script::forEachText(const std::function<void(std::string& text, const TextP
         for (Element& el : screen->elements) {
             if (el.kind == ElementKind::Text || el.kind == ElementKind::Button) f(el.text, place);
             if (!el.confirm.empty()) f(el.confirm, place);
-            // (the words parts show: an input's placeholder, the pages' tabs, the saves' questions, a control's while it
-            // waits for a key, a phone app's title)
+            // (the words parts show: an input's placeholder, what an ending or achievement shows until it's had, the
+            // pages' tabs, the saves' questions, a control's while it waits for a key, a phone app's title)
             static constexpr std::string_view kWords[]{"placeholder", "secret", "auto", "quick", "load_confirm", "delete_confirm", "waiting", "title"};
             for (std::string_view word : kWords)
                 if (auto it = el.props.find(word); it != el.props.end()) f(it->second, place);

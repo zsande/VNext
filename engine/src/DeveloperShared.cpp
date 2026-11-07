@@ -56,18 +56,15 @@ std::vector<std::string> toolsTexts() {
     };
     for (const auto& [text, shape] : listedTexts()) {
         switch (shape) {
-        case TextShape::Text: add(text); break;
+        case TextShape::Text:
+        case TextShape::Group: add(text); break;
         case TextShape::Labels:
             for (const std::string_view label : wordsOf(text, '|')) add(label);
             break;
-        case TextShape::Suggestions: // (what each is)
-            for (const std::string_view entry : wordsOf(text, '|'))
-                if (const std::string_view about = suggestionOf(entry).second; !about.empty()) add(about);
-            break;
+        case TextShape::Suggestions: break; // (values, as written)
         case TextShape::Hint: // (words; not a value, as 100% or 1)
             if (std::isupper(static_cast<unsigned char>(text.front()))) add(text);
             break;
-        case TextShape::Group: add(text.starts_with('+') ? text.substr(1) : text); break;
         case TextShape::Choices: // (as their buttons say them)
             for (const std::string_view word : wordsOf(text)) add(upperFirst(spaced(word)));
             break;
@@ -120,16 +117,6 @@ std::string styleValueText(const Style& s, std::string_view key, const Palette& 
 
 namespace dev {
 
-std::pair<std::string_view, std::string_view> suggestionOf(std::string_view entry) {
-    const auto digit = [&](std::size_t k) { return k < entry.size() && std::isdigit(static_cast<unsigned char>(entry[k])); };
-    for (std::size_t i = 0; i < entry.size(); ++i) {
-        if (entry[i] != ':') continue;
-        const bool time = digit(i - 1) && digit(i + 1) && digit(i + 2) && (i + 3 == entry.size() || entry[i + 3] == ' ' || entry[i + 3] == ':'); // (8:00)
-        if (!time) return {entry.substr(0, i), entry.substr(i + 1)};
-    }
-    return {entry, {}};
-}
-
 std::string scaled(const std::string& line, float sy) {
     if (sy == 1.0f) return line;
     static const std::set<std::string_view> down{"size", "padding", "bar"};
@@ -170,6 +157,10 @@ void showGameSettingValues(std::vector<StoryEditor::Field>& fields, const GameSe
         }
         if (f.name == "Title" && f.hint.empty() && !value("Name").empty()) { // (an ending's, an achievement's, a tip's: its name)
             f.hint = value("Name");
+            continue;
+        }
+        if (f.name == "Fade out" && f.hint == "None" && !value("Called").empty()) { // (a named sound's: the one before by its name stops at once)
+            f.hint = "At once"_hint;
             continue;
         }
         if (f.hint != "From Settings") continue;
@@ -214,9 +205,8 @@ std::vector<std::string> clipboardLines() {
     return out;
 }
 
-char clipboardKey(const SDL_KeyboardEvent& key) {
-    if (!(key.mod & (SDL_KMOD_GUI | SDL_KMOD_CTRL))) return 0;
-    return key.key == SDLK_C ? 'c' : key.key == SDLK_X ? 'x' : key.key == SDLK_V ? 'v' : key.key == SDLK_D ? 'd' : 0;
+char clipboardKey(const DeveloperTools& d, const SDL_KeyboardEvent& key) {
+    return d.isKey(key, ToolKey::Copy) ? 'c' : d.isKey(key, ToolKey::Cut) ? 'x' : d.isKey(key, ToolKey::Paste) ? 'v' : d.isKey(key, ToolKey::Duplicate) ? 'd' : 0;
 }
 
 std::size_t previousLetter(const std::string& s, std::size_t i) {
@@ -353,6 +343,13 @@ DeveloperTools::Edited DeveloperTools::edited(const std::string& id, StoryEditor
     std::ranges::find(out.fields, name, &StoryEditor::Field::name)->value = value;
     focus.clear();
     return out;
+}
+
+bool DeveloperTools::isKey(const SDL_KeyboardEvent& key, ToolKey which) const {
+    if (key.which == kToolButton) return key.raw == static_cast<Uint16>(which); // (its button's: it's that, whatever its keys)
+    SDL_Event e{};
+    e.key = key;
+    return std::ranges::any_of(toolKeys[static_cast<std::size_t>(which)], [&](const KeyChord& chord) { return chord.matches(e); });
 }
 
 void DeveloperTools::saidRenamed(bool ok, std::string_view mistake) {

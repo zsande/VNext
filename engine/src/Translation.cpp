@@ -252,8 +252,6 @@ TranslationFile translationFile(Script& script, std::string_view id, const std::
             heading = "Character names";
         } else if (place.what == "screen") {
             heading = std::format("Screen: {}", place.name);
-        } else if (place.what == "control") {
-            heading = "Input";
         } else { // a record: the gallery, endings, songs, achievements, tips
             static const std::map<std::string_view, std::string_view> headings{
                 {"gallery", "Gallery"}, {"ending", "Endings"}, {"song", "Music room"}, {"achievement", "Achievements"}, {"tip", "Tips"}};

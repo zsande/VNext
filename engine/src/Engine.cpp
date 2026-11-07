@@ -100,7 +100,7 @@ std::vector<std::string> systemFallbackFonts() {
 }
 
 bool isPress(const SDL_Event& e) {
-    return e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat);
+    return e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat);
 }
 
 // The player settings a game starts with ("setting default.*" lines).
@@ -125,7 +125,7 @@ Engine::Session::~Session() {
 }
 
 namespace {
-constexpr std::size_t kLogKept = 500; // messages the developer tools can show
+constexpr std::size_t kLogKept = 500; // messages kept for the log file before it's open
 
 void writeLogLine(SDL_IOStream* io, SDL_LogPriority priority, std::string_view text) {
     static constexpr const char* names[] = {"", "TRACE", "VERBOSE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL"};
@@ -144,11 +144,12 @@ void Engine::Log::start() {
             if (self->previous) self->previous(self->previousData, category, priority, message);
             withoutThrowing([&] { // (SDL calls this, from any thread)
                 const std::scoped_lock _(self->mutex);
-                self->recent.push_back({priority, message});
-                if (self->recent.size() > kLogKept) self->recent.pop_front();
                 if (self->io) {
                     writeLogLine(self->io.get(), priority, message);
                     SDL_FlushIO(self->io.get());
+                } else {
+                    self->early.push_back({priority, message});
+                    if (self->early.size() > kLogKept) self->early.pop_front();
                 }
             });
         },
@@ -160,20 +161,9 @@ void Engine::Log::open(const std::string& path) {
     io.reset(SDL_IOFromFile(path.c_str(), "w"));
     if (!io) return;
     SDL_IOprintf(io.get(), "VNext %s on %s, with SDL %s\n", kVersion, SDL_GetPlatform(), sdlVersion().c_str()); // (on screen, About says)
-    for (const Entry& e : recent) writeLogLine(io.get(), e.priority, e.text);
+    for (const Entry& e : early) writeLogLine(io.get(), e.priority, e.text);
+    early.clear();
     SDL_FlushIO(io.get());
-}
-
-std::vector<Engine::Log::Entry> Engine::Log::newest(std::size_t count, std::size_t skip) {
-    const std::scoped_lock _(mutex);
-    const std::size_t end = recent.size() - std::min(skip, recent.size());
-    const std::size_t begin = end - std::min(count, end);
-    return {recent.begin() + static_cast<std::ptrdiff_t>(begin), recent.begin() + static_cast<std::ptrdiff_t>(end)};
-}
-
-std::size_t Engine::Log::size() {
-    const std::scoped_lock _(mutex);
-    return recent.size();
 }
 
 Engine::Log::~Log() {
@@ -322,8 +312,8 @@ void Engine::loadPlayerData() {
 }
 
 // What the player shows first: scene start (a game folder's: or --scene's scene, to try one; a pack, a
-// finished game, always begins at scene start). In developer mode, the developer
-// tools, until Play; without a game, they're all there is.
+// finished game, always begins at scene start). In developer mode, the developer tools, until Play;
+// without a game, they're all there is.
 void Engine::begin() {
     if (packed_) startScene_.clear();
     if (noGame_) developer_.openDeveloper();
@@ -486,7 +476,7 @@ const Translation* Engine::language() const {
 void Engine::useLanguage() {
     const Translation* t = language();
     script_.translate(t);
-    if (window_) SDL_SetWindowTitle(window_.get(), windowTitle().c_str());
+    showTitle();
     assets_->setLanguage(t ? t->id : std::string{});
     configureFonts();
 }
@@ -582,18 +572,18 @@ Script Engine::readScript() const {
     return script;
 }
 
-// Where the developer tools' Pack the game puts the pack: next to the game folder.
+// Where the developer tools' Pack puts the pack: next to the game folder.
 std::string Engine::packPath() const {
     const std::string folder = gameRoot_.substr(0, gameRoot_.size() - 1);
     const auto slash = folder.find_last_of("/\\");
     return (slash == std::string::npos ? std::string{} : folder.substr(0, slash + 1)) + std::string(kPackName);
 }
 
-// What packing says, a sentence or two a line (the developer tools' window shows the lines apart, the log
-// on one line), in the developer tools' language (on the command line, English).
+// What packing says, a sentence or two a line (the developer tools' window shows the lines apart, the log on
+// one line), in the developer tools' language (on the command line, English).
 namespace {
 std::string packedAlready() { return "Can't pack the game: it's a pack already."_tr() + "\n" + "Open its game folder to pack it again."_tr(); }
-std::string scriptsWrong() { return "Can't pack the game: its scripts have mistakes."_tr() + "\n" + "The Story tab and the log say where."_tr(); }
+std::string scriptsWrong() { return "Can't pack the game: its scripts have mistakes."_tr() + "\n" + "The developer tools mark them in red."_tr(); }
 } // namespace
 
 // Packs the game into `file`, and writes the licences of what's built into the player next to it
@@ -619,7 +609,7 @@ std::expected<std::string, std::string> Engine::packInto(const std::string& file
                               : "The pack holds {} files ({:.1f} MB) in {:.1f} MB, made in {:.1f} seconds."_tr(report->files, size, packed, took);
 }
 
-// Pack the game: next to the game folder, a folder named after the game with game.vnext (the game in
+// Pack: next to the game folder, a folder named after the game with game.vnext (the game in
 // one file, which keeps its players' saves and progress in it too) and licences.txt. To play it, the player goes
 // next to game.vnext: VNext.app, VNext.exe or VNext-Linux.AppImage, from VNext's releases on GitHub. One made before
 // goes to the Trash first.
@@ -686,7 +676,7 @@ void Engine::configure() {
     sound_.setDucking(game.musicUnderVoices);
     assets_->setMemoryLimit(static_cast<std::size_t>(game.imageMemory) * 1024 * 1024);
     saves_.configure(game.savePages, game.pageSlots);
-    hasSave_ = saves_.newest().has_value();
+    countSaves();
     if (inPack_) logInfo("Saves and progress go in '{}'.", gameRoot_.substr(0, gameRoot_.size() - 1));
     else if (!noGame_) logInfo("Saves go in '{}'.", saves);
     applySettings();
@@ -727,6 +717,7 @@ std::optional<Value> Engine::builtin(std::string_view name) const {
     const bool playing = mode_ == Mode::Game && g;
     if (name == "in_game") return flag(playing);
     if (name == "has_save") return flag(hasSave_);
+    if (name == "has_quick_save") return flag(hasQuickSave_);
     if (name == "can_save") return flag(playing && g->canSave());
     if (name == "can_rollback") return flag(playing && g->canRollback());
     if (name == "skip") return flag(playing && g->skipping());
@@ -780,9 +771,9 @@ std::optional<Value> Engine::builtin(std::string_view name) const {
         return g && def ? phoneApp(*def) : std::string{};
     }
     if (name == "has_phone") return flag(playing && g->hasPhone());
-    if (name == "phone_button") // (the textbox's Phone button: new messages say so with it, and there's a phone to open, not open already)
-        return flag(playing && g->hasPhone() && gameSettings().newMessages == NewMessages::Button && script_.screen("phone") &&
-                    !std::ranges::contains(overlays_, std::string("phone")));
+    if (name == "phone_button") // (the textbox's Phone button: a phone to open, not open already; with new_messages button its count says a message came)
+        return flag(playing && g->hasPhone() && script_.screen("phone") && !std::ranges::contains(overlays_, std::string("phone")));
+    if (name == "menu_button") return flag(playing && script_.screen("pause") && !std::ranges::contains(overlays_, std::string("pause"))); // (the textbox's Menu button: a pause menu to open)
     if (name == "messages_unread") return g ? g->unseenMessages() : 0; // (not the ones still being typed)
     if (name == "calls_missed") return g ? g->unseenCalls() : 0;
     if (name == "phone_unread") return g ? g->unseenMessages() + g->unseenCalls() : 0; // (what the Phone button counts)
@@ -929,7 +920,7 @@ void Engine::leaveStory(bool keepSound) {
 void Engine::openTitle(bool keepSound) {
     leaveStory(keepSound);
     for (const auto& [name, value] : beforeTitle_) game_->setVariable(name, value); // (its buttons see what was picked before it)
-    hasSave_ = saves_.newest().has_value();
+    countSaves();
     if (ScreenView* title = view("title")) {
         title->reset();
         titleShown_ = true;
@@ -1164,21 +1155,81 @@ void Engine::syncShownScreens() {
             }
 }
 
-// The screen a control's move, press and scroll actions work on: the one on top that takes clicks (open menus
-// first, then the title, the choice, the textbox, the screens the story shows and the hud), or a menu over them.
-ScreenView* Engine::keyView() {
-    std::vector<ScreenView*> order;
-    for (const auto& name : overlays_ | std::views::reverse) order.push_back(view(name));
-    if (mode_ == Mode::Title) order.push_back(view("title"));
+// The screens a control's move, press and scroll actions work on: an open menu on top that takes clicks (or one the
+// story waits for), alone; else the title screen; else the story's, together: the choice, the textbox, the screens
+// the story shows (down to one that takes every key) and the hud.
+std::vector<ScreenView*> Engine::keyViews() {
+    for (const auto& name : overlays_ | std::views::reverse)
+        if (ScreenView* v = view(name); v && (v->takesClicks() || v->modal())) return {v};
+    std::vector<ScreenView*> out;
+    auto add = [&](ScreenView* v) { // (true: it takes every key, so none under it does)
+        if (v && (v->takesClicks() || v->modal())) out.push_back(v);
+        return v && v->modal();
+    };
+    if (mode_ == Mode::Title) add(view("title"));
     else if (mode_ == Mode::Game && game_) {
-        if (game_->showingChoices() && !game_->choiceOnPhone()) order.push_back(view("choice"));
-        if (game_->showingSay()) order.push_back(textbox());
-        for (const auto& name : game_->shownScreens() | std::views::reverse) order.push_back(view(name));
-        order.push_back(view("hud"));
+        if (game_->showingChoices() && !game_->choiceOnPhone()) add(view("choice"));
+        if (game_->showingSay()) add(textbox());
+        for (const auto& name : game_->shownScreens() | std::views::reverse)
+            if (add(view(name))) return out;
+        add(view("hud"));
     }
-    for (ScreenView* v : order)
-        if (v && (v->takesClicks() || v->modal())) return v;
-    return nullptr;
+    if (const auto typing = std::ranges::find_if(out, &ScreenView::typing); typing != out.end()) return {*typing}; // (an input's keyboard: only its keys)
+    return out;
+}
+
+// The move actions: a slider pointed at changes (left and right), else the nearest part that way on the screens the
+// keys work on is pointed at (none pointed at yet: the first one); with none that way, what scrolls there scrolls.
+void Engine::moveKeys(int dx, int dy) {
+    const std::vector<ScreenView*> views = keyViews();
+    ScreenView* from = nullptr;
+    std::optional<SDL_FRect> at;
+    for (ScreenView* v : views)
+        if ((at = v->pointedRect())) {
+            from = v;
+            break;
+        }
+    if (from && dx != 0 && from->adjustPointed(dx)) return;
+    if (!from) {
+        for (ScreenView* v : views)
+            if (v->pointFirst()) return;
+    } else {
+        ScreenView* best = nullptr;
+        float nearest = 0.0f;
+        for (ScreenView* v : views)
+            if (const auto far = v->toward(*at, dx, dy); far && (!best || *far < nearest)) {
+                best = v;
+                nearest = *far;
+            }
+        if (best) {
+            for (ScreenView* v : views)
+                if (v != best) v->letGo();
+            best->pointToward(*at, dx, dy);
+            return;
+        }
+    }
+    if (dy != 0)
+        for (ScreenView* v : views)
+            if (v->scrollBy(dy < 0 ? "up" : "down")) return;
+}
+
+bool Engine::idle(const Commands& actions) {
+    if (actions.empty()) return false;
+    const std::vector<ScreenView*> views = keyViews();
+    for (const Command& c : actions) {
+        const auto* ui = std::get_if<cmd::Ui>(&c);
+        if (!ui) return false;
+        const std::string& v = ui->verb;
+        if (v == "tools") continue; // (the developer tools' key: in the game, its key goes on to the others)
+        if (v.starts_with("move ") || v.starts_with("scroll ")) {
+            if (std::ranges::any_of(views, &ScreenView::takesKeys)) return false;
+        } else if (v == "press") {
+            if (std::ranges::any_of(views, &ScreenView::keysPoint)) return false;
+        } else {
+            return false;
+        }
+    }
+    return true;
 }
 
 ScreenView* Engine::topView() {
@@ -1192,6 +1243,9 @@ bool Engine::open(const std::string& name, ScreenView::Played opening, ScreenVie
         return false;
     }
     if (!overlays_.empty() && overlays_.back() == name) return true;
+    if (mode_ == Mode::Game) // (a menu over the story: what the keys point at on the story's screens stays, but a press goes on with the story again)
+        for (auto& [named, under] : views_)
+            if (!std::ranges::contains(overlays_, named)) under.keysRest();
     // Animations wait for each other: a screen whose show animation starts covered (fade=) opens once the
     // one under it has faded out with its hide animation (ending covered), not over it at once.
     v->playWith(opening, closing); // (what it plays this time, to know)
@@ -1350,7 +1404,8 @@ void Engine::ui(const cmd::Ui& c) {
     else if (v == "open") {
         if (c.arg.find("://") != std::string::npos || c.arg.starts_with("www.")) SDL_OpenURL(c.arg.c_str());
         else if (!overlays_.empty() && overlays_.back() == c.arg) { // open already, on top: put it away, so one key opens and closes it (a chat scene or a call keeps the phone)
-            if (!showsPhone(c.arg) || !playing() || !game_->phoneBusy()) close();
+            if (const ScreenDef* def = script_.screen(c.arg); def && def->closeAfter > 0.0f) topSince_ = time_; // (one that closes by itself, a notice: its time again)
+            else if (!showsPhone(c.arg) || !playing() || !game_->phoneBusy()) close();
         }
         else if (std::ranges::contains(overlays_, c.arg) || (c.arg == "title" && titleShown_)) backTo(c.arg); // open under others: back to it
         else open(c.arg, ScreenView::animationIn(&script_, c.opening), ScreenView::animationIn(&script_, c.closing)); // (with NAME, and close with NAME: this time)
@@ -1405,11 +1460,20 @@ void Engine::ui(const cmd::Ui& c) {
         if (game_->skipMode()) game_->toggleSkip(); // any input stops skipping
         else game_->nextLine();
     }
-    else if (v == "move up" || v == "move down" || v == "move left" || v == "move right") {
-        if (ScreenView* s = keyView()) s->move(v == "move left" ? -1 : v == "move right" ? 1 : 0, v == "move up" ? -1 : v == "move down" ? 1 : 0);
+    else if (v == "move up" || v == "move down" || v == "move left" || v == "move right") moveKeys(v == "move left" ? -1 : v == "move right" ? 1 : 0, v == "move up" ? -1 : v == "move down" ? 1 : 0);
+    else if (v == "press") { // (on the story's screens, the next press goes on with the story again)
+        for (ScreenView* s : keyViews())
+            if (s->keysPoint()) {
+                const bool story = mode_ == Mode::Game && !std::ranges::contains(overlays_, s->name());
+                s->pressPointed();
+                if (story) s->keysRest();
+                break;
+            }
     }
-    else if (v == "press") { if (ScreenView* s = keyView()) s->pressPointed(); }
-    else if (v.starts_with("scroll ")) { if (ScreenView* s = keyView()) s->scrollBy(std::string_view(v).substr(7)); }
+    else if (v.starts_with("scroll ")) {
+        for (ScreenView* s : keyViews())
+            if (s->scrollBy(std::string_view(v).substr(7))) break;
+    }
     else if (v == "put back") { for (auto& [name, screen] : views_) screen.putBack(); }
     else if (v == "choose") { // the choice's option with that number, if it has one
         const auto n = static_cast<std::size_t>(std::max(0, toInt(c.arg)));
@@ -1418,6 +1482,7 @@ void Engine::ui(const cmd::Ui& c) {
     else if (v == "fullscreen") toggleFullscreen();
     else if (v == "screenshot") screenshotRequest_ = std::format("{}screenshot-{}.png", prefPath_, SDL_GetTicks());
     else if (v == "reload") { if (developerMode()) reloadRequested_ = true; }
+    else if (v == "tools") {} // (the developer tools' own keys: they do it while they're open)
     else if (v == "yes" || v == "no") {
         auto yes = std::exchange(confirmYes_, {});
         close();
@@ -1648,7 +1713,8 @@ std::string Engine::keyLabel(std::string_view control, std::size_t slot) const {
 }
 
 // While a control part waits for a key: Esc cancels, Backspace / Delete empties the slot,
-// anything else (a key, possibly with Ctrl/Shift/Alt/Cmd, a mouse button or the wheel) is taken.
+// anything else (a key, possibly with Ctrl/Shift/Alt/Cmd, a mouse button or the wheel) is taken; a controller's button
+// goes in its controller slot.
 bool Engine::captureKey(const SDL_Event& e) {
     const auto mods = static_cast<SDL_Keymod>(SDL_GetModState() & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_ALT | SDL_KMOD_GUI));
     KeyChord key;
@@ -1686,6 +1752,7 @@ bool Engine::captureKey(const SDL_Event& e) {
         return false;
     }
     if (rebinding_->second == kPadSlot && key.device != KeyChord::Device::Pad) return true; // the Controller column takes buttons only
+    if (key.device == KeyChord::Device::Pad) rebinding_->second = kPadSlot; // (a button for a key's slot: the control's controller button)
     setKey(key.name());
     return true;
 }
@@ -1695,9 +1762,9 @@ void Engine::setKey(const std::string& name) {
     const auto [control, slot] = *std::exchange(rebinding_, std::nullopt);
     const Control* target = script_.control(control);
     if (!target) return;
-    if (name != "none") // a key does one thing: take it away from the others
+    if (name != "none") // a key does one thing: take it away from the others (on screens, or in the story, as it is)
         for (const auto& other : script_.controls) {
-            if (other.name == control) continue;
+            if (other.name == control || other.onScreens() != target->onScreens()) continue;
             auto names = keyNames(other);
             if (std::ranges::contains(names, name)) {
                 if (padOrTouch(name)) std::erase(names, name);              // its column just goes empty
@@ -1760,7 +1827,7 @@ void Engine::slotDelete(std::size_t index, std::string question) {
     ask(std::move(question), [this, index, slot = cards[index].slot] {
         saves_.remove(slot);
         slots_.refresh(index);
-        hasSave_ = saves_.newest().has_value();
+        countSaves();
     });
 }
 
@@ -1855,6 +1922,11 @@ void Engine::quickLoad() {
     else logWarn("There's no quick save to load.");
 }
 
+void Engine::countSaves() {
+    hasSave_ = saves_.newest().has_value();
+    hasQuickSave_ = saves_.newest("quick").has_value();
+}
+
 void Engine::autosave() {
     if (gameSettings().autosave && mode_ == Mode::Game && game_->canSave()) saveToSlot(saves_.rotatingSlot("auto"));
 }
@@ -1870,6 +1942,7 @@ bool Engine::saveToSlot(const std::string& slot) {
         return false;
     }
     hasSave_ = true;
+    hasQuickSave_ = hasQuickSave_ || slot.starts_with("quick-");
     return true;
 }
 
@@ -2016,14 +2089,33 @@ void Engine::drawGame(bool thumbnail) {
         if (ScreenView* v = view("choice"); v && game_->showingChoices() && !game_->choiceOnPhone()) v->draw(r); // (a chat's: on the phone)
         if (ScreenView* v = view("hud"); v && !thumbnail) v->draw(r);
     }
+    if (thumbnail) // (the phone, say, as it was before the menu opened over it; not a notice that goes by itself)
+        for (const auto& name : overlays_) {
+            if (stopsStory(name)) break;
+            if (ScreenView* v = view(name); v && v->def().closeAfter <= 0.0f) v->draw(r);
+        }
     thumbnail_ = false;
 }
 
-// In developer mode the window says so, and how to open the developer tools (without a game, that's all
-// there is).
+bool Engine::stopsStory(const std::string& screen) const {
+    const ScreenDef* def = script_.screen(screen);
+    return !def || def->storyWaits;
+}
+
+// In developer mode the window says so, and how to open the developer tools, or with them open, the tab
+// they show and how to go back to the game (without a game, the tools are all there is).
 std::string Engine::windowTitle() const {
     if (noGame_) return "VNext: developer mode"_tr;
-    return gameSettings().developer ? "{}  (developer mode: F10 for the developer tools)"_tr(gameSettings().title) : gameSettings().title;
+    if (!gameSettings().developer) return gameSettings().title;
+    if (developer_.isOpen()) return "{}: {}  (developer mode: F10 for the game)"_tr(gameSettings().title, developer_.tabName());
+    return "{}  (developer mode: F10 for the developer tools)"_tr(gameSettings().title);
+}
+
+void Engine::showTitle() {
+    if (std::string title = windowTitle(); window_ && title != shownTitle_) {
+        SDL_SetWindowTitle(window_.get(), title.c_str());
+        shownTitle_ = std::move(title);
+    }
 }
 
 void Engine::drawErrors() {
@@ -2167,6 +2259,7 @@ SDL_AppResult Engine::event(SDL_Event& e) {
     useView(developer_.isOpen()); // (clicks are read in the view they're for)
     SDL_ConvertEventToRenderCoordinates(renderer_.get(), &e);
     if (e.type == SDL_EVENT_MOUSE_MOTION) ++pointerMoves_;
+    if (isPress(e) || e.type == SDL_EVENT_MOUSE_WHEEL) padInUse_ = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN; // (what the player plays with now)
     switch (e.type) {
     case SDL_EVENT_QUIT:
         return SDL_APP_SUCCESS;
@@ -2194,8 +2287,9 @@ SDL_AppResult Engine::event(SDL_Event& e) {
         return std::ranges::any_of(controlKeys_[i], [&](const KeyChord& k) { return k.matches(e); });
     };
 
-    // Developer mode: F10 opens and closes the developer tools, which take every key and click while open.
-    if (developerMode() && e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && e.key.key == SDLK_F10) {
+    // Developer mode: F10 (the tools' Play: control tools_play) opens and closes the developer tools, which take every key
+    // and click while open.
+    if (developerMode() && developer_.toolKey(e, ToolKey::Play)) {
         if (noGame_) return done(); // (without a game there's nothing else to show)
         if (developer_.isOpen()) developer_.backToGame();
         else developer_.openDeveloper();
@@ -2208,10 +2302,11 @@ SDL_AppResult Engine::event(SDL_Event& e) {
 
     if (rebinding_ && captureKey(e)) return done(); // a control part is waiting for a key
 
-    // Controls with in_menus=yes work on every screen (fullscreen, screenshot, reload...).
+    // Controls with in_menus=yes work on every screen (moving and pressing on it, fullscreen, screenshot...). One that
+    // would do nothing now (moving or pressing with nothing there to) lets its key go on: to the next line's, a button's...
     auto works = [&](std::size_t i) { return !script_.controls[i].condition || script_.controls[i].condition->test(lookup()); }; // (when=)
     for (std::size_t i = 0; i < script_.controls.size(); ++i)
-        if (script_.controls[i].inMenus && pressed(i) && works(i)) {
+        if (script_.controls[i].inMenus && pressed(i) && works(i) && !idle(script_.controls[i].actions)) {
             run(script_.controls[i].actions);
             return done();
         }
@@ -2255,7 +2350,7 @@ SDL_AppResult Engine::event(SDL_Event& e) {
         if (ScreenView* v = view(name); v && (v->handleEvent(e) || v->modal())) return done();
     if (ScreenView* v = view("hud"); v && v->handleEvent(e)) return done();
     for (std::size_t i = 0; i < script_.controls.size(); ++i)
-        if (!script_.controls[i].inMenus && pressed(i) && works(i)) {
+        if (!script_.controls[i].inMenus && pressed(i) && works(i) && !idle(script_.controls[i].actions)) {
             run(script_.controls[i].actions);
             break;
         }
@@ -2275,6 +2370,7 @@ SDL_AppResult Engine::iterate() {
         developer_.reloaded();
     }
     developer_.updateDeveloper();
+    showTitle();
     const Uint64 now = SDL_GetTicksNS();
     const float frame = std::min(0.1f, static_cast<float>(now - lastTicks_) / 1e9f);
     lastTicks_ = now;
@@ -2298,10 +2394,8 @@ SDL_AppResult Engine::iterate() {
     assets_->beginFrame();
     ++frameNumber_;
     // A menu covers the story and stops it (one with story=goes_on, like the phone, lets it go on).
-    const bool covered = mode_ == Mode::Game && (developer_.isOpen() || std::ranges::any_of(overlays_, [&](const std::string& name) {
-                                                     const ScreenDef* screen = script_.screen(name);
-                                                     return !screen || screen->storyWaits;
-                                                 }));
+    auto stops = [&](const std::string& name) { return stopsStory(name); };
+    const bool covered = mode_ == Mode::Game && (developer_.isOpen() || std::ranges::any_of(overlays_, stops));
     if (covered != covered_) {
         covered_ = covered;
         game_->setCovered(covered); // its voice line and movie wait under menus
@@ -2312,8 +2406,11 @@ SDL_AppResult Engine::iterate() {
         gesture(KeyChord::Gesture::LongPress);
     }
     if (mode_ == Mode::Game) {
-        game_->updatePhone(dt); // (messages are typed while the phone is open too)
-        if (const auto& call = game_->call(); call && !call->outgoing && !call->talking) { // a call coming: controllers buzz while it rings
+        // Messages come and calls ring as the story goes on, or with the phone open over a menu; a menu over them stops them.
+        const auto phone = std::ranges::find(overlays_, std::string("phone"));
+        const bool phoneGoesOn = !developer_.isOpen() && std::none_of(phone == overlays_.end() ? overlays_.begin() : phone + 1, overlays_.end(), stops);
+        if (phoneGoesOn) game_->updatePhone(dt);
+        if (const auto& call = game_->call(); phoneGoesOn && call && !call->outgoing && !call->talking) { // a call coming: controllers buzz while it rings
             if ((ringPulse_ -= dt) <= 0.0f) {
                 rumble(0.6f, 500);
                 ringPulse_ = 1.5f;

@@ -1,5 +1,5 @@
-// The Story tab: the scenes and characters to choose from, a scene's rows (its lines, as forms) and
-// the chosen row's form.
+// The Story tab: the scenes and characters to choose from, a scene's lines, New line and Whole story under them,
+// and the chosen line's form (the map is DeveloperMap.cpp's); and About.
 #include "DeveloperShared.hpp"
 #include "DeveloperUi.hpp"
 
@@ -66,14 +66,6 @@ std::size_t rowWords(const StoryEditor& editor, const StoryEditor::Row& row) {
     return words;
 }
 
-// What a phone line's first box says for one of its words ("Message" for message).
-std::string phoneLabel(std::string_view word) {
-    const auto& kind = StoryEditor::kindOf(StoryEditor::Box::PhoneLine);
-    const auto words = wordsOf(kind.choices), labels = wordsOf(kind.labels, '|');
-    const auto at = static_cast<std::size_t>(std::ranges::find(words, word) - words.begin());
-    return at < labels.size() ? std::string(labels[at]) : std::string(word);
-}
-
 // The story as one text file: each scene's lines, choices and messages, without the commands between
 // them (for proofreaders and voice actors).
 std::string storyText(const StoryEditor& editor) {
@@ -94,15 +86,14 @@ std::string storyText(const StoryEditor& editor) {
                 line = who.empty() ? words : who + ": " + words;
                 break;
             }
-            case StoryEditor::Kind::Choice: line = "Choice:"; break;
-            case StoryEditor::Kind::Option: line = "> " + value("Text"); break;
-            default: { // (a phone line's words after which of them it is: Message, Chat, Call...)
-                const auto phone = std::ranges::find(fields, std::string_view("Phone line"), &StoryEditor::Field::name);
-                const std::string kind = phone != fields.end() ? phoneLabel(phone->value) : std::string(StoryEditor::kindName(row.kind));
-                for (const StoryEditor::Field& f : fields)
-                    if (f.rich && !trim(f.value).empty()) line += (line.empty() ? kind + ": " : " ") + withoutTags(f.value);
+            case StoryEditor::Kind::Message: { // (a chat's: who writes it, and its words or an image's caption)
+                if (const std::string words = value("Text"); !words.empty() && value("Does") != "reacts")
+                    line = (value("Sent") == "by_player" ? std::string("me") : value("Who")) + ": " + words;
                 break;
             }
+            case StoryEditor::Kind::Choice: line = "Choice:"; break;
+            case StoryEditor::Kind::Option: line = "> " + value("Text"); break;
+            default: break; // (no words of their own)
             }
             if (!line.empty()) out += std::string(static_cast<std::size_t>(row.depth) * 4, ' ') + line + "\n";
         }
@@ -263,15 +254,14 @@ std::string libraries() {
 
 } // namespace
 
-// The log, the newest at the bottom; or About from the top: the versions, then the licences.
-void Developer::drawLines(DeveloperUi& ui, const SDL_FRect& box) {
+// About, from the top: the versions, then the licences.
+void Developer::drawAbout(DeveloperUi& ui, const SDL_FRect& box) {
     DeveloperTools& d = tools;
-    const float k = ui.k, rowHeight = layout::logRowH * k;
+    const float k = ui.k, rowHeight = layout::aboutRowH * k;
     draw::rect(ui.r, box, kBox);
     const std::size_t pageLines = static_cast<std::size_t>(std::max(1.0f, (box.h - 12 * k) / rowHeight)); // (that fit)
-    auto scroll = [&](float lines) { // up is positive: the log goes back to older lines, About up to earlier ones
-        const float by = d.view == View::About ? -lines : lines;
-        d.scroll = by > 0 ? d.scroll + static_cast<std::size_t>(by) : d.scroll - std::min(d.scroll, static_cast<std::size_t>(-by));
+    auto scroll = [&](float lines) { // (up is positive: to earlier lines)
+        d.aboutScroll = lines < 0 ? d.aboutScroll + static_cast<std::size_t>(-lines) : d.aboutScroll - std::min(d.aboutScroll, static_cast<std::size_t>(lines));
     };
     if (const float turns = ui.wheelOver(box); turns != 0.0f) scroll(turns * 3.0f);
     const auto page = static_cast<float>(pageLines);
@@ -284,62 +274,28 @@ void Developer::drawLines(DeveloperUi& ui, const SDL_FRect& box) {
         default: return false;
         }
     });
-    // Its scrollbar, by lines (the log's scroll counts back from its newest: the bar's, down from its oldest).
-    const bool about = d.view == View::About;
-    const std::size_t total = about ? aboutLines().size() + 2 : engine.log_.size(), most = total > pageLines ? total - pageLines : 0;
-    d.scroll = std::min(d.scroll, most);
-    float down = static_cast<float>(about ? d.scroll : most - d.scroll);
-    ui.scrollbar(&d.scroll, ui.barInside(box), page, static_cast<float>(total), down);
-    const auto downLines = std::min(most, static_cast<std::size_t>(std::lround(down)));
-    d.scroll = about ? downLines : most - downLines;
+    // Its scrollbar, by lines.
+    const auto& all = aboutLines();
+    const std::size_t total = all.size() + 2, most = total > pageLines ? total - pageLines : 0;
+    d.aboutScroll = std::min(d.aboutScroll, most);
+    float down = static_cast<float>(d.aboutScroll);
+    ui.scrollbar(&d.aboutScroll, ui.barInside(box), page, static_cast<float>(total), down);
+    d.aboutScroll = std::min(most, static_cast<std::size_t>(std::lround(down)));
     const float w = box.w - (total > pageLines ? layout::scrollbarRoom * k : 0.0f); // (its lines: beside its scrollbar)
-    std::vector<std::pair<std::string, SDL_Color>> lines;
-    if (about) {
-        const auto& all = aboutLines();
-        for (std::size_t i = d.scroll; i < std::min(total, d.scroll + pageLines); ++i) {
-            if (i < 2) {
-                lines.emplace_back(i == 0 ? libraries() : std::string{}, theme::text);
-                continue;
-            }
-            const AboutLine& line = all[i - 2];
-            lines.emplace_back(line.text, line.heading ? kAccent : line.text.starts_with("--") || line.text.starts_with("==") ? theme::dim : theme::text);
-        }
-    } else {
-        for (const auto& entry : engine.log_.newest(pageLines, d.scroll)) {
-            const SDL_LogPriority p = entry.priority;
-            lines.emplace_back(entry.text, p >= SDL_LOG_PRIORITY_ERROR ? kBad : p == SDL_LOG_PRIORITY_WARN ? kWarn : theme::text);
-            std::ranges::replace(lines.back().first, '\n', ' ');
-        }
-    }
     const DeveloperUi::Clip clipped(ui, box);
-    float y = d.view == View::About ? box.y + 6 * k : box.y + box.h - 6 * k - rowHeight * static_cast<float>(lines.size());
-    for (const auto& [text, colour] : lines) {
-        // "story.vnscript line 12: ..." leads to that line (in the developer tools' tabs) when clicked.
-        std::optional<std::pair<std::string, std::size_t>> place;
-        static constexpr std::string_view kExtension = ".vnscript", kLine = " line ";
-        if (const auto at = text.find(std::string(kExtension) + std::string(kLine)); d.view == View::Log && at != std::string::npos && d.editor.loaded()) {
-            const auto start = text.find_last_of(" \t:", at);
-            const std::size_t from = start == std::string::npos ? 0 : start + 1;
-            const std::string name = text.substr(from, at + kExtension.size() - from);
-            std::size_t n = 0, i = at + kExtension.size() + kLine.size();
-            for (; i < text.size() && std::isdigit(static_cast<unsigned char>(text[i])); ++i) n = n * 10 + static_cast<std::size_t>(text[i] - '0');
-            if (n >= 1) place = std::pair{name.starts_with("scripts/") ? name : "scripts/" + name, n - 1};
-        }
-        const SDL_FRect row{box.x, y, w, rowHeight};
-        if (place && ui.over(row)) draw::rect(ui.r, row, kButtonHover);
+    float y = box.y + 6 * k;
+    for (std::size_t i = d.aboutScroll; i < std::min(total, d.aboutScroll + pageLines); ++i) {
+        const AboutLine* line = i < 2 ? nullptr : &all[i - 2];
+        const std::string text = i == 0 ? libraries() : line ? std::string(line->text) : std::string{};
+        const SDL_Color colour = !line ? theme::text : line->heading ? kAccent : line->text.starts_with("--") || line->text.starts_with("==") ? theme::dim : theme::text;
         ui.textFitted(text, box.x + 10 * k, y + ui.measure("Ag", layout::listText).y / 2, layout::listText, colour, w - 20 * k); // (one line: cut to fit, its whole in a tip)
-        if (place && ui.click(row) && !goTo(place->first, place->second)) {
-            d.failed = true;
-            d.status = "{} line {} isn't in a scene, a screen, a setting, a character or the Library: change it in a text editor."_tr(
-                                   place->first, place->second + 1);
-        }
         y += rowHeight;
     }
 }
 
-// The Story tab as it is this frame: the scene open, its lines and the one chosen, the characters, and
-// where the lists, the lines and the form go. Its parts are drawn by drawStoryLists, drawStoryRows and
-// drawStoryForm.
+// The Story tab as it is this frame: the scene open, its lines and the one chosen, the characters, and what's
+// said under the lines. Its parts are drawn by drawScenesList, drawCharactersList, drawLinesList, drawNewLine,
+// drawWholeStory, drawStoryForm and drawMap, each in the room drawPanels gives it.
 struct Developer::StoryFrame {
     DeveloperUi& ui;
     DeveloperTools& d;
@@ -347,8 +303,7 @@ struct Developer::StoryFrame {
     const std::vector<StoryEditor::Row>& rows;
     const std::vector<StoryEditor::Character>& characters;
     const StoryEditor::Row* selected;
-    SDL_FRect left, middle, right;
-    float gap;
+    std::string counts; // what's said under the lines (storyCounts)
 
     // Whether the scene's row i is chosen, and the lines of the chosen rows (the first one's last).
     [[nodiscard]] bool isChosen(std::size_t i) const { return d.row == rows[i].line || std::ranges::contains(d.moreRows, rows[i].line); }
@@ -377,27 +332,73 @@ struct Developer::StoryFrame {
         const std::string_view name = row != now.end() ? mainField(row->kind) : std::string_view{};
         if (name.empty()) return;
         const auto fields = d.editor.fields(*row);
-        const auto f = std::ranges::find(fields, name, &StoryEditor::Field::name);
+        auto f = std::ranges::find(fields, name, &StoryEditor::Field::name);
+        if (f == fields.end() && row->kind == Kind::Message) f = std::ranges::find(fields, std::string_view("Text"), &StoryEditor::Field::name); // (one that says something: its words)
         if (f == fields.end()) return;
-        d.focusOn(std::format("row:{}:{}", line, name), f->value);
+        d.focusOn(std::format("row:{}:{}", line, f->name), f->value);
         StoryEditor::Field boxed = *f; // (as its kind has it)
         applyBox(boxed);
         if (boxed.pick != StoryEditor::Pick::None || !boxed.suggest.empty()) d.openList = d.focus; // (its list opens, to pick from)
     }
 };
 
-// The Story tab: the scenes and characters on the left, the chosen scene's lines in the middle, and
-// the chosen line (or character) as a form on the right.
+namespace {
+// New line's buttons, in their groups.
+std::vector<DeveloperUi::ButtonGroup> newLineGroups() {
+    std::vector<DeveloperUi::ButtonGroup> groups;
+    for (const auto& [name, adds] : kAdds) {
+        DeveloperUi::ButtonGroup& g = groups.emplace_back(DeveloperUi::ButtonGroup{.name = tr(name), .labels = {}});
+        for (const Adding& add : adds) g.labels.push_back(tr(add.label));
+    }
+    return groups;
+}
+
+// What's under the lines, `w` wide: how long the scene and the game are (storyCounts) beside its buttons (Save as a
+// text file, and Remove the stops while there are some), or over them, the whole width, when that would leave them
+// less than half; and how tall that is.
+struct StoryFoot {
+    std::string unstop;
+    float saveW = 0.0f, unstopW = 0.0f, countsW = 0.0f, countsH = 0.0f, h = 0.0f;
+    bool countsOver = false;
+};
+StoryFoot storyFoot(DeveloperUi& ui, const std::string& counts, std::size_t stops, float w) {
+    const float k = ui.k, listGap = layout::gap * k;
+    StoryFoot foot;
+    foot.saveW = ui.buttonWidth("Save as a text file"_tr, layout::smallButtonText, layout::widerButtonW);
+    foot.unstop = stops == 1 ? "Remove the stop"_tr() : "Remove the {} stops"_tr(stops); // (Stop here, in every scene)
+    foot.unstopW = stops == 0 ? 0.0f : ui.buttonWidth(foot.unstop, layout::smallButtonText, layout::widerButtonW) + listGap;
+    const float besideW = w - foot.saveW - foot.unstopW - 2 * listGap;
+    foot.countsOver = besideW < w / 2;
+    foot.countsW = foot.countsOver ? w : std::max(0.0f, besideW);
+    foot.countsH = ui.measure(counts, layout::smallText, foot.countsW).y;
+    foot.h = foot.countsOver ? foot.countsH + listGap + layout::smallButtonH * k : std::max(foot.countsH, layout::smallButtonH * k);
+    return foot;
+}
+} // namespace
+
+// The Story tab, each part a sub-window under its title: Scenes over Characters on the left; the chosen scene's Lines
+// over New line and Whole story (what's under them) in the middle; and the chosen line's (or character's) form over the
+// Map of the scenes on the right.
 void Developer::drawStory(DeveloperUi& ui, const SDL_FRect& area) {
     DeveloperTools& d = tools;
     StoryEditor& editor = d.editor;
     const float k = ui.k;
     using Row = StoryEditor::Row;
 
+    // Where the tab puts them, side by side: Scenes over Characters; Lines over New line and Whole story; the form over
+    // the Map.
+    const auto [left, middle, right] = ui.columns(area);
+    const float half = std::round(left.h * 0.56f), formH = std::round(right.h * 0.62f);
+    const SDL_FRect scenesAt{left.x, left.y, left.w, half};
     const auto& scenes = editor.scenes();
-    if (scenes.empty()) {
-        ui.text("Empty"_tr, area.x, area.y, layout::lineText, theme::dim);
-        if (ui.button({area.x, area.y + layout::bigButtonH * k, ui.buttonWidth("+ New scene"_tr, layout::lineText, layout::widerButtonW), layout::bigButtonH * k}, "+ New scene"_tr)) d.scene = editor.addScene(0);
+    if (scenes.empty()) { // (none yet: only the scenes, empty, and + New scene)
+        std::array panels{listPanel(ui, "scenes", "Scenes"_tr, scenesAt, 1, [&](const ListPart& at) {
+            ui.list(at.list, d.scenesScroll, 0, [](std::size_t) { return std::string{}; }, [](std::size_t) { return false; }, [](std::size_t) { return false; });
+            if (!ui.button(at.rows[0], "+ New scene"_tr, false, true, layout::buttonText)) return false;
+            d.scene = editor.addScene(0);
+            return true;
+        })};
+        drawPanels(ui, "story", panels);
         return;
     }
     d.scene = std::min(d.scene, scenes.size() - 1);
@@ -412,16 +413,28 @@ void Developer::drawStory(DeveloperUi& ui, const SDL_FRect& area) {
     }
     clampIndex(d.character, characters.size());
 
-    const auto [left, middle, right] = ui.columns(area);
-    const float gap = layout::columnGap * k;
-
-    StoryFrame f{.ui = ui, .d = d, .scene = scene, .rows = rows, .characters = characters, .selected = selected, .left = left, .middle = middle,
-                 .right = right, .gap = gap};
-    if (drawStoryLists(f) || drawStoryRows(f)) return; // (something changed: the rest is drawn next frame)
-    drawStoryForm(f);
+    StoryFrame f{.ui = ui, .d = d, .scene = scene, .rows = rows, .characters = characters, .selected = selected, .counts = {}};
+    f.counts = storyCounts(f);
+    const SDL_FPoint chrome = panelChrome(k); // (New line and Whole story are as tall as what's in them)
+    const float headingH = layout::headingH * k;
+    const float newLineH = chrome.y + ui.newButtonsH(newLineGroups(), middle.w - chrome.x);
+    const float footH = chrome.y + headingH + storyFoot(ui, f.counts, d.stops.size(), middle.w - chrome.x).h;
+    const float linesH = std::max(chrome.y + headingH + layout::listItemH * k, middle.h - newLineH - footH); // (the rest: a line's room under its title at least)
+    std::array panels{
+        listPanel(ui, "scenes", "Scenes"_tr, scenesAt, 1, [&](const ListPart& at) { return drawScenesList(f, at); }),
+        listPanel(ui, "characters", "Characters"_tr, {left.x, left.y + half, left.w, left.h - half}, 1, [&](const ListPart& at) { return drawCharactersList(f, at); }),
+        listPanel(ui, "lines", "Lines"_tr, {middle.x, middle.y, middle.w, linesH}, 0, [&](const ListPart& at) { return drawLinesList(f, at); }),
+        Panel{.id = "new_line", .at = {middle.x, middle.y + linesH, middle.w, newLineH}, .draw = [&](const SDL_FRect& box) { return drawNewLine(f, box); }},
+        titledPanel(ui, "whole_story", "Whole story"_tr, {middle.x, middle.y + linesH + newLineH, middle.w, footH},
+                    [&](const SDL_FRect& box) { return drawWholeStory(f, box); }),
+        formPanel(ui, "form", "Form"_tr, {right.x, right.y, right.w, formH}, [&](const SDL_FRect& box) { return drawStoryForm(f, box), false; }),
+        titledPanel(ui, "map", "Map"_tr, {right.x, right.y + formH, right.w, right.h - formH}, [&](const SDL_FRect& box) { return drawMap(ui, box); })};
+    drawPanels(ui, "story", panels); // (one changed something: the rest are drawn next frame)
 }
 
-bool Developer::drawStoryLists(const StoryFrame& f) {
+// The scenes (each file's under its name, with more than one) and + New scene (true: changed, the rest next
+// frame).
+bool Developer::drawScenesList(const StoryFrame& f, const ListPart& at) {
     DeveloperTools& d = tools;
     StoryEditor& editor = d.editor;
     DeveloperUi& ui = f.ui;
@@ -429,14 +442,8 @@ bool Developer::drawStoryLists(const StoryFrame& f) {
     const auto& scenes = editor.scenes();
     const auto& scene = f.scene;
     const auto& rows = f.rows;
-    const auto& characters = f.characters;
-    const SDL_FRect& left = f.left;
-    // --- The scenes and the characters.
     const std::vector<bool>& wrongScene = d.wrongScenes(); // (as of this version of the scripts)
-    const float half = std::round(left.h * 0.56f);
-    const float headingH = layout::headingH * k, listButtonH = layout::buttonH * k, listGap = layout::gap * k;
-    ui.heading("Scenes"_tr, left.x, left.y);
-    const SDL_FRect scenesBox{left.x, left.y + headingH, left.w, half - headingH - listButtonH - 2 * listGap};
+    const SDL_FRect& scenesBox = at.list;
     // With more than one script file, each file's scenes are under its name.
     struct Entry {
         std::size_t file = 0;
@@ -464,7 +471,7 @@ bool Developer::drawStoryLists(const StoryFrame& f) {
     };
     // A line dragged onto a scene goes to its end.
     std::optional<std::size_t> dropOn;
-    if (d.listDrag && d.listDrag->list == "rows" && d.listDrag->moving && ui.over(scenesBox) && d.listDrag->item < rows.size()) {
+    if (d.listDrag && d.listDrag->list == "lines" && d.listDrag->moving && ui.over(scenesBox) && d.listDrag->item < rows.size()) {
         const auto i = static_cast<std::size_t>(std::max(0.0f, d.mouseY - scenesBox.y + d.scenesScroll) / (layout::listItemH * k));
         if (i < entries.size() && entries[i].scene && *entries[i].scene != d.scene) dropOn = *entries[i].scene;
         if (!d.held) {
@@ -519,7 +526,7 @@ bool Developer::drawStoryLists(const StoryFrame& f) {
         if (!entries[event.item].scene) break;
         f.choose({}, {});
         if (d.scene != *entries[event.item].scene) { // (another scene: its lines are drawn from the next frame)
-            d.rowsScroll = 0.0f;
+            d.linesScroll = 0.0f;
             d.scene = *entries[event.item].scene;
             return true;
         }
@@ -535,8 +542,7 @@ bool Developer::drawStoryLists(const StoryFrame& f) {
             const std::string name = editor.fileName(e.file);
             editor.removeFile(e.file);
             d.scene = 0;
-            d.failed = false;
-            d.status = "'{}.vnscript' and its scenes are in the Trash now (undo brings them back)."_tr(name);
+            logInfo("{}", "'{}.vnscript' and its scenes are in the Trash now (undo brings them back)."_tr(name));
         } else {
             editor.removeScene(*e.scene);
             d.scene = d.scene >= *e.scene && d.scene > 0 ? d.scene - 1 : d.scene;
@@ -555,26 +561,27 @@ bool Developer::drawStoryLists(const StoryFrame& f) {
     case ListKind::None:
         break;
     }
-    const float bw = (left.w - 6 * k) / 2;
-    auto typeName = [&](std::size_t entry, std::string name) { // (the new one's name, ready to type: its entry in the list)
-        f.choose({}, {});
-        d.focusOn(std::format("scenes:rename:{}", entry), std::move(name));
-    };
-    if (ui.button({left.x, scenesBox.y + scenesBox.h + listGap, bw, listButtonH}, "+ New scene"_tr, false, true, layout::buttonText)) {
+    if (ui.button(at.rows[0], "+ New scene"_tr, false, true, layout::buttonText)) { // (its name, ready to type: its entry in the list)
         std::size_t entry = 0; // (after the file's last entry)
         for (std::size_t i = 0; i < entries.size(); ++i)
             if (entries[i].file == scene.file) entry = i + 1;
         d.scene = editor.addScene(scene.file);
-        typeName(entry, scenes[d.scene].name);
+        f.choose({}, {});
+        d.focusOn(std::format("scenes:rename:{}", entry), scenes[d.scene].name);
         return true; // (the lines have moved: drawn again next frame)
     }
-    if (ui.button({left.x + bw + listGap, scenesBox.y + scenesBox.h + listGap, bw, listButtonH}, "+ New file"_tr, false, true, layout::buttonText)) {
-        const std::size_t entry = entries.size() + (byFile ? 0 : 1); // (the last entry, with one per file once there are two)
-        typeName(entry, editor.fileName(editor.addFile()));
-        return true;
-    }
-    ui.heading("Characters"_tr, left.x, left.y + half);
-    const SDL_FRect charactersBox{left.x, left.y + half + headingH, left.w, left.h - half - headingH - listButtonH - listGap};
+    return false;
+}
+
+// The characters, and + New character (true: changed, the rest next frame).
+bool Developer::drawCharactersList(const StoryFrame& f, const ListPart& at) {
+    DeveloperTools& d = tools;
+    StoryEditor& editor = d.editor;
+    DeveloperUi& ui = f.ui;
+    const float k = ui.k;
+    const auto& characters = f.characters;
+    using ListKind = DeveloperUi::ListEvent::Kind;
+    const SDL_FRect& charactersBox = at.list;
     // Characters: a double click renames one (and the lines it says), its x deletes it, and dragging
     // moves it among the characters of its file.
     const auto who = ui.editList("characters", charactersBox, d.charactersScroll,
@@ -592,10 +599,10 @@ bool Developer::drawStoryLists(const StoryFrame& f) {
                                           return (slot < characters.size() && characters[slot].file == file) || (slot > 0 && characters[slot - 1].file == file);
                                       },
                                   .paint = // (its name colour as a square before its name, as its box shows it)
-                                      [&](std::size_t i, const SDL_FRect& at) {
-                                          float x = at.x + layout::listPad * k;
-                                          if (const auto c = d.characterColour(engine.palette(), characters[i].name)) x = ui.swatch(x, at.y + at.h / 2, *c);
-                                          ui.textFitted(characters[i].name, x, at.y + at.h / 2, layout::listText, theme::text, at.x + at.w - layout::listPad * k - x);
+                                      [&](std::size_t i, const SDL_FRect& row) {
+                                          float x = row.x + layout::listPad * k;
+                                          if (const auto c = d.characterColour(engine.palette(), characters[i].name)) x = ui.swatch(x, row.y + row.h / 2, *c);
+                                          ui.textFitted(characters[i].name, x, row.y + row.h / 2, layout::listText, theme::text, row.x + row.w - layout::listPad * k - x);
                                       }});
     switch (who.kind) {
     case ListKind::Chosen:
@@ -618,7 +625,7 @@ bool Developer::drawStoryLists(const StoryFrame& f) {
     case ListKind::None:
         break;
     }
-    if (ui.button({left.x, charactersBox.y + charactersBox.h + listGap, left.w, listButtonH}, "+ New character"_tr, false, true, layout::buttonText)) {
+    if (ui.button(at.rows[0], "+ New character"_tr, false, true, layout::buttonText)) {
         const std::size_t c = editor.addCharacter();
         f.choose({}, c);
         const StoryEditor::Character made = editor.characters()[c]; // (its name, ready to type: the form's Name box)
@@ -628,81 +635,58 @@ bool Developer::drawStoryLists(const StoryFrame& f) {
     return false;
 }
 
-bool Developer::drawStoryRows(StoryFrame& f) {
+// The scene's lines (a click chooses one, its x deletes it, dragging moves it among the lines next to it):
+// chosen, moved, copied (true: changed, the rest next frame).
+bool Developer::drawLinesList(StoryFrame& f, const ListPart& at) {
     DeveloperTools& d = tools;
     DeveloperUi& ui = f.ui;
     const float k = ui.k;
-    const float listGap = layout::gap * k;
     const auto& scene = f.scene;
     const auto& selected = f.selected;
-    const SDL_FRect& middle = f.middle;
     StoryEditor& editor = d.editor;
     const auto& rows = f.rows;
-    // --- The scene's lines (a click chooses one, its x deletes it, dragging moves it among the lines next
-    // to it), New line under them (its buttons, in groups), and under that what the scene comes to.
-    std::vector<DeveloperUi::ButtonGroup> addGroups;
-    for (const auto& [name, adds] : kAdds) {
-        DeveloperUi::ButtonGroup& g = addGroups.emplace_back(DeveloperUi::ButtonGroup{.name = tr(name), .labels = {}});
-        for (const Adding& add : adds) g.labels.push_back(tr(add.label));
-    }
-    const auto addPlaces = ui.grouped(addGroups, middle.w);
-    const std::string counts = storyCounts(f);
-    const float saveW = ui.buttonWidth("Save as a text file"_tr, layout::smallButtonText, layout::widerButtonW);
-    const std::string unstop = d.stops.size() == 1 ? "Remove the stop"_tr() : "Remove the {} stops"_tr(d.stops.size()); // (Stop here, in every scene)
-    const float unstopW = d.stops.empty() ? 0.0f : ui.buttonWidth(unstop, layout::smallButtonText, layout::widerButtonW) + listGap;
-    // (the counts beside the buttons; over them, the whole width, when that leaves them less than half)
-    const float besideW = middle.w - saveW - unstopW - layout::columnGap * k;
-    const bool countsOver = besideW < middle.w / 2;
-    const float countsW = countsOver ? middle.w : std::max(0.0f, besideW), countsH = ui.measure(counts, layout::smallText, countsW).y;
-    const float findH = layout::listItemH * k, headingH = layout::headingH * k;
-    const float bottomH = countsOver ? countsH + listGap + layout::smallButtonH * k : std::max(countsH, layout::smallButtonH * k);
-    if (drawFindBar(f, findH)) return true;
-    const SDL_FRect rowsBox{middle.x, middle.y + findH + listGap, middle.w,
-                            std::max(0.0f, middle.h - findH - listGap - listGap - headingH - addPlaces.h - listGap - bottomH)};
+    const SDL_FRect& rowsBox = at.list;
     const float rowH = layout::listItemH * k;
     // Up and down choose the line before or after (while nothing's typed into).
     if (d.focus.empty())
         std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) {
             if ((key.key != SDLK_UP && key.key != SDLK_DOWN) || rows.empty()) return false;
-            const auto at = static_cast<std::size_t>(selected ? selected - rows.data() : 0);
+            const auto now = static_cast<std::size_t>(selected ? selected - rows.data() : 0);
             const std::size_t to = !selected ? (key.key == SDLK_UP ? rows.size() - 1 : 0)
-                                 : key.key == SDLK_UP ? (at == 0 ? 0 : at - 1)
-                                                      : std::min(at + 1, rows.size() - 1);
+                                 : key.key == SDLK_UP ? (now == 0 ? 0 : now - 1)
+                                                      : std::min(now + 1, rows.size() - 1);
             f.choose(rows[to].line, {});
             const float top = static_cast<float>(to) * rowH; // (in sight)
-            d.rowsScroll = std::clamp(d.rowsScroll, top + rowH - rowsBox.h, top);
+            d.linesScroll = std::clamp(d.linesScroll, top + rowH - rowsBox.h, top);
             return true;
         });
-    // F9: Stop here, on or off, for the chosen line (one that does something).
-    if (const std::string path = editor.path(scene.file); d.focus.empty() && selected && d.moreRows.empty() && d.runLines.contains({path, selected->line}))
-        std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) {
-            if (key.key != SDLK_F9 || key.repeat) return false;
-            toggleStop(path, selected->line);
-            return true;
-        });
-    if (!d.find.empty()) {
-        if (d.lookedFind.what != d.find || d.lookedFind.version != editor.version()) // (looked for again when the words or the scripts change)
-            d.lookedFind = {.what = d.find, .version = editor.version(), .found = editor.find(d.find)};
-        const auto& found = d.lookedFind.found;
-        const auto clicked = ui.list(rowsBox, d.findScroll, found.size(),
-                                     [&](std::size_t i) { return std::format("{}:  {}", editor.placeOf(found[i].file, found[i].line), found[i].text); },
-                                     [](std::size_t) { return false; }, [&](std::size_t i) { return d.problemAt(found[i].file, found[i].line) != nullptr; });
-        if (clicked) { // (in its tab)
-            goTo(editor.path(found[*clicked].file), found[*clicked].line);
-            d.find.clear();
-            return true;
-        }
+    // F9 (or the tools' own Stop here): Stop here, on or off, for the chosen line (one that does something).
+    if (const std::string path = editor.path(scene.file); selected && d.moreRows.empty() && d.runLines.contains({path, selected->line})) {
+        d.stoppable = std::pair{path, selected->line};
+        if (d.focus.empty())
+            std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) {
+                if (!d.isKey(key, ToolKey::StopHere)) return false;
+                toggleStop(path, selected->line);
+                return true;
+            });
     }
-    if (drawRowList(f, rowsBox) || storyClipboard(f)) return true;
+    return drawRowList(f, rowsBox) || storyClipboard(f);
+}
 
-    // New line: after the chosen line (and what's inside it), or inside a choice's option, an "if" or
-    // "else", "together", a chat, a call or its missed: lines; with none chosen, at the scene's end. Its
-    // heading says which.
+// New line: after the chosen line (and what's inside it), or inside a choice's option, an "if" or
+// "else", "together", a chat, a call or its missed: lines; with none chosen, at the scene's end. Its
+// heading says which.
+bool Developer::drawNewLine(const StoryFrame& f, const SDL_FRect& box) {
+    DeveloperTools& d = tools;
+    DeveloperUi& ui = f.ui;
+    StoryEditor& editor = d.editor;
+    const auto& scene = f.scene;
+    const auto& selected = f.selected;
+    const auto& rows = f.rows;
     const bool inside = selected && (selected->kind == Kind::Option || selected->kind == Kind::If || selected->kind == Kind::Else || selected->kind == Kind::Together ||
                                      selected->kind == Kind::Chat || selected->kind == Kind::Call || selected->kind == Kind::Missed);
-    const float addsY = rowsBox.y + rowsBox.h + listGap;
-    ui.heading(!selected ? "New line, at the scene's end"_tr : inside ? "New line, inside the chosen one"_tr : "New line, after the chosen one"_tr, middle.x, addsY, middle.w);
-    if (const auto clicked = ui.groupedButtons(addGroups, addPlaces, middle.x, addsY + headingH)) {
+    const std::string_view heading = !selected ? "New line, at the scene's end"_tr : inside ? "New line, inside the chosen one"_tr : "New line, after the chosen one"_tr;
+    if (const auto clicked = ui.newButtons(heading, newLineGroups(), box)) {
         std::size_t i = *clicked;
         for (const auto& [name, adds] : kAdds) {
             if (i >= adds.size()) {
@@ -716,24 +700,31 @@ bool Developer::drawStoryRows(StoryFrame& f) {
             return true; // (the lines have moved: drawn again next frame)
         }
     }
-    // Under them: how long the scene and the game are, the lines here never run (see above), and the
-    // story as one text file (next to the game folder) for proofreaders and voice actors.
-    {
-        const float buttonH = layout::smallButtonH * k;
-        const float buttonY = countsOver ? middle.y + middle.h - buttonH : middle.y + middle.h - bottomH + (bottomH - buttonH) / 2;
-        ui.text(counts, middle.x, countsOver ? middle.y + middle.h - bottomH : middle.y + middle.h - bottomH + (bottomH - countsH) / 2, layout::smallText, theme::dim, countsW);
-        if (ui.button({middle.x + middle.w - saveW, buttonY, saveW, buttonH}, "Save as a text file"_tr, false, true, layout::smallButtonText)) {
-            const std::string file = parentFolder(engine.gameRoot()) + "story.txt", text = storyText(editor);
-            d.failed = !SDL_SaveFile(file.c_str(), text.data(), text.size());
-            d.status = d.failed ? "Can't write '{}': {}."_tr(file, SDL_GetError()) : "Saved the story as '{}'."_tr(file);
-        }
-        if (unstopW > 0.0f && ui.button({middle.x + middle.w - saveW - unstopW, buttonY, unstopW - listGap, buttonH}, unstop, false, true, layout::smallButtonText)) {
-            d.stops.clear();
-            d.stopsSeen.clear();
-            saveStops();
-            d.failed = false;
-            d.status = "The story doesn't stop at any line now."_tr;
-        }
+    return false;
+}
+
+// Whole story, under the lines: how long the scene and the game are, the lines here never run (see storyCounts), the
+// story as one text file (next to the game folder) for proofreaders and voice actors, and Stop here taken off every
+// line.
+bool Developer::drawWholeStory(const StoryFrame& f, const SDL_FRect& box) {
+    DeveloperTools& d = tools;
+    DeveloperUi& ui = f.ui;
+    StoryEditor& editor = d.editor;
+    const float k = ui.k, listGap = layout::gap * k, buttonH = layout::smallButtonH * k;
+    const StoryFoot foot = storyFoot(ui, f.counts, d.stops.size(), box.w);
+    const float buttonY = foot.countsOver ? box.y + box.h - buttonH : box.y + (box.h - buttonH) / 2;
+    ui.text(f.counts, box.x, foot.countsOver ? box.y : box.y + (box.h - foot.countsH) / 2, layout::smallText, theme::dim, foot.countsW);
+    if (ui.button({box.x + box.w - foot.saveW, buttonY, foot.saveW, buttonH}, "Save as a text file"_tr, false, true, layout::smallButtonText)) {
+        const std::string file = parentFolder(engine.gameRoot()) + "story.txt", text = storyText(editor);
+        d.failed = !SDL_SaveFile(file.c_str(), text.data(), text.size());
+        d.status = d.failed ? "Can't write '{}': {}."_tr(file, SDL_GetError()) : "Saved the story as '{}'."_tr(file);
+    }
+    if (foot.unstopW > 0.0f &&
+        ui.button({box.x + box.w - foot.saveW - foot.unstopW, buttonY, foot.unstopW - listGap, buttonH}, foot.unstop, false, true, layout::smallButtonText)) {
+        d.stops.clear();
+        d.stopsSeen.clear();
+        saveStops();
+        logInfo("{}", "The story doesn't stop at any line now."_tr());
     }
     return false;
 }
@@ -789,44 +780,8 @@ std::string Developer::storyCounts(const StoryFrame& f) {
     const std::string time = readingTime(d.gameWords);
     std::string counts = d.sceneWords == 1 ? "1 word here, {} in the game: {} to read"_tr(d.gameWords, time) : "{} words here, {} in the game: {} to read"_tr(d.sceneWords, d.gameWords, time);
     if (showReach)
-        counts += never == 0 ? "; every line here has run in a play"_tr() : never == 1 ? "; 1 line here has never run in a play (marked grey)"_tr() : "; {} lines here have never run in a play (marked grey)"_tr(never);
+        counts += never == 0 ? "; every line here has run in a play"_tr() : never == 1 ? "; 1 line here has never run in a play"_tr() : "; {} lines here have never run in a play"_tr(never);
     return counts;
-}
-
-// Find (Cmd/Ctrl+F) in every scene's lines: while something's typed there, the list shows where it is (a
-// click goes there), and it can be replaced everywhere at once (true: it was).
-bool Developer::drawFindBar(const StoryFrame& f, float findH) {
-    DeveloperTools& d = tools;
-    StoryEditor& editor = d.editor;
-    DeveloperUi& ui = f.ui;
-    const float k = ui.k;
-    const SDL_FRect& middle = f.middle;
-    if (d.focus.empty())
-        std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) {
-            if (key.key == SDLK_ESCAPE && !d.find.empty()) return d.find.clear(), true;
-            if (key.key != SDLK_F || !(key.mod & (SDL_KMOD_GUI | SDL_KMOD_CTRL))) return false;
-            d.focusOn("find", d.find);
-            return true;
-        });
-    const float findLabelW = ui.width("Find"_tr, layout::labelText) + 8 * k, replaceAllW = ui.buttonWidth("Replace all"_tr, layout::buttonText, layout::wideButtonW);
-    const float findW = (d.find.empty() ? middle.w : std::round(middle.w * 0.4f)) - findLabelW;
-    ui.textAround("Find"_tr, middle.x, middle.y + findH / 2, layout::labelText, theme::dim);
-    if (const auto v = ui.field("find", {middle.x + findLabelW, middle.y, findW, findH}, d.find, layout::boxText)) d.find = *v;
-    if (!d.find.empty()) {
-        const float withX = middle.x + findLabelW + findW + 6 * k, withLabelW = ui.width("Replace with"_tr, layout::labelText) + 8 * k;
-        ui.textAround("Replace with"_tr, withX, middle.y + findH / 2, layout::labelText, theme::dim);
-        const SDL_FRect with{withX + withLabelW, middle.y, middle.x + middle.w - replaceAllW - 6 * k - (withX + withLabelW), findH};
-        if (const auto v = ui.field("replace", with, d.replaceWith, layout::boxText)) d.replaceWith = *v;
-        if (ui.button({middle.x + middle.w - replaceAllW, middle.y, replaceAllW, findH}, "Replace all"_tr, false, true, layout::buttonText)) {
-            const std::size_t n = editor.replaceAll(d.find, d.replaceWith);
-            d.failed = false;
-            d.status = n == 1 ? "Replaced it in 1 line."_tr() : "Replaced it in {} lines."_tr(n);
-            d.find = d.replaceWith;
-            d.focus.clear();
-            return true;
-        }
-    }
-    return false;
 }
 
 // The scene's lines: chosen (Shift+click: more, or one less, to move, copy, cut and delete together),
@@ -847,7 +802,7 @@ bool Developer::drawRowList(const StoryFrame& f, const SDL_FRect& rowsBox) {
     if (d.rowInSight) {
         if (const auto row = std::ranges::find(rows, *d.rowInSight, &Row::line); row != rows.end()) {
             const float top = static_cast<float>(row - rows.begin()) * rowH;
-            d.rowsScroll = std::clamp(d.rowsScroll, std::min(top, top + rowH - rowsBox.h), top);
+            d.linesScroll = std::clamp(d.linesScroll, std::min(top, top + rowH - rowsBox.h), top);
         }
         d.rowInSight.reset();
     }
@@ -860,8 +815,8 @@ bool Developer::drawRowList(const StoryFrame& f, const SDL_FRect& rowsBox) {
         for (std::size_t i = 0; i < rows.size() && !storyRow; ++i) // (a line inside one, with no row of its own)
             if (at->second > rows[i].line && at->second < rows[i].end) storyRow = i;
     }
-    const auto rowEvent = d.find.empty() ? ui.editList(
-        "rows", rowsBox, d.rowsScroll,
+    const auto rowEvent = ui.editList(
+        "lines", rowsBox, d.linesScroll,
         {.count = rows.size(),
          .label = [&](std::size_t i) { return editor.summary(rows[i]); },
          .chosen = [&](std::size_t i) { return f.isChosen(i); },
@@ -908,8 +863,7 @@ bool Developer::drawRowList(const StoryFrame& f, const SDL_FRect& rowsBox) {
                  const bool stop = hasStop(scenePath, row.line);
                  ui.textFitted(summary, sx, box.y + box.h / 2, layout::listText, theme::text, box.x + box.w - (stop ? 22 : 8) * k - sx);
                  if (stop) draw::circle(ui.r, box.x + box.w - 11 * k, box.y + box.h / 2, 5 * k, kBad);
-             },
-         .itemH = 30.0f}) : DeveloperUi::ListEvent{};
+             }});
     switch (rowEvent.kind) {
     case ListKind::Chosen: {
         const std::size_t line = rows[rowEvent.item].line;
@@ -951,10 +905,10 @@ bool Developer::drawRowList(const StoryFrame& f, const SDL_FRect& rowsBox) {
         break;
     }
     if (d.collapseTo && !d.held && !(d.listDrag && d.listDrag->moving)) f.choose(*d.collapseTo, {});
-    // Delete (or Backspace) deletes the chosen lines, after a click in their list.
-    if (d.focus.empty() && d.lastList == "rows" && d.row)
+    // The tools' delete key (Delete, Backspace) deletes the chosen lines, after a click in their list.
+    if (d.focus.empty() && d.lastList == "lines" && d.row)
         for (auto key = d.keys.begin(); key != d.keys.end(); ++key)
-            if (key->key == SDLK_DELETE || key->key == SDLK_BACKSPACE) {
+            if (d.isKey(*key, ToolKey::Delete)) {
                 d.keys.erase(key);
                 editor.removeRows(scene, f.chosenLines());
                 f.choose({}, {});
@@ -963,8 +917,9 @@ bool Developer::drawRowList(const StoryFrame& f, const SDL_FRect& rowsBox) {
     return false;
 }
 
-// Copy, cut, paste and duplicate (Cmd/Ctrl+C, X, V, D) the chosen line, scene or character (in the list
-// clicked last), while nothing's typed into; they go through the clipboard as script lines (true: done).
+// Copy, cut, paste and duplicate (their controls' keys: Cmd/Ctrl+C, X, V and D at first) the chosen line, scene or
+// character (in the list clicked last), while nothing's typed into; they go through the clipboard as script lines
+// (true: done).
 bool Developer::storyClipboard(const StoryFrame& f) {
     DeveloperTools& d = tools;
     StoryEditor& editor = d.editor;
@@ -973,7 +928,7 @@ bool Developer::storyClipboard(const StoryFrame& f) {
     const StoryEditor::Row* selected = f.selected;
     if (d.focus.empty())
         for (auto key = d.keys.begin(); key != d.keys.end(); ++key) {
-            const char what = clipboardKey(*key);
+            const char what = clipboardKey(d, *key);
             if (!what) continue;
             d.keys.erase(key);
             const bool onScene = d.lastList == "scenes", onCharacter = d.lastList == "characters" && d.character;
@@ -1022,7 +977,7 @@ bool Developer::storyClipboard(const StoryFrame& f) {
     return false;
 }
 
-void Developer::drawStoryForm(const StoryFrame& f) {
+void Developer::drawStoryForm(const StoryFrame& f, const SDL_FRect& right) {
     DeveloperTools& d = tools;
     StoryEditor& editor = d.editor;
     DeveloperUi& ui = f.ui;
@@ -1033,8 +988,7 @@ void Developer::drawStoryForm(const StoryFrame& f) {
     const auto& rows = f.rows;
     const auto& characters = f.characters;
     const Row* selected = f.selected;
-    const SDL_FRect& right = f.right;
-    // --- The form, the whole of the right side (it scrolls when it's longer than the room it has).
+    // --- The form, the whole of the room it's given (it scrolls when it's longer than the room it has).
     const float titleH = layout::titleH * k, boxH = layout::boxH * k, rowGap = layout::rowGap * k;
     const SDL_FRect formBox{right.x, right.y + titleH, right.w, std::max(0.0f, right.h - titleH)};
     // The labels' column (as wide as the form's labels need: column()), and the boxes after it.
@@ -1076,14 +1030,9 @@ void Developer::drawStoryForm(const StoryFrame& f) {
             }
             return;
         }
-        if (!selected) {
-            ui.text("Click a line to change it, or add one with the buttons under the lines. Choose a character on the left to change it."_tr, right.x,
-                    right.y, layout::noteText, theme::dim, right.w);
-            return;
-        }
+        if (!selected) return;
         if (!d.moreRows.empty()) {
             ui.formTitle("{} lines"_tr(d.moreRows.size() + 1), right.x, right.y);
-            ui.text("Drag one to move them all; Delete deletes them, and Cmd/Ctrl+C copies them."_tr, right.x, right.y + 40 * k, layout::noteText, theme::dim, right.w);
             return;
         }
         const Row row = *selected;
@@ -1094,12 +1043,6 @@ void Developer::drawStoryForm(const StoryFrame& f) {
         if (asForm) titleRight -= asTextButton(ui, titleRight, right.y) + layout::gap * k;
         if (d.runLines.contains({scenePath, row.line})) stopHereButton(ui, scenePath, row.line, titleRight, right.y); // (a line that does something)
         under();
-        if (const auto at = storyAt(); at && at->first == scenePath && at->second == row.line) { // (the developer tools opened over the story, at this line)
-            const std::string_view note = engine.game_->stoppedThere()
-                ? "The story stopped just before this line. Next line plays it and stops at the next one; Back to the game plays on. The Library's Variables show their values now."_tr
-                : "The story is at this line. Next line stops at the next one; Back to the game plays on. The Library's Variables show their values now."_tr;
-            y += ui.text(note, right.x, y, layout::noteText, kAccent, right.w).y + 8 * k;
-        }
         if (const ScriptError* problem = d.problemAt(scene.file, row.line)) y += ui.text(problem->message, right.x, y, layout::noteText, kBad, right.w).y + 8 * k;
         if (d.asText || !asForm) {
             const std::string id = std::format("raw:{}", row.line);
@@ -1108,12 +1051,6 @@ void Developer::drawStoryForm(const StoryFrame& f) {
         }
         auto fields = editor.fields(row);
         showGameSettingValues(fields, engine.gameSettings());
-        if (std::ranges::all_of(fields, &Field::hidden)) { // (nothing to set)
-            const std::string_view about = row.kind == Kind::Together ? "The lines inside it happen at the same time. Choose it and add them with the buttons under the lines."_tr
-                                         : row.kind == Kind::Missed   ? "The lines inside it happen when the player doesn't answer the call. Choose it and add them with the buttons under the lines."_tr
-                                                                      : "There's nothing to set."_tr;
-            y += ui.text(about, right.x, y, layout::noteText, theme::dim, right.w).y + rowGap;
-        }
         const std::string id = std::format("row:{}", row.line);
         column(fields, {"Voice file"_tr});
         if (const auto edit = drawForm(ui, id, fields, right.x, right.w, labelW, y)) {
@@ -1136,11 +1073,15 @@ void Developer::drawStoryForm(const StoryFrame& f) {
             if (found) listenButton(ui, {right.x + right.w - layout::listenW * k, y, layout::listenW * k, boxH}, *found);
             y += boxH + rowGap;
         }
-        // Enter in a line's words starts the next line, said by the same one; in an option's text, the
-        // next option.
+        // Enter in a line's words starts the next line, said by the same one (a chat's message: written by the
+        // same one); in an option's text, the next option.
         if (d.entered == id + ":Words" && row.kind == Kind::Line) {
             const std::string speaker = fieldValue(fields, "Speaker");
             f.startTyping(editor.add(scene, &row, false, {speaker.empty() ? std::string("\"\"") : speaker + ": "}));
+            return;
+        }
+        if (d.entered == id + ":Text" && row.kind == Kind::Message && fieldValue(fields, "Does") == "says") {
+            f.startTyping(editor.add(scene, &row, false, {(fieldValue(fields, "Sent") == "by_player" ? std::string("me") : fieldValue(fields, "Who")) + ": "}));
             return;
         }
         if (d.entered == id + ":Text" && row.kind == Kind::Option) {
@@ -1259,15 +1200,13 @@ bool Developer::hasStop(std::string_view path, std::size_t line) const {
 
 void Developer::toggleStop(const std::string& path, std::size_t line) {
     DeveloperTools& d = tools;
-    d.failed = false;
     if (std::erase_if(d.stops, [&](const DeveloperTools::StopMark& s) { return s.line == line && s.path == path; }) > 0) {
-        d.status = "The story doesn't stop at this line any more."_tr;
+        logInfo("{}", "The story doesn't stop at this line any more."_tr());
     } else {
         const std::vector<std::string>* lines = d.editor.fileLines(path);
         if (!lines || line >= lines->size()) return;
         d.stops.push_back({.path = path, .line = line, .text = std::string(trim((*lines)[line]))});
         d.stopsSeen.insert_or_assign(path, *lines); // (its file as it is now: the stop moves with its line from here)
-        d.status = "When the game is played, the story stops just before this line, and the developer tools open at it (Stop here)."_tr;
     }
     saveStops();
 }
@@ -1344,10 +1283,9 @@ void Developer::storyStopped() {
     const bool step = d.stepping;
     openDeveloper(); // (at the line the story is at)
     d.view = View::Story;
-    d.failed = false;
     const auto at = storyAt();
     const std::string place = at ? "line {} of {}"_tr(at->second + 1, at->first.substr(at->first.find('/') + 1)) : "a line"_tr();
-    d.status = step ? "Next line: the story is at {} now."_tr(place) : "The story stopped just before {} (Stop here)."_tr(place);
+    logInfo("{}", step ? "Next line: the story is at {} now."_tr(place) : "The story stopped just before {} (Stop here)."_tr(place));
 }
 
 // Where the story under the developer tools is (they were opened over the game): the file and line of

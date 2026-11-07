@@ -35,7 +35,7 @@ public:
     // `s` on one line `room` wide from x, centred on `middle` (up and down): as it is, or fitted(), its
     // whole in a tip. How a text that may not fit is drawn. Gives how wide it's drawn.
     float textFitted(std::string_view s, float x, float middle, float size, SDL_Color colour, float room);
-    // A panel's heading ("Scenes", "Images", "Preview"...), the same on every tab: in the middle of its
+    // A part's heading ("Scenes", "Images", "Preview"...), the same on every tab: in the middle of its
     // row (layout::headingH high from `y`), on one line `room` wide.
     void heading(std::string_view title, float x, float y, float room = std::numeric_limits<float>::infinity());
     // Buttons that make something new, in named groups, the same on every tab (the Story's New line, the
@@ -55,13 +55,22 @@ public:
     [[nodiscard]] Grouped grouped(std::span<const ButtonGroup> groups, float w);
     std::optional<std::size_t> groupedButtons(std::span<const ButtonGroup> groups, const Grouped& at, float x, float y, std::span<const std::size_t> chosen = {},
                                               bool enabled = true);
-    // A tab's columns, the same on every tab (Story, Screens, Library, Translate): its lists at the left,
-    // the chosen thing's form at the right (with `form`), what's chosen between them; each its share of
-    // the room, the lists' and the form's within what reads well (layout::sideLeast...).
+    // A part of those buttons under its heading, the same on every tab (New line, New part): how tall it is `w` wide,
+    // and drawn in `box` (the button clicked).
+    [[nodiscard]] float newButtonsH(std::span<const ButtonGroup> groups, float w);
+    std::optional<std::size_t> newButtons(std::string_view title, std::span<const ButtonGroup> groups, const SDL_FRect& box,
+                                          std::span<const std::size_t> chosen = {}, bool enabled = true);
+    // A part that's a list under its heading, the same on every tab (Scenes, Characters, Screens, Parts, the
+    // Library's, Languages), with `rows` rows of buttons under it (a gap over each): the heading drawn at the top of
+    // `box`, and where the list and each row go.
+    ListPart listPart(std::string_view title, const SDL_FRect& box, std::size_t rows);
+    // A tab's columns, the same on every tab (Story, Screens, Library), side by side: its lists at the left, the
+    // chosen thing's form at the right, what's chosen between them; each its share of the room, the lists' and the
+    // form's within what reads well (layout::sideLeast...).
     struct Columns {
         SDL_FRect left, middle, right;
     };
-    [[nodiscard]] Columns columns(const SDL_FRect& area, bool form = true) const;
+    [[nodiscard]] Columns columns(const SDL_FRect& area) const;
     // A form's title ("Line", "Style: shout"...), the same on every tab: at the top of its row
     // (layout::titleH high from `y`), level with a button there (As text), cut to fit in `room` (what
     // that leaves it).
@@ -145,15 +154,13 @@ public:
     // chosen, whose list opens under it on a click. Gives the field's new value when one is clicked or
     // picked. With `multi`, a click turns one on or off ("none" goes on its own).
     std::optional<std::string> choices(const std::string& id, const SDL_FRect& box, const StoryEditor::Field& f);
-    // A tab in the bar at the top (red: what it shows has a mistake).
-    bool tab(const SDL_FRect& box, std::string_view label, bool chosen, bool wrong, float size = layout::tabText);
     // Text centred on `middle` (up and down).
     void textAround(std::string_view s, float x, float middle, float size, SDL_Color colour, float wrap = 0.0f);
 
     // A box to type into, showing `value` (while it's typed into, what's typed; when it's empty, the
     // `hint`), with what's in braces ({bold}) dimmer. A click puts the caret there; dragging, Shift (with
-    // a click or the arrows, Home and End) and a double click (a word) choose letters, Cmd/Ctrl+A all
-    // of them, and typing, pasting, cutting and deleting replace what's chosen. Gives the new text when
+    // a click or the arrows, Home and End) and a double click (a word) choose letters, Select all's keys
+    // all of them, and typing, pasting, cutting and deleting replace what's chosen. Gives the new text when
     // it changes.
     std::optional<std::string> field(const std::string& id, const SDL_FRect& box, const std::string& value, float size = 16, std::string_view hint = {},
                                      bool spelling = false);
@@ -182,7 +189,7 @@ public:
     // on), scrolls it.
     void scrollbar(const void* of, const SDL_FRect& track, float view, float total, float& scroll);
     // Where a scrollbar runs: inside a box at its right (its rows leave it layout::scrollbarRoom), or
-    // beside one, in the margin at its right (a form's, which has no box of its own).
+    // beside one, in the room kept at its right (a form's, which has no box of its own: layout::formBarRoom).
     [[nodiscard]] SDL_FRect barInside(const SDL_FRect& box) const;
     [[nodiscard]] SDL_FRect barBeside(const SDL_FRect& box) const;
     // What the spell checker doesn't check: the characters' names (and their words).

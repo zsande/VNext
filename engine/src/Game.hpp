@@ -28,8 +28,8 @@ namespace vn {
 // ---------------------------------------------------------------------------
 
 // The story's flowchart: the points the player has passed in every playthrough (choices and endings),
-// joined by the way they went. Each point keeps the game as it was the
-// last time the player was there, so they can go back to it. Kept in flowchart.txt.
+// joined by the way they went. Each point keeps the game as it was the last time the player was there,
+// so they can go back to it. Kept in flowchart.txt.
 class Flowchart {
 public:
     enum class Kind : std::uint8_t { Choice, Ending };
@@ -311,6 +311,11 @@ struct MessageItem {
     float typing = 0.0f;      // seconds until it comes (meanwhile they're typing)
     std::uint32_t number = 0; // the count of messages when it came (the newest has the highest)
 };
+// A message proper: not someone typing, nor a change to one, nor the line saying a chat scene's over.
+[[nodiscard]] inline bool isMessage(MessageItem::Kind kind) {
+    using Kind = MessageItem::Kind;
+    return kind == Kind::Text || kind == Kind::Image || kind == Kind::Sticker || kind == Kind::Voice;
+}
 // A call made or missed.
 struct CallItem {
     std::string who;
@@ -444,8 +449,7 @@ public:
     [[nodiscard]] const std::string& faceBase() const { return faceBase_; }
     [[nodiscard]] const std::string& faceSide() const { return faceSide_; } // empty when there's no face
     // What a textbox screen shows: the line on screen (in its textbox), or a line in another one said
-    // together with it. boxes(): the
-    // textboxes with a line to show, the line on screen's last.
+    // together with it. boxes(): the textboxes with a line to show, the line on screen's last.
     struct LineView {
         std::string_view speaker, text, face, faceBase, faceSide;
         SDL_Color speakerColour{255, 255, 255, 255};
@@ -476,7 +480,7 @@ public:
     [[nodiscard]] std::vector<Upcoming> upcomingImages(int commands) const;
     [[nodiscard]] const std::vector<ChoiceItem>& choices() const { return choiceItems_; }
     // The phone: its messages (the newest last) and calls.
-    [[nodiscard]] const PhoneData& phone() const;
+    [[nodiscard]] const PhoneData& phone() const { return phone_; }
     [[nodiscard]] const std::vector<MessageItem>& messages() const { return phone().messages; }
     void readMessages(std::string_view with = {}); // the ones in a chat (or all) have been seen
     // The chats, the latest first: each person's, with its newest message, how many
@@ -519,7 +523,7 @@ public:
     [[nodiscard]] bool hasPhone() const {
         return (!gameSettings().hasPhone || gameSettings().hasPhone->test(lookup_)) && toNumber(variable("phone_battery")) > 0;
     }
-    void updatePhone(float dt); // messages being typed arrive, calls ring (under menus too)
+    void updatePhone(float dt); // messages being typed arrive, calls ring (with the story, or with the phone open over a menu)
     // How much of a timed choice's time is left (1 down to 0), if one is on screen.
     [[nodiscard]] std::optional<float> timeLeft() const;
     [[nodiscard]] const std::vector<HistoryEntry>& history() const { return history_; }
@@ -546,9 +550,9 @@ public:
     [[nodiscard]] std::vector<cmd::Ui> takeRequests() { return std::exchange(requests_, {}); } // open, show phone...
     [[nodiscard]] bool takePersistentChanged() { return std::exchange(persistentChanged_, false); }
 
-    // Save data is a small text format. load() returns a note for the player (when the script
-    // changed since saving) or an error.
-    [[nodiscard]] std::string save() const;
+    // Save data is a small text format (`history`: with the history's lines, as saves have them; rollback's moments
+    // count them instead). load() returns a note for the log (when the script changed since saving) or an error.
+    [[nodiscard]] std::string save(bool history = true) const;
     std::expected<std::string, std::string> load(std::string_view data);
 
     // The script's texts changed language: shows the ones on screen in the new one.
@@ -662,7 +666,6 @@ private:
     std::vector<PageLine> page_;                      // the lines said (a page part shows the newest that fit)
     // The phone, a call, a chat scene.
     PhoneData phone_;
-    PhoneData& ownPhone() { return phone_; }
     [[nodiscard]] bool hasSignal() const { return truthy(variable("phone_signal")); }
     std::optional<CallNow> call_;
     std::string chat_;                     // the chat a chat scene is in
@@ -701,7 +704,7 @@ private:
     };
     [[nodiscard]] Person person(const std::string& character, const std::string& sender) const; // the one a phone line names
     [[nodiscard]] Person personNamed(std::string_view name) const;                                // ...by the name the phone shows
-    void addMessage(PhoneData& phone, MessageItem m);
+    void addMessage(MessageItem m);
     void arrive(MessageItem& m);                                 // it comes to the phone: its tips, image and sound
     void change(const cmd::Message& c);                          // deletes it, edits it, reacts, reads it
     void hurry();                                                // the message a chat scene waits for comes now
@@ -778,6 +781,7 @@ private:
     void listChoices(const cmd::Menu& menu); // the options to show now
     void letPass();                          // none of them picked: the story goes on after the choice
     bool menuPrompt_ = false;                // the line before it stays on screen meanwhile (it asks it)
+    std::size_t saidAt_ = SIZE_MAX;          // the line said last (a choice's question: saved with it, said again on loading)
     bool choiceAgain_ = false;               // a repeating choice up again after an option's lines (without the line that asked it)
     float menuTime_ = 0.0f;                  // seconds left, for a timed one
     // A choice up while the story goes on (for N lines): its command and the lines it has left. A

@@ -1,4 +1,4 @@
-// The Map tab: the scenes as boxes, with arrows where the story goes from one to another.
+// The Story tab's map: the scenes as boxes, with arrows where the story goes from one to another.
 #include "DeveloperShared.hpp"
 #include "DeveloperUi.hpp"
 
@@ -82,7 +82,7 @@ void drawCurve(SDL_Renderer* r, const std::vector<SDL_FPoint>& curve, SDL_Color 
 
 } // namespace
 
-// The Map tab as it's drawn this frame: the scenes and the links between them (a copy: taking one away
+// The Story tab's map as it's drawn this frame: the scenes and the links between them (a copy: taking one away
 // changes the editor's), each scene's column (jumps from start; `reached`: the column of the ones never
 // jumped to) and box, the arrows, and what's under the mouse.
 struct Developer::MapFrame {
@@ -92,13 +92,12 @@ struct Developer::MapFrame {
     };
     DeveloperUi& ui;
     SDL_FRect area;
-    float top; // where the boxes start, under the help (as far down as it goes: it can take two lines)
+    float top; // where the boxes start
     const std::vector<StoryEditor::Scene>& scenes;
     std::vector<StoryEditor::Link> links;
     std::map<std::string, std::size_t> byName{};
     std::vector<int> column{};
     int reached = 0;
-    bool unreachedLaidOut = false; // (some of them are in that column)
     std::vector<SDL_FRect> boxes{};
     std::vector<Arrow> arrows{};
     const Arrow* chosenArrow = nullptr;
@@ -111,38 +110,39 @@ struct Developer::MapFrame {
     }
 };
 
-// The Map tab: every scene as a box, in columns by how many jumps they are from start (the ones the
+// The Story tab's map: every scene as a box, in columns by how many jumps they are from start (the ones the
 // story never jumps to after them), or where it was put by hand, with an arrow for each jump. A click
-// chooses a scene, another click renames it, and a double click opens it in the Story tab; dragging one
+// chooses a scene (Lines shows it), another click renames it, and a double click just opens it; dragging one
 // moves it, and dragging the dot at its right to another makes it jump there. A click chooses an arrow,
 // and its x (or Delete) takes it away. Dragging the space between them (or the wheel) looks around.
-void Developer::drawMap(DeveloperUi& ui, const SDL_FRect& area) {
+bool Developer::drawMap(DeveloperUi& ui, const SDL_FRect& area) {
     DeveloperTools& d = tools;
     StoryEditor& editor = d.editor;
     SDL_Renderer* r = ui.r;
     const float k = ui.k;
-    // What can be done, over the map (the + New scene button at its right); the boxes start under it.
-    const std::string_view help = "Drag a scene to move it, or its dot to another to jump there. Click an arrow, then its x, to take it away; double-click a scene to open it."_tr;
-    const float helpX = area.x + 12 * k, helpW = area.x + area.w - 170 * k - helpX;
-    const float top = std::max(layout::mapPadY * k, 6 * k + ui.measure(help, layout::noteText, helpW).y + (layout::mapPadY - layout::mapNoteY) * k);
+    const float top = layout::mapPadY * k;
     MapFrame f{.ui = ui, .area = area, .top = top, .scenes = editor.scenes(), .links = editor.links()};
     const auto& scenes = f.scenes;
     const auto& links = f.links;
     layOutMap(f);
+    // The chosen scene in sight, each time another is chosen: the map goes as far as it takes to
+    // have its box in the middle, and stays where it's looked around to after that.
+    if (d.scene < scenes.size() && d.mapFollows != d.scene) {
+        d.mapFollows = d.scene;
+        const SDL_FRect& box = f.boxes[d.scene];
+        const SDL_FRect seen{area.x, area.y + top, area.w, std::max(0.0f, area.h - top)};
+        if (box.x < seen.x || box.x + box.w > seen.x + seen.w || box.y < seen.y || box.y + box.h > seen.y + seen.h) {
+            d.mapX += box.x + box.w / 2 - (seen.x + seen.w / 2);
+            d.mapY += box.y + box.h / 2 - (seen.y + seen.h / 2);
+            layOutMap(f);
+        }
+    }
     draw::rect(r, area, kBox);
     const DeveloperUi::Clip clipped(ui, area);
     // Looking around: the wheel (Shift: sideways), or dragging the empty space.
     if (const float turns = ui.wheelOver(area); turns != 0.0f) {
         const bool sideways = SDL_GetModState() & SDL_KMOD_SHIFT;
         (sideways ? d.mapX : d.mapY) -= turns * layout::mapStep * k;
-    }
-    // + New scene (in the column of scenes nothing jumps to, to draw a jump to).
-    const float newW = ui.buttonWidth("+ New scene"_tr, layout::buttonText, layout::optionButtonW);
-    if (ui.button({area.x + area.w - newW - 10 * k, area.y + layout::gap * k, newW, layout::mediumButtonH * k}, "+ New scene"_tr, false, true, layout::buttonText)) {
-        d.scene = editor.addScene(d.scene < scenes.size() ? scenes[d.scene].file : 0);
-        d.row.reset();
-        d.character.reset();
-        return;
     }
     // The arrows: out to the right of one box, in from the left of another (or to the mouse).
     for (std::size_t i = 0; i < links.size(); ++i)
@@ -152,16 +152,11 @@ void Developer::drawMap(DeveloperUi& ui, const SDL_FRect& area) {
     if (const auto it = std::ranges::find_if(f.arrows, [&](const MapFrame::Arrow& a) { return d.mapArrow == std::pair{links[a.link].from, links[a.link].line}; });
         it != f.arrows.end())
         f.chosenArrow = &*it;
-    if (removeMapArrow(f) || mapClicks(f)) return;
+    if (removeMapArrow(f) || mapClicks(f)) return true;
     drawMapArrows(f);
     drawMapScenes(f);
-    if (mapLetGo(f)) return;
-    // What can be done, and the column of scenes nothing jumps to (each arrow: a jump).
-    ui.text(help, helpX, area.y + 6 * k, layout::noteText, theme::dim, helpW);
-    const float nodeW = layout::nodeW * k, gapX = layout::nodeGapX * k;
-    if (f.unreachedLaidOut && f.reached < static_cast<int>(scenes.size()))
-        ui.text("Nothing jumps to these"_tr, area.x + layout::mapPadX * k + static_cast<float>(f.reached) * (nodeW + gapX) - d.mapX,
-                area.y + top - (layout::mapPadY - layout::mapNoteY) * k - d.mapY, layout::smallText, theme::dim);
+    if (mapLetGo(f)) return true;
+    return false;
 }
 
 // Where each scene's box is: in its column (jumps from start, found going out from it; the ones the story
@@ -203,7 +198,6 @@ void Developer::layOutMap(MapFrame& f) {
             continue;
         }
         const int row = rowsIn[column[i]]++;
-        f.unreachedLaidOut = f.unreachedLaidOut || column[i] == reached;
         boxes[i] = {area.x + layout::mapPadX * k + static_cast<float>(column[i]) * (nodeW + gapX) - d.mapX,
                     area.y + f.top + static_cast<float>(row) * (nodeH + gapY) - d.mapY, nodeW, nodeH};
     }
@@ -224,7 +218,7 @@ bool Developer::removeMapArrow(const MapFrame& f) {
     bool remove = ui.button({mid.x - layout::smallButtonH / 2 * k, mid.y - layout::smallButtonH / 2 * k, layout::smallButtonH * k, layout::smallButtonH * k}, "x", false, true, layout::smallButtonText);
     if (d.focus.empty())
         for (auto key = d.keys.begin(); key != d.keys.end(); ++key)
-            if (key->key == SDLK_DELETE || key->key == SDLK_BACKSPACE) {
+            if (d.isKey(*key, ToolKey::Delete)) {
                 d.keys.erase(key);
                 remove = true;
                 break;
@@ -234,14 +228,13 @@ bool Developer::removeMapArrow(const MapFrame& f) {
     const std::string from = f.scenes[link.from].name;
     editor.removeLink(link);
     d.mapArrow.reset();
-    d.failed = false;
-    d.status = "'{}' no longer jumps to '{}'."_tr(from, link.to);
+    logInfo("{}", "'{}' no longer jumps to '{}'."_tr(from, link.to));
     return true;
 }
 
 // What's under the mouse (a scene, its dot, an arrow), and the clicks on them: a jump drawn from a dot, a
-// scene chosen (to move or rename it) or opened (a double click: true, in the Story tab), an arrow
-// chosen, or the empty space dragged to look around.
+// scene chosen (to move or rename it) or opened (a double click: true), an arrow chosen, or the empty space
+// dragged to look around.
 bool Developer::mapClicks(MapFrame& f) {
     DeveloperTools& d = tools;
     DeveloperUi& ui = f.ui;
@@ -275,13 +268,18 @@ bool Developer::mapClicks(MapFrame& f) {
                 d.scene = *hovered;
                 d.row.reset();
                 d.character.reset();
-                d.rowsScroll = 0.0f;
-                d.view = DeveloperTools::View::Story;
+                d.linesScroll = 0.0f;
                 return true;
             }
             d.mapPress = DeveloperTools::MapPress{.from = *hovered, .x = d.mouseX, .y = d.mouseY, .box = {boxes[*hovered].x, boxes[*hovered].y},
                                                   .dot = false, .moving = false, .chosen = d.scene == *hovered};
-            d.scene = *hovered;
+            if (d.scene != *hovered) { // (another scene: its lines, in Lines, from the next frame)
+                d.scene = *hovered;
+                d.row.reset();
+                d.character.reset();
+                d.linesScroll = 0.0f;
+                return true;
+            }
         } else if (hoveredArrow) {
             d.clicked = false;
             d.mapArrow = std::pair{links[*hoveredArrow].from, links[*hoveredArrow].line};
@@ -388,8 +386,7 @@ bool Developer::mapLetGo(const MapFrame& f) {
     if (p.dot && p.moving && target) {
         const std::string from = scenes[p.from].name, to = scenes[*target].name;
         const bool changed = editor.jumpAtEnd(p.from, to);
-        d.failed = false;
-        d.status = changed ? "'{}' jumps to '{}' at its end now, instead of what it did."_tr(from, to) : "'{}' jumps to '{}' at its end now."_tr(from, to);
+        logInfo("{}", changed ? "'{}' jumps to '{}' at its end now, instead of what it did."_tr(from, to) : "'{}' jumps to '{}' at its end now."_tr(from, to));
         return true;
     }
     if (!p.dot && p.moving) { // (it stays where it was put)

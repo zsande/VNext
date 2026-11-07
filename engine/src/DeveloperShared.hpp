@@ -2,8 +2,8 @@
 
 // What the developer files (Developer*.cpp, StoryEditor.cpp) share, and only they include: the player
 // (Engine.hpp: they all work on it), the tables their forms are made from, and the helpers more than one of
-// them uses. They're in a namespace of
-// their own (dev) that the developer files use as if each had declared them.
+// them uses. They're in a namespace of their own (dev) that the developer files use as if each had declared
+// them.
 
 #include "Developer.hpp"
 #include "Engine.hpp"
@@ -105,7 +105,7 @@ struct Slot {
     ToolsHint hint;
     std::string_view only; // written (and shown) only after these words
     bool seconds = false;
-    ToolsSuggestions suggest; // values it often has ("|" between them, "value:what it is")
+    ToolsSuggestions suggest; // values it often has ("|" between them)
     bool commas = false;      // an Option that's several of its choices, with commas between them (all: not written)
     bool rich = false;        // text that can be bold, coloured...
     ToolsGroup group;         // the heading it starts in the form
@@ -137,7 +137,7 @@ inline const Slot kStyleSlots[]{
     {.type = Type::Option, .name = "Based on", .key = "based_on", .box = Box::Style, .hint = "default"},
     {.type = Type::Option, .name = "Font", .key = "font", .box = Box::Font, .hint = "From its base style", .group = "Text"},
     {.type = Type::Option, .name = "Size", .key = "size", .box = Box::Pixels, .hint = "From its base style", .label = "Font size"},
-    {.type = Type::Option, .name = "Colour", .key = "colour", .box = Box::Colour, .hint = "From its base style", .suggest = "speaker:the speaker's colour", .label = "Text colour"},
+    {.type = Type::Option, .name = "Colour", .key = "colour", .box = Box::Colour, .hint = "From its base style", .suggest = "speaker", .label = "Text colour"},
     {.type = Type::Option, .name = "Across", .key = "align", .box = Box::Align, .choices = "inherit left centre right", .label = "Align"},
     {.type = Type::Option, .name = "Down", .key = "align_vertically", .box = Box::AlignVertically, .choices = "inherit top centre bottom", .label = "Align vertically"},
     {.type = Type::Option, .name = "Line spacing", .key = "line_spacing", .box = Box::LineSpacing, .hint = "From its base style"},
@@ -248,8 +248,6 @@ const CommandForm* formOf(StoryEditor::Kind kind);
 
 // Words of a list, split by `by`.
 std::vector<std::string_view> wordsOf(std::string_view list, char by = ' ');
-// A suggestion ("value:what it is") as its value and what it is (none: empty); a time's colon (8:00) is the value's.
-std::pair<std::string_view, std::string_view> suggestionOf(std::string_view entry);
 std::string spaced(std::string_view word); // "stop_music" -> "stop music"
 
 // An expression's parts at its top level (outside brackets and quotes), split at `ops`: words ("and",
@@ -293,121 +291,120 @@ std::string parentFolder(const std::string& root); // (root ends with a slash)
 using Kind = StoryEditor::Kind;
 using View = DeveloperTools::View;
 
-// The Settings tab: setting NAME, what the form calls it, its value without a setting line, the words
-// it's one of (else it's typed) and what it does. One without a name is a heading.
+// The Library's Settings: setting NAME, what the form calls it, its value without a setting line, and the
+// words it's one of (else it's typed). One without a name is a heading.
 struct Setting {
     std::string_view name;
     ToolsText label;
     std::string_view standard;
     ToolsChoices choices;
-    ToolsText help;
     bool quoted = false;      // written in quotes
     Box box = Box::None;      // its box's kind: what it lists, what its buttons say and how it's written, as the same box everywhere
-    ToolsSuggestions suggest; // values it often has besides its kind's ("value:what it is")
+    ToolsSuggestions suggest; // values it often has besides its kind's
     ToolsHint hint;           // what its empty box means, when it has no value then (else None)
 };
 
 inline const std::array kSettings{
     Setting{.label = "Game"},
-    Setting{.name = "title", .label = "Title", .standard = "VNext", .help = "The game's name: the window's title, and {title} on screens", .quoted = true, .box = Box::Text},
-    Setting{.name = "version", .label = "Version", .standard = "1.0", .help = "{version} on screens", .quoted = true, .box = Box::Text},
-    Setting{.name = "save_folder", .label = "Save folder name", .standard = "VNext", .help = "The players' folder for its saves and settings: every game needs its own", .quoted = true, .box = Box::Name},
-    Setting{.name = "language", .label = "Language", .standard = "English", .help = "The language the scripts are written in, as Settings shows it", .quoted = true, .box = Box::Language},
-    Setting{.name = "game_size", .label = "Game size", .standard = "1280 720", .help = "Width and height in pixels: the screens are laid out on it", .box = Box::WidthHeight},
-    Setting{.name = "icon", .label = "Icon", .help = "The window's icon, and the packed game's", .quoted = true, .box = Box::ImageFile, .hint = "Default"},
-    Setting{.name = "letterbox_colour", .label = "Letterbox colour", .standard = "black", .help = "The colour around the game when the window isn't the same shape", .box = Box::Colour},
-    Setting{.name = "resizable", .label = "Resizable window", .standard = "yes", .help = "The window can be resized by dragging its edges, in the game and in the developer tools", .box = Box::YesNo},
-    Setting{.name = "mouse_pointer", .label = "Mouse pointer", .help = "An image for the mouse pointer, in place of the system's", .quoted = true, .box = Box::Image, .hint = "Default"},
-    Setting{.name = "pointer_tip", .label = "Pointer's tip", .standard = "0 0", .help = "The pixel of the pointer's image that points", .box = Box::Point},
+    Setting{.name = "title", .label = "Title", .standard = "VNext", .quoted = true, .box = Box::Text},
+    Setting{.name = "version", .label = "Version", .standard = "1.0", .quoted = true, .box = Box::Text},
+    Setting{.name = "save_folder", .label = "Save folder name", .standard = "VNext", .quoted = true, .box = Box::Name},
+    Setting{.name = "language", .label = "Language", .standard = "English", .quoted = true, .box = Box::Language},
+    Setting{.name = "game_size", .label = "Game size", .standard = "1280 720", .box = Box::WidthHeight},
+    Setting{.name = "icon", .label = "Icon", .quoted = true, .box = Box::ImageFile, .hint = "Default"},
+    Setting{.name = "letterbox_colour", .label = "Letterbox colour", .standard = "black", .box = Box::Colour},
+    Setting{.name = "resizable", .label = "Resizable window", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "mouse_pointer", .label = "Mouse pointer", .quoted = true, .box = Box::Image, .hint = "Default"},
+    Setting{.name = "pointer_tip", .label = "Pointer's tip", .standard = "0 0", .box = Box::Point},
     Setting{.label = "Saves"},
-    Setting{.name = "autosave", .label = "Autosave", .standard = "yes", .help = "The game saves at every choice and when the player leaves it", .box = Box::YesNo},
-    Setting{.name = "save_pages", .label = "Save pages", .standard = "9", .help = "Numbered pages of save slots", .box = Box::Count},
-    Setting{.name = "page_slots", .label = "Slots on a page", .standard = "6", .help = "Save slots on each page", .box = Box::Count},
+    Setting{.name = "autosave", .label = "Autosave", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "save_pages", .label = "Save pages", .standard = "9", .box = Box::Count},
+    Setting{.name = "page_slots", .label = "Slots on a page", .standard = "6", .box = Box::Count},
     Setting{.label = "Text"},
-    Setting{.name = "text_appears", .label = "Text appears", .standard = "letter", .choices = "letter word line", .help = "A letter, a word or a whole line at a time", .box = Box::TextAppears},
-    Setting{.name = "narration_colour", .label = "Narration colour", .standard = "#96aaff", .help = "The speaker's colour for narration, and for speakers who aren't characters", .box = Box::Colour},
-    Setting{.name = "history_length", .label = "History length", .standard = "25", .help = "Latest lines kept for History parts to show", .box = Box::Count},
-    Setting{.name = "rollback_lines", .label = "Rollback lines", .standard = "100", .help = "Lines and choices players can go back (0: none)", .box = Box::Count},
-    Setting{.name = "skip_time", .label = "Skip time per line (seconds)", .standard = "0.05", .help = "How long each line shows while skipping", .box = Box::Seconds},
-    Setting{.name = "hold_to_skip", .label = "Hold to skip", .standard = "ctrl", .choices = "ctrl shift alt none", .help = "The key that skips while it's held", .box = Box::HoldToSkip},
-    Setting{.name = "auto_letter_delay", .label = "Auto delay per letter (seconds)", .standard = "0.01", .help = "How much longer auto-forward waits for each letter of a line without a voice", .box = Box::Seconds},
+    Setting{.name = "text_appears", .label = "Text appears", .standard = "letter", .choices = "letter word line", .box = Box::TextAppears},
+    Setting{.name = "narration_colour", .label = "Narration colour", .standard = "#96aaff", .box = Box::Colour},
+    Setting{.name = "history_length", .label = "History length", .standard = "25", .box = Box::Count},
+    Setting{.name = "rollback_lines", .label = "Rollback lines", .standard = "100", .box = Box::Count},
+    Setting{.name = "skip_time", .label = "Skip time per line (seconds)", .standard = "0.05", .box = Box::Seconds},
+    Setting{.name = "hold_to_skip", .label = "Hold to skip", .standard = "ctrl", .choices = "ctrl shift alt none", .box = Box::HoldToSkip},
+    Setting{.name = "auto_letter_delay", .label = "Auto delay per letter (seconds)", .standard = "0.01", .box = Box::Seconds},
     Setting{.label = "Images"},
-    Setting{.name = "image_scaling", .label = "Image scaling", .standard = "smooth", .choices = "smooth pixel", .help = "How scaled images look: smooth, or sharp pixels for pixel art", .box = Box::ImageScaling},
-    Setting{.name = "character_height", .label = "Character height", .standard = "95%", .help = "The tallest a character may be, of the screen's height", .box = Box::Percent},
-    Setting{.name = "animation_on_show", .label = "Animation on show", .help = "What characters and images play as they come, when their line names none", .box = Box::Animation, .hint = "At once"},
-    Setting{.name = "animation_on_hide", .label = "Animation on hide", .help = "What characters and images play as they go, when their line names none", .box = Box::Animation, .hint = "At once"},
-    Setting{.name = "move_time", .label = "Move time (seconds)", .standard = "0.4", .help = "How long someone on stage takes to slide to another place", .box = Box::Seconds},
-    Setting{.name = "load_ahead", .label = "Lines to load ahead", .standard = "30", .help = "Story lines looked ahead for images to load early (0: none)", .box = Box::Count},
-    Setting{.name = "image_memory", .label = "Image memory", .standard = "512", .help = "MB of images kept loaded (0: no limit)", .box = Box::Count, .suggest = "0:no limit|256|512|1024"},
+    Setting{.name = "image_scaling", .label = "Image scaling", .standard = "smooth", .choices = "smooth pixel", .box = Box::ImageScaling},
+    Setting{.name = "character_height", .label = "Character height", .standard = "95%", .box = Box::Percent},
+    Setting{.name = "animation_on_show", .label = "Animation on show", .box = Box::Animation, .hint = "At once"},
+    Setting{.name = "animation_on_hide", .label = "Animation on hide", .box = Box::Animation, .hint = "At once"},
+    Setting{.name = "move_time", .label = "Move time (seconds)", .standard = "0.4", .box = Box::Seconds},
+    Setting{.name = "load_ahead", .label = "Lines to load ahead", .standard = "30", .box = Box::Count},
+    Setting{.name = "image_memory", .label = "Image memory", .standard = "512", .box = Box::Count, .suggest = "0|256|512|1024"},
     Setting{.label = "Screens"},
-    Setting{.name = "glide", .label = "Lists glide after a drag", .standard = "yes", .help = "Lists and containers that scroll keep gliding when let go while moving (a part can say otherwise)", .box = Box::YesNo},
-    Setting{.name = "glide_speed", .label = "Glide speed", .standard = "100%", .help = "How fast they glide, of the speed they were let go at", .box = Box::Percent},
-    Setting{.name = "glide_distance", .label = "Glide distance", .standard = "100%", .help = "How far they carry: 200% slows down half as fast", .box = Box::Percent},
-    Setting{.name = "scrollbar_thickness", .label = "Scrollbar thickness", .standard = "6", .help = "Pixels thick a scrollbar is (a part can say otherwise)", .box = Box::Pixels},
-    Setting{.name = "fading_edges", .label = "Fading edges", .standard = "0", .help = "Pixels a fading edge spans (0: a fifth of the box, 64 at most; a container can say otherwise)", .box = Box::Pixels,
-            .suggest = "0:a fifth of the box|32|64|96"},
+    Setting{.name = "glide", .label = "Lists glide after a drag", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "glide_speed", .label = "Glide speed", .standard = "100%", .box = Box::Percent},
+    Setting{.name = "glide_distance", .label = "Glide distance", .standard = "100%", .box = Box::Percent},
+    Setting{.name = "scrollbar_thickness", .label = "Scrollbar thickness", .standard = "6", .box = Box::Pixels},
+    Setting{.name = "fading_edges", .label = "Fading edges", .standard = "0", .box = Box::Pixels,
+            .suggest = "0:a fifth of the box, at most 64|32|64|96"},
     Setting{.label = "Sound"},
-    Setting{.name = "music_crossfade", .label = "Music crossfade (seconds)", .standard = "0.5", .help = "How long the old song fades out when the music changes", .box = Box::Seconds},
-    Setting{.name = "music_under_voices", .label = "Music under voices", .standard = "70%", .help = "How loud music plays while someone speaks (100%: no change)", .box = Box::Volume},
-    Setting{.name = "text_follows_voices", .label = "Text follows voices", .standard = "no", .help = "Voiced lines type out in time with the voice", .box = Box::YesNo},
-    Setting{.name = "made_up_voice_speed", .label = "Made-up voice speed", .standard = "1", .help = "How fast made-up voices talk", .box = Box::Speed},
-    Setting{.name = "typing_sound_gap", .label = "Typing sound gap (seconds)", .standard = "0.06", .help = "How often a character's typing sound plays as their line appears", .box = Box::Seconds},
-    Setting{.name = "typing_sound_volume", .label = "Typing sound volume", .standard = "60%", .help = "How loud characters' typing sounds are", .box = Box::Volume},
+    Setting{.name = "music_crossfade", .label = "Music crossfade (seconds)", .standard = "0.5", .box = Box::Seconds},
+    Setting{.name = "music_under_voices", .label = "Music under voices", .standard = "70%", .box = Box::Volume},
+    Setting{.name = "text_follows_voices", .label = "Text follows voices", .standard = "no", .box = Box::YesNo},
+    Setting{.name = "made_up_voice_speed", .label = "Made-up voice speed", .standard = "1", .box = Box::Speed},
+    Setting{.name = "typing_sound_gap", .label = "Typing sound gap (seconds)", .standard = "0.06", .box = Box::Seconds},
+    Setting{.name = "typing_sound_volume", .label = "Typing sound volume", .standard = "60%", .box = Box::Volume},
     Setting{.label = "Characters"},
-    Setting{.name = "mouths_move", .label = "Mouths move", .standard = "yes", .choices = "yes voice no", .help = "When mouths move as characters speak (a character can say otherwise)", .box = Box::MouthMoves},
-    Setting{.name = "mouth_speed", .label = "Mouth speed", .standard = "4", .help = "Mouth movements a second without a voice", .box = Box::PerSecond},
-    Setting{.name = "blink", .label = "Blinks", .standard = "yes", .help = "Characters blink (a character can say otherwise)", .box = Box::YesNo},
-    Setting{.name = "seconds_between_blinks", .label = "Seconds between blinks", .standard = "4", .help = "How often characters blink, on average", .box = Box::Seconds},
+    Setting{.name = "mouths_move", .label = "Mouths move", .standard = "yes", .choices = "yes voice no", .box = Box::MouthMoves},
+    Setting{.name = "mouth_speed", .label = "Mouth speed", .standard = "4", .box = Box::PerSecond},
+    Setting{.name = "blink", .label = "Blinks", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "seconds_between_blinks", .label = "Seconds between blinks", .standard = "4", .box = Box::Seconds},
     Setting{.label = "Time"},
-    Setting{.name = "time", .label = "Time", .standard = "none", .choices = "none story real days", .help = "The story's own clock and calendar, the player's real ones (the story waits for them), or days and parts of the day", .box = Box::TimeKind},
-    Setting{.name = "time_start", .label = "Starts at", .help = "A date (2025-07-14) or a weekday, then a time or a part of the day: without either, days go by number", .box = Box::TimeStart, .hint = "8:00"},
-    Setting{.name = "time_parts", .label = "Parts of the day", .standard = "morning 6:00, afternoon 12:00, evening 18:00, night 22:00", .help = "Each part of the day and when it starts: {time_part}, and time lines' words", .quoted = true, .box = Box::DayParts},
-    Setting{.name = "clock", .label = "Clock", .standard = "24", .choices = "24 12", .help = "How times show: 18:30, or 6:30 PM", .box = Box::Clock},
-    Setting{.name = "phone_follows_time", .label = "The phone follows it", .standard = "yes", .help = "The phone's clock and date, and the times on its messages and calls, are the game's time", .box = Box::YesNo},
-    Setting{.name = "backgrounds_follow_time", .label = "Backgrounds follow it", .standard = "yes", .help = "A background's version for the part of the day shows when there is one: park_evening for park", .box = Box::YesNo},
+    Setting{.name = "time", .label = "Time", .standard = "none", .choices = "none story real days", .box = Box::TimeKind},
+    Setting{.name = "time_start", .label = "Starts at", .box = Box::TimeStart, .hint = "8:00"},
+    Setting{.name = "time_parts", .label = "Parts of the day", .standard = "morning 6:00, afternoon 12:00, evening 18:00, night 22:00", .quoted = true, .box = Box::DayParts},
+    Setting{.name = "clock", .label = "Clock", .standard = "24", .choices = "24 12", .box = Box::Clock},
+    Setting{.name = "phone_follows_time", .label = "The phone follows it", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "backgrounds_follow_time", .label = "Backgrounds follow it", .standard = "yes", .box = Box::YesNo},
     Setting{.label = "Phone"},
-    Setting{.name = "has_phone", .label = "Has a phone when", .help = "The player has their phone while this is true (a variable)", .box = Box::Variable, .hint = "Always"},
-    Setting{.name = "phone_owner", .label = "Owner", .help = "Whose phone it is, as it starts: the variable phone_owner (the player can change it in its Settings app)", .quoted = true, .box = Box::Text},
-    Setting{.name = "phone_wallpaper", .label = "Home screen wallpaper", .help = "The image behind its apps, as it starts: the variable phone_wallpaper (the player can change it in its Settings app)", .box = Box::Image},
-    Setting{.name = "phone_lock_wallpaper", .label = "Lock screen wallpaper", .help = "The image behind its lock screen, as it starts: the variable phone_lock_wallpaper (the player can change it in its Settings app)", .box = Box::Image},
-    Setting{.name = "phone_passcode", .label = "Passcode", .help = "The code its lock screen asks for, as it starts: the variable phone_passcode (the player can change it in its Settings app)", .quoted = true, .box = Box::Text},
-    Setting{.name = "phone_clock", .label = "Clock", .help = "The time it shows, as it starts: the variable phone_clock (none: the computer's clock; when it follows the time, the time's)", .quoted = true, .box = Box::Text, .hint = "The computer's"},
-    Setting{.name = "phone_date", .label = "Date", .help = "The date its lock screen and chats show, as it starts: the variable phone_date (when it follows the time, the time's)", .quoted = true, .box = Box::Text},
-    Setting{.name = "phone_signal", .label = "Signal", .standard = "yes", .help = "It has a signal, as it starts: the variable phone_signal (without one, calls don't get through and the player can't reply)", .box = Box::YesNo},
-    Setting{.name = "phone_battery", .label = "Battery", .standard = "100", .help = "How full its battery is, 0 to 100, as it starts: the variable phone_battery (at 0 the phone is off)", .box = Box::Count},
-    Setting{.name = "new_messages", .label = "New messages", .standard = "button", .choices = "button open", .help = "How players learn a message has come to their phone", .box = Box::NewMessages},
-    Setting{.name = "chat_messages", .label = "Chat messages come", .standard = "typed", .choices = "typed click", .help = "How a chat scene's messages come: as they're typed, or each after a click", .box = Box::ChatMessages},
-    Setting{.name = "phone_typing", .label = "Phone typing speed", .standard = "6", .help = "Letters a second people type messages on the phone (0: at once)", .box = Box::TextSpeed},
-    Setting{.name = "phone_history", .label = "Messages in the history", .standard = "no", .help = "The phone's messages show in the history too", .box = Box::YesNo},
-    Setting{.name = "phone_message_sound", .label = "Message sound", .help = "What plays when a message comes", .box = Box::Sound},
-    Setting{.name = "phone_send_sound", .label = "Sending sound", .help = "What plays when the player sends one", .box = Box::Sound},
-    Setting{.name = "phone_typing_sound", .label = "Typing sound", .help = "What plays when someone starts typing", .box = Box::Sound},
-    Setting{.name = "phone_ringtone", .label = "Ringtone", .help = "What plays while a call comes (a character's own ringtone instead, if they have one)", .box = Box::Sound},
-    Setting{.name = "phone_calling_sound", .label = "Calling sound", .help = "What plays while the player's call rings", .box = Box::Sound},
+    Setting{.name = "has_phone", .label = "Has a phone when", .box = Box::Variable, .hint = "Always"},
+    Setting{.name = "phone_owner", .label = "Owner", .quoted = true, .box = Box::Text},
+    Setting{.name = "phone_wallpaper", .label = "Home screen wallpaper", .box = Box::Image},
+    Setting{.name = "phone_lock_wallpaper", .label = "Lock screen wallpaper", .box = Box::Image},
+    Setting{.name = "phone_passcode", .label = "Passcode", .quoted = true, .box = Box::Text},
+    Setting{.name = "phone_clock", .label = "Clock", .quoted = true, .box = Box::Text, .hint = "The computer's"},
+    Setting{.name = "phone_date", .label = "Date", .quoted = true, .box = Box::Text},
+    Setting{.name = "phone_signal", .label = "Signal", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "phone_battery", .label = "Battery", .standard = "100", .box = Box::Count},
+    Setting{.name = "new_messages", .label = "New messages", .standard = "button", .choices = "button open", .box = Box::NewMessages},
+    Setting{.name = "chat_messages", .label = "Chat messages come", .standard = "typed", .choices = "typed click", .box = Box::ChatMessages},
+    Setting{.name = "phone_typing", .label = "Phone typing speed", .standard = "6", .box = Box::TextSpeed},
+    Setting{.name = "phone_history", .label = "Messages in the history", .standard = "no", .box = Box::YesNo},
+    Setting{.name = "phone_message_sound", .label = "Message sound", .box = Box::Sound},
+    Setting{.name = "phone_send_sound", .label = "Sending sound", .box = Box::Sound},
+    Setting{.name = "phone_typing_sound", .label = "Typing sound", .box = Box::Sound},
+    Setting{.name = "phone_ringtone", .label = "Ringtone", .box = Box::Sound},
+    Setting{.name = "phone_calling_sound", .label = "Calling sound", .box = Box::Sound},
     Setting{.label = "New players' settings"},
-    Setting{.name = "default.fullscreen", .label = "Fullscreen", .standard = "no", .help = "The game takes the whole screen", .box = Box::YesNo},
-    Setting{.name = "default.scaling", .label = "Scaling", .standard = "fit", .choices = "fit integer stretch fill", .help = "How the game fills the window", .box = Box::WindowFill},
-    Setting{.name = "default.vsync", .label = "VSync", .standard = "yes", .help = "Frames in step with the screen", .box = Box::YesNo},
-    Setting{.name = "default.frame_limit", .label = "Frame limit", .standard = "0", .help = "Frames a second (0: no limit)", .box = Box::Count, .suggest = "0:no limit|30|60|120|144"},
-    Setting{.name = "default.text_speed", .label = "Text speed", .standard = "45", .help = "Letters a second (0: at once)", .box = Box::TextSpeed},
-    Setting{.name = "default.auto_delay", .label = "Auto delay (seconds)", .standard = "0.5", .help = "How long auto-forward waits after a line", .box = Box::Seconds},
-    Setting{.name = "default.textbox_opacity", .label = "Textbox opacity", .standard = "85%", .help = "How solid the textbox is", .box = Box::Opacity},
-    Setting{.name = "default.text_size", .label = "Text size", .standard = "100%", .help = "The size of text that follows this setting", .box = Box::Percent},
-    Setting{.name = "default.animations", .label = "Animations", .standard = "yes", .help = "Characters, images and screens move, fade and wipe", .box = Box::YesNo},
-    Setting{.name = "default.master_volume", .label = "Master volume", .standard = "100%", .help = "Music, sounds and voices", .box = Box::Volume},
-    Setting{.name = "default.music_volume", .label = "Music volume", .standard = "80%", .help = "Music", .box = Box::Volume},
-    Setting{.name = "default.sound_volume", .label = "Sound volume", .standard = "100%", .help = "Sounds that aren't music or a voice", .box = Box::Volume},
-    Setting{.name = "default.voice_volume", .label = "Voice volume", .standard = "100%", .help = "Voices", .box = Box::Volume},
-    Setting{.name = "default.made_up_voices", .label = "Made-up voices", .standard = "yes", .help = "Characters' made-up voices play", .box = Box::YesNo},
-    Setting{.name = "default.typing_sounds", .label = "Typing sounds", .standard = "yes", .help = "Characters' typing sounds play", .box = Box::YesNo},
-    Setting{.name = "default.mouths", .label = "Mouths move", .standard = "yes", .choices = "yes voice no", .help = "When mouths move as characters speak", .box = Box::Mouths},
-    Setting{.name = "default.skip_unread", .label = "Skip unread text", .standard = "no", .help = "Skipping goes past lines not read yet", .box = Box::YesNo},
-    Setting{.name = "default.skip_after_choices", .label = "Skip after choices", .standard = "no", .help = "Skipping goes on after a choice", .box = Box::YesNo},
-    Setting{.name = "default.skip_movies", .label = "Skip movies", .standard = "yes", .help = "Clicks and skipping go past movies", .box = Box::YesNo},
-    Setting{.name = "default.rollback", .label = "Rollback", .standard = "yes", .help = "The mouse wheel goes back to earlier lines", .box = Box::YesNo},
-    Setting{.name = "default.read_aloud", .label = "Read aloud", .standard = "no", .help = "The computer reads the lines, choices and buttons pointed at aloud (on Linux: with speech-dispatcher)", .box = Box::YesNo},
-    Setting{.name = "default.vibration", .label = "Vibration", .standard = "yes", .help = "Controllers vibrate when a message comes and while the phone rings", .box = Box::YesNo},
-    Setting{.name = "default.high_contrast", .label = "High contrast", .standard = "no", .help = "Screens show white on black, with what's pointed at in yellow", .box = Box::YesNo},
+    Setting{.name = "default.fullscreen", .label = "Fullscreen", .standard = "no", .box = Box::YesNo},
+    Setting{.name = "default.scaling", .label = "Scaling", .standard = "fit", .choices = "fit integer stretch fill", .box = Box::WindowFill},
+    Setting{.name = "default.vsync", .label = "VSync", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "default.frame_limit", .label = "Frame limit", .standard = "0", .box = Box::Count, .suggest = "0|30|60|120|144"},
+    Setting{.name = "default.text_speed", .label = "Text speed", .standard = "45", .box = Box::TextSpeed},
+    Setting{.name = "default.auto_delay", .label = "Auto delay (seconds)", .standard = "0.5", .box = Box::Seconds},
+    Setting{.name = "default.textbox_opacity", .label = "Textbox opacity", .standard = "85%", .box = Box::Opacity},
+    Setting{.name = "default.text_size", .label = "Text size", .standard = "100%", .box = Box::Percent},
+    Setting{.name = "default.animations", .label = "Animations", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "default.master_volume", .label = "Master volume", .standard = "100%", .box = Box::Volume},
+    Setting{.name = "default.music_volume", .label = "Music volume", .standard = "80%", .box = Box::Volume},
+    Setting{.name = "default.sound_volume", .label = "Sound volume", .standard = "100%", .box = Box::Volume},
+    Setting{.name = "default.voice_volume", .label = "Voice volume", .standard = "100%", .box = Box::Volume},
+    Setting{.name = "default.made_up_voices", .label = "Made-up voices", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "default.typing_sounds", .label = "Typing sounds", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "default.mouths", .label = "Mouths move", .standard = "yes", .choices = "yes voice no", .box = Box::Mouths},
+    Setting{.name = "default.skip_unread", .label = "Skip unread text", .standard = "no", .box = Box::YesNo},
+    Setting{.name = "default.skip_after_choices", .label = "Skip after choices", .standard = "no", .box = Box::YesNo},
+    Setting{.name = "default.skip_movies", .label = "Skip movies", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "default.rollback", .label = "Rollback", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "default.read_aloud", .label = "Read aloud", .standard = "no", .box = Box::YesNo},
+    Setting{.name = "default.vibration", .label = "Vibration", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "default.high_contrast", .label = "High contrast", .standard = "no", .box = Box::YesNo},
 };
 
 // `line` for a game `sy` times as high: its text sizes, padding and bars grown or shrunk to fit (places
@@ -439,7 +436,7 @@ inline const PartOption kScreenOptions[]{
     {.key = "stop_music_on_close", .label = "Stops music on close", .box = Box::YesNo, .choices = "no yes"},
     {.key = "stop_voice_on_open", .label = "Stops voice on open", .box = Box::YesNo, .choices = "no yes"},
     {.key = "stop_voice_on_close", .label = "Stops voice on close", .box = Box::YesNo, .choices = "no yes"},
-    {.key = "close_after", .label = "Closes itself after (seconds)", .box = Box::Seconds, .hint = "None"},
+    {.key = "close_after", .label = "Closes after (seconds)", .box = Box::Seconds, .hint = "None"},
 };
 
 inline const PartOption kPartOptions[]{
@@ -481,7 +478,7 @@ inline const PartOption kPartOptions[]{
     {.key = "edges", .label = "Its edges", .box = Box::Edges, .choices = "show cut fade"},
     {.key = "scrollbar", .label = "Scrollbar", .box = Box::YesNo, .choices = "no yes"},
     {.key = "scrollbar_thickness", .label = "Scrollbar thickness", .box = Box::Pixels, .hint = "From Settings"},
-    {.key = "fading_edges", .label = "Fading edges", .box = Box::Pixels, .hint = "From Settings"},
+    {.key = "fading_edges", .label = "Fading edges", .box = Box::Pixels, .hint = "From Settings", .suggest = "0:a fifth of the box, at most 64|32|64|96"},
     {.key = "glide", .label = "Glides on after a drag", .box = Box::YesNo, .choices = "yes no"},
     {.key = "glide_speed", .label = "Glide speed", .box = Box::Percent, .hint = "100%"},
     {.key = "glide_distance", .label = "Glide distance", .box = Box::Percent, .hint = "100%"},
@@ -528,14 +525,15 @@ inline const PartOption kPartOptions[]{
 };
 
 constexpr std::string_view kImageBy = "?";
-inline const ToolsSuggestions kImageBySuggest = "?:depends on a variable";
+inline const ToolsSuggestions kImageBySuggest = "?";
 
 // In a form's fields: where an empty box means "from its style", the style's value instead (a field is
 // named by its setting, or, a style's own form, by the setting's label).
 void showStyleValues(std::vector<StoryEditor::Field>& fields, const Style& style, const Palette& palette);
 
 // ...and in a story line's or a character's form: where an empty box means the setting in Settings
-// (a move's time, the animation on show, blinking...), that value.
+// (a move's time, the animation on show, blinking...), that value; where it hangs on another box (a
+// character's image: their name; a named sound's fade out), what that box makes it.
 void showGameSettingValues(std::vector<StoryEditor::Field>& fields, const GameSettings& gameSettings);
 
 // Screen lines written in a game's pixels (for `width` x `height`), written in places and shares instead.
@@ -554,7 +552,7 @@ inline std::string_view usualEase(std::string_view key) { return key == "fade" ?
 // The tools' look: VNext's own indigo (its icon's, from #5a4dde to #231b6e, on its banner's #110e31), with
 // VNext's text colours (theme::text and theme::dim: the ones its screens use too).
 constexpr SDL_Color kPanel{20, 18, 48, 255}, kBar{31, 26, 76, 255}, kAccent{173, 162, 255, 255}, kButton{43, 37, 99, 255},
-    kButtonHover{59, 51, 146, 255}, kEdge{91, 81, 184, 255}, kChosen{77, 65, 196, 255}, kBox{12, 10, 34, 255}, kGood{140, 230, 160, 255},
+    kButtonHover{59, 51, 146, 255}, kEdge{91, 81, 184, 255}, kChosen{77, 65, 196, 255}, kBox{12, 10, 34, 255},
     kBad{255, 140, 150, 255}, kWarn{255, 205, 120, 255}, kOptionArrow{210, 150, 255, 255};
 
 // The scene a mistake is in, if any.
@@ -582,8 +580,8 @@ inline const FileKind kFileKinds[]{{"images", "Images", "Image", "images/", kIma
 // The clipboard's text as lines (without the blank ones at its end).
 std::vector<std::string> clipboardLines();
 
-// Which of Cmd+C (copy), X (cut), V (paste) and D (duplicate) a key is, if any.
-char clipboardKey(const SDL_KeyboardEvent& key);
+// Which of the tools' copy, cut, paste and duplicate keys a key is ('c', 'x', 'v', 'd'), if any.
+char clipboardKey(const DeveloperTools& d, const SDL_KeyboardEvent& key);
 
 // The caret steps over whole letters (UTF-8).
 std::size_t previousLetter(const std::string& s, std::size_t i);

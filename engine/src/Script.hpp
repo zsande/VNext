@@ -93,7 +93,8 @@ private:
 // Numbers (2, 2.5), "text" or 'text', true/false, variables, + - * / %, parentheses, comparisons
 // (= == != < <= > >= or the words is, is not, at least, at most, more than, less than),
 // and / or / not, and the functions random(a, b), random(n), min, max, abs, round, len, str, int,
-// upper, lower. Names are case-insensitive. Dividing gives a fraction when it doesn't come out whole.
+// upper, lower and if(condition, then, otherwise). Names are case-insensitive. Dividing gives a fraction
+// when it doesn't come out whole.
 class Expr {
 public:
     static std::expected<Expr, std::string> parse(std::string_view source);
@@ -126,7 +127,9 @@ private:
 };
 
 // Text tags handled by the textbox: {pause}, {pause 0.5}, {no_wait}, {speed 10}...{/speed},
-// {colour gold}...{/colour}, {appears line}. `at` is the tag's position in the expanded text, in codepoints.
+// {colour gold}...{/colour}, {appears line}, {bold}, {italic}, {underline} and {crossed_out} (each to its
+// {/...}), {furigana READING}...{/furigana} and {tip NAME}...{/tip}. `at` is the tag's position in the
+// expanded text, in codepoints.
 using TagHandler = std::function<void(std::string_view name, std::string_view arg, std::size_t at)>;
 [[nodiscard]] bool isTextTag(std::string_view inner);
 
@@ -491,12 +494,12 @@ struct Animation {
 };
 
 enum class ElementKind : std::uint8_t {
-    Image, Text, Button,                                                              // general
+    Image, Text, Button,                                                                        // general
     Namebox, Dialogue, Indicator, Choices, History, Pages, Slots, Face, Control, Gallery, Page, // engine widgets
-    Input, Bar, Slider,                                                             // variable widgets
-    Movie,                                                                          // a movie playing (loops)
-    Endings, Songs, Achievements, Tips,                                             // lists of what was reached
-    Flowchart,                                                                          // the flowchart
+    Input, Bar, Slider,                                                                         // variable widgets
+    Movie,                                                                                      // a movie playing (loops)
+    Endings, Songs, Achievements, Tips,                                                         // lists of what was reached
+    Flowchart,                                                                                  // the flowchart
     Container, // parts in it (any part can hold parts; list=: once for each item of a list, the phone's...)
 };
 // What a container can repeat its parts for (list=NAME), and what one of them is called in its parts' values
@@ -517,14 +520,16 @@ inline constexpr std::array<std::pair<std::string_view, std::string_view>, 7> kI
 // Whether a kind of part ("history", "container"...) takes a setting of its own ("columns", "glide"...):
 // the ones the editor's form for it shows, besides any part's place, size and look.
 [[nodiscard]] bool partTakes(std::string_view kind, std::string_view key);
+// The style a kind of part has when it names none, if the game has one by that name ("button"...): else "default".
+[[nodiscard]] std::string_view partStyle(std::string_view kind, const std::function<bool(std::string_view)>& hasStyle);
 
 // What screens' conditions and texts (and the story's) know besides the variables: every value
 // Engine::builtin gives, in its order (the player's settings, by their names, too: Settings::has).
 inline constexpr std::string_view kBuiltinValues[]{
-    "in_game", "has_save", "can_save", "can_rollback", "skip", "auto", "speaking", "choosing", "prompt", "text_complete", "time_left",
+    "in_game", "has_save", "has_quick_save", "can_save", "can_rollback", "skip", "auto", "speaking", "choosing", "prompt", "text_complete", "time_left",
     "gallery_image", "gallery_title", "gallery_movie", "tip", "tip_title", "tip_text", "flowchart_points", "gallery_total", "gallery_unlocked",
     "endings_total", "endings_reached", "songs_total", "songs_heard", "achievements_total", "achievements_earned", "tips_total", "tips_found",
-    "messages_total", "chats_total", "open_chat_messages", "calls_total", "people_total", "open_chat", "phone_app", "has_phone", "phone_button", "messages_unread", "calls_missed", "phone_unread",
+    "messages_total", "chats_total", "open_chat_messages", "calls_total", "people_total", "open_chat", "phone_app", "has_phone", "phone_button", "menu_button", "messages_unread", "calls_missed", "phone_unread",
     "phone_locked", "in_call", "in_chat", "caller",
     "call_incoming", "call_outgoing", "call_busy", "call_choice", "call_time", "caller_avatar", "caller_colour", "caller_initial", "open_image", "open_image_text", "phone_needs_code",
     "phone_code", "phone_wrong", "dragging", "has_face", "face_side", "fullscreen", "developer", "thumbnail", "save_mode", "title", "language", "languages",
@@ -584,8 +589,9 @@ struct Element {
     [[nodiscard]] std::string option(std::string_view name, std::string_view fallback = {}) const;
     [[nodiscard]] SDL_Color colour(std::string_view name, SDL_Color fallback) const;
     [[nodiscard]] const Style& substyle(std::string_view name) const;
-    // A container's: scroll=yes (what's in it scrolls), fit=parts (as big as its biggest part, not its box)
-    // and edges= (what's past its edges: show, cut or fade; scrolling: cut, unless it says). Any part that
+    // A container's: scroll=yes (what's in it scrolls), fit=parts (as big as its parts, not its box: its
+    // biggest part, or stacked, all of them) and edges= (what's past its edges: show, cut or fade; scrolling:
+    // cut, unless it says). Any part that
     // scrolls: whether a drag glides on (glide=; none: `usually`, the game's setting), and which way dragging
     // scrolls it (-1: a container or a grid, further down as it grows; +1: a history or a chat, further
     // up from the latest; 0: it isn't dragged).
@@ -619,9 +625,16 @@ struct Control {
     Commands actions;
     bool inMenus = false;       // also on the title screen and in menus (else only while playing)
     std::optional<Expr> condition; // when=: works only while it's true
+    // Its actions only move, press or scroll on screens: it can share its keys with the story's controls (Enter can
+    // press what the keys point at on a menu and go to the next line, as the mouse's left button clicks and goes on).
+    [[nodiscard]] bool onScreens() const;
 };
+// What the developer tools do with their own keys ("tools WHAT", their built-in controls' actions: tools_copy and the
+// rest): nothing in the game. A control that does only one of these is the tools' (its place here, else none).
+inline constexpr std::array<std::string_view, 15> kToolsVerbs{"undo", "redo", "cut", "copy", "paste", "duplicate", "delete", "select all",
+                                                            "reload", "quit", "story", "screens", "library", "play", "stop here"};
+[[nodiscard]] std::optional<std::size_t> toolsVerbOf(const Control& control);
 
-// The messages the player shows, in English: the ones "setting text.ID" lines don't change.
 // What a screen's control parts call the mouse buttons, the wheel, controller buttons and touch gestures
 // (keys are named by the system): the only words the player shows that aren't the game's own, so a
 // translation file lists them.
@@ -634,8 +647,8 @@ inline constexpr std::array<std::pair<std::string_view, std::string_view>, 29> k
     {"long_press", "Long press"}, {"two_finger_tap", "Two-finger tap"}, {"unknown_key", "?"}}};
 [[nodiscard]] std::string_view keyWord(std::string_view id); // (the id itself when it isn't listed)
 
-// What tells players a message has come to their phone (setting new_messages): a Phone button on the textbox
-// that counts them, or the phone opening.
+// What tells players a message has come to their phone (setting new_messages): the textbox's Phone button counting
+// them, or the phone opening (the Phone button is there either way, to open it).
 enum class NewMessages : std::uint8_t { Button, Open };
 // How a chat scene's messages come (setting chat_messages): as they're typed (dots first; a click hurries one),
 // or each after a click.
@@ -801,7 +814,7 @@ public:
     // Translations. Where a text players read is (see forEachText):
     struct TextPlace {
         const Instruction* line = nullptr; // a story line, choice, question or message
-        std::string_view what;             // else "title", "character", "screen", "control", "text" or a record kind ("gallery"...)
+        std::string_view what;             // else "title", "character", "screen" or a record kind ("gallery"...)
         std::string_view name;             // ...and which one
     };
     // Every text players read: lines, choices, names, screen texts, messages, gallery titles...
@@ -844,7 +857,7 @@ private:
 //
 // Players choose it in Settings (the "language" setting). Texts it doesn't have show as written.
 struct Translation {
-    std::string id;   // the file's name ("spanish"); also images/<id>/ and sounds/<id>/
+    std::string id;   // the file's name ("spanish"); also its own images/<id>/, sounds/<id>/ and movies/<id>/
     std::string name; // as players see it ("Español")
     std::string code; // the language's code ("es", "pt-BR"): players whose computer uses it start with it
     std::unordered_map<std::string, std::string, StringHash, std::equal_to<>> texts; // as written -> translated

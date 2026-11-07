@@ -106,7 +106,7 @@ public:
 
     [[nodiscard]] const std::string& root() const { return root_; }
     [[nodiscard]] std::string path(std::string_view relative) const { return root_ + std::string(relative); }
-    // A translation's id: its own images (images/<id>/) and sounds (sounds/<id>/) are used first.
+    // A translation's id: its own images (images/<id>/), sounds (sounds/<id>/) and movies (movies/<id>/) are used first.
     // Forgets loaded images when it changes.
     void setLanguage(std::string id);
     // The sound file a script means: sounds/<name>.ogg/.mp3/.flac/.wav, or `name` as written.
@@ -133,7 +133,9 @@ public:
     // images/<name>.png (or another of kImageTypes), an atlas frame or a sub-image; empty when missing.
     // `looks`: with colour effects (a copy, made when first needed).
     Image image(std::string_view name, Frame frame = {}, unsigned looks = 0);
-    Image whole(std::string_view name, Frame frame = {}, unsigned looks = 0); // the same, but never a sub-image
+    // The image file itself, never an atlas or a sub-image of that name (an atlas mostly has its image's name):
+    // what the Library shows of a file, and what sub-images are cut from.
+    Image file(std::string_view name, unsigned looks = 0);
     // The image's pixels (RGBA32), for reading them (an image-shaped wipe).
     [[nodiscard]] SurfacePtr pixels(std::string_view name) const;
     // Loads an image (with colour effects) before it's needed; false if it already was.
@@ -164,6 +166,7 @@ private:
     [[nodiscard]] SurfacePtr filePixels(std::string_view name) const;
     [[nodiscard]] std::string imageFolder(std::string_view key) const; // images/, or the language's own when it has that image
     SDL_Texture* loadTexture(std::string_view name, unsigned looks = 0);
+    Image frameOrFile(std::string_view name, Frame frame, unsigned looks); // an atlas's frame, else the file
     void trim();
 
     SDL_Renderer* renderer_;

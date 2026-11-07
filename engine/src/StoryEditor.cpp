@@ -66,74 +66,74 @@ StoryEditor::Kind classify(std::string_view t, StoryEditor::Kind parent) {
     if (command == "hide" && second == "ui") return Kind::Other;
     if (command == "show" || command == "hide") return Kind::Character;
     static constexpr std::pair<std::string_view, Kind> kCommandKinds[]{ // (the plain ones: a word, its kind)
-        {"choice", Kind::Choice}, {"if", Kind::If},         {"else", Kind::Else},        {"set", Kind::Set},
-        {"add", Kind::Set},       {"subtract", Kind::Set},  {"toggle", Kind::Set},       {"jump", Kind::Jump},
-        {"music", Kind::Music},      {"sound", Kind::Sound},    {"voice", Kind::Voice},
-        {"stop", Kind::Stop},     {"wait", Kind::Wait},     {"time", Kind::Time},
-        {"effect", Kind::Effect}, {"weather", Kind::Weather}, {"camera", Kind::Camera},  {"movie", Kind::Movie},    {"open", Kind::Screen},
-        {"together", Kind::Together},
-        {"chat", Kind::Chat},
-        {"quick save", Kind::Game}, {"fullscreen", Kind::Game}, {"screenshot", Kind::Game}, {"quit", Kind::Game},
+        {"choice", Kind::Choice},     {"if", Kind::If},             {"else", Kind::Else},         {"set", Kind::Set},
+        {"add", Kind::Set},           {"subtract", Kind::Set},      {"toggle", Kind::Set},        {"jump", Kind::Jump},
+        {"music", Kind::Music},       {"sound", Kind::Sound},       {"voice", Kind::Voice},       {"stop", Kind::Stop},
+        {"wait", Kind::Wait},         {"time", Kind::Time},         {"effect", Kind::Effect},     {"weather", Kind::Weather},
+        {"camera", Kind::Camera},     {"movie", Kind::Movie},       {"open", Kind::Screen},       {"together", Kind::Together},
+        {"chat", Kind::Chat},         {"quick save", Kind::Game},   {"fullscreen", Kind::Game},   {"screenshot", Kind::Game},
+        {"quit", Kind::Game},
     };
     if (const auto it = std::ranges::find(kCommandKinds, std::string_view(command), &std::pair<std::string_view, Kind>::first); it != std::end(kCommandKinds))
         return it->second;
     if (!command.empty() || !unknownCommand(t).empty()) return Kind::Other; // (a lower-case word that isn't a command: a mistake, as the engine has it)
+    if (parent == Kind::Chat && !isQuoted(trim(t))) return Kind::Message; // (in a chat, someone's words are a message, as the engine has it)
     return Kind::Line; // someone speaking, or narration
 }
 
-// Values a box often has, that say what they are (plain numbers are typed: no list for those).
-const ToolsSuggestions kAcross = "-1:the left edge|-0.5|0:the middle|0.5|1:the right edge", kDown = "-1:the bottom|-0.5|0:the middle|0.5|1:the top",
-                           kLayers = "-1:behind the others|1:in front of the others|2", kSpeeds = "0.5:slower|0.75|1.5|2:faster";
+// Values a box often has, listed beside it (any other can be typed).
+const ToolsSuggestions kAcross = "-1|-0.5|0|0.5|1", kDown = "-1|-0.5|0|0.5|1", kLayers = "-1:behind the others|1:in front of the others|2",
+                       kSpeeds = "0.5:slower|0.75|1.5|2:faster";
 
 const Slot kJumpSlots[]{{.type = Type::Word, .name = "Scene"_text, .box = Box::Scene}};
 const Slot kMusicSlots[]{{.type = Type::Word, .name = "Song"_text, .box = Box::Sound},
-                             {.type = Type::After, .name = "Fade in"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade in (seconds)"_text},
-                             {.type = Type::After, .name = "Fade out"_text, .key = "fade_out", .box = Box::Seconds, .hint = "From Settings"_hint, .label = "Fade out (seconds)"_text},
-                             {.type = Type::After, .name = "Volume"_text, .key = "volume", .box = Box::Volume, .hint = "100%"},
-                             {.type = Type::Flag, .name = "Once"_text, .key = "once", .box = Box::YesNo, .choices = "no yes"_choices, .label = "Play once"_text}};
+                         {.type = Type::After, .name = "Fade in"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade in (seconds)"_text},
+                         {.type = Type::After, .name = "Fade out"_text, .key = "fade_out", .box = Box::Seconds, .hint = "From Settings"_hint, .label = "Fade out (seconds)"_text},
+                         {.type = Type::After, .name = "Volume"_text, .key = "volume", .box = Box::Volume, .hint = "100%"},
+                         {.type = Type::Flag, .name = "Once"_text, .key = "once", .box = Box::YesNo, .choices = "no yes"_choices, .label = "Play once"_text}};
 
 const Slot kSoundSlots[]{{.type = Type::Word, .name = "Sound"_text, .box = Box::Sound},
-                             {.type = Type::Flag, .name = "Loop"_text, .key = "loop", .box = Box::YesNo, .choices = "no yes"_choices},
-                             {.type = Type::After, .name = "Called"_text, .key = "as", .box = Box::Channel, .label = "Name to stop it by"_text},
-                             {.type = Type::After, .name = "Fade in"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade in (seconds)"_text},
-                             {.type = Type::After, .name = "Fade out"_text, .key = "fade_out", .box = Box::Seconds, .hint = "None"_hint, .label = "Fade out (seconds)"_text},
-                             {.type = Type::After, .name = "Volume"_text, .key = "volume", .box = Box::Volume, .hint = "100%"}};
+                         {.type = Type::Flag, .name = "Loop"_text, .key = "loop", .box = Box::YesNo, .choices = "no yes"_choices},
+                         {.type = Type::After, .name = "Called"_text, .key = "as", .box = Box::Channel, .label = "Name to stop it by"_text},
+                         {.type = Type::After, .name = "Fade in"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade in (seconds)"_text},
+                         {.type = Type::After, .name = "Fade out"_text, .key = "fade_out", .box = Box::Seconds, .hint = "None"_hint, .label = "Fade out (seconds)"_text},
+                         {.type = Type::After, .name = "Volume"_text, .key = "volume", .box = Box::Volume, .hint = "100%"}};
 
 const Slot kVoiceSlots[]{{.type = Type::Word, .name = "Voice"_text, .box = Box::Sound, .label = "Voice file"_text},
-                             {.type = Type::Option, .name = "Text follows it"_text, .key = "text_follows", .box = Box::YesNoSettings, .choices = "usual yes no"_choices},
-                             {.type = Type::After, .name = "Volume"_text, .key = "volume", .box = Box::Volume, .hint = "100%"}};
+                         {.type = Type::Option, .name = "Text follows it"_text, .key = "text_follows", .box = Box::YesNoSettings, .choices = "usual yes no"_choices},
+                         {.type = Type::After, .name = "Volume"_text, .key = "volume", .box = Box::Volume, .hint = "100%"}};
 
 const Slot kStopSlots[]{{.type = Type::Word, .name = "Called"_text, .box = Box::Channel, .hint = "All"_hint, .only = "stop_sound", .label = "Sound's name"_text},
-                            {.type = Type::After, .name = "Fade out"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade out (seconds)"_text}};
+                        {.type = Type::After, .name = "Fade out"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade out (seconds)"_text}};
 
 const Slot kWaitSlots[]{{.type = Type::Word, .name = "Seconds"_text, .box = Box::Seconds, .hint = "Until a click"_hint, .seconds = true}};
 const Slot kTimeSlots[]{{.type = Type::Words, .name = "When"_text, .box = Box::TimeWhen, .only = "time"},
-                            {.type = Type::Option, .name = "Day"_text, .key = "day", .box = Box::Count, .hint = "None"_hint, .only = "time", .label = "Day number"_text},
-                            {.type = Type::Words, .name = "How long"_text, .box = Box::TimePasses, .hint = "To the next part of the day"_hint, .only = "time_passes"}};
+                        {.type = Type::Option, .name = "Day"_text, .key = "day", .box = Box::Count, .hint = "None"_hint, .only = "time", .label = "Day number"_text},
+                        {.type = Type::Words, .name = "How long"_text, .box = Box::TimePasses, .hint = "To the next part of the day"_hint, .only = "time_passes"}};
 
 const Slot kEffectSlots[]{{.type = Type::Words, .name = "Effects"_text, .box = Box::Effects, .choices = "greyscale sepia invert blur pixelate noise glitch none"_choices},
-                              {.type = Type::Option, .name = "Amount"_text, .key = "amount", .box = Box::Percent, .hint = "100%"},
-                              {.type = Type::After, .name = "Fade"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade in (seconds)"_text},
-                              {.type = Type::After, .name = "Just for"_text, .key = "for", .box = Box::Seconds, .hint = "Until turned off"_hint, .seconds = true, .label = "Duration (seconds)"_text}};
+                          {.type = Type::Option, .name = "Amount"_text, .key = "amount", .box = Box::Percent, .hint = "100%"},
+                          {.type = Type::After, .name = "Fade"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade in (seconds)"_text},
+                          {.type = Type::After, .name = "Just for"_text, .key = "for", .box = Box::Seconds, .hint = "Until turned off"_hint, .seconds = true, .label = "Duration (seconds)"_text}};
 
 const Slot kWeatherSlots[]{{.type = Type::Word, .name = "Weather"_text, .box = Box::WeatherKind, .choices = "rain snow petals leaves embers"_choices, .label = "Kind"_text},
-                               {.type = Type::Option, .name = "Amount"_text, .key = "amount", .box = Box::Percent, .hint = "100%", .group = "Look"_group},
-                               {.type = Type::Option, .name = "Speed"_text, .key = "speed", .box = Box::Speed, .hint = "1"},
-                               {.type = Type::Option, .name = "Wind"_text, .key = "wind", .box = Box::Wind, .hint = "None"_hint},
-                               {.type = Type::Option, .name = "Tint"_text, .key = "tint", .box = Box::Colour},
-                               {.type = Type::Option, .name = "Image"_text, .key = "image", .box = Box::Image},
-                               {.type = Type::Option, .name = "Behind people"_text, .key = "behind", .box = Box::YesNo, .choices = "no yes"_choices, .label = "Behind characters"_text},
-                               {.type = Type::After, .name = "Fade in"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade in (seconds)"_text}};
+                           {.type = Type::Option, .name = "Amount"_text, .key = "amount", .box = Box::Percent, .hint = "100%", .group = "Look"_group},
+                           {.type = Type::Option, .name = "Speed"_text, .key = "speed", .box = Box::Speed, .hint = "1"},
+                           {.type = Type::Option, .name = "Wind"_text, .key = "wind", .box = Box::Wind, .hint = "None"_hint},
+                           {.type = Type::Option, .name = "Tint"_text, .key = "tint", .box = Box::Colour},
+                           {.type = Type::Option, .name = "Image"_text, .key = "image", .box = Box::Image},
+                           {.type = Type::Option, .name = "Behind people"_text, .key = "behind", .box = Box::YesNo, .choices = "no yes"_choices, .label = "Behind characters"_text},
+                           {.type = Type::After, .name = "Fade in"_text, .key = "fade", .box = Box::Seconds, .hint = "At once"_hint, .label = "Fade in (seconds)"_text}};
 
 const Slot kCameraSlots[]{{.type = Type::Option, .name = "Animation"_text, .key = "animation", .box = Box::Animation, .hint = "None"_hint,
-                           .suggest = "none:stops the one it has"_suggest, .group = "Animations"_group},
-                          {.type = Type::After, .name = "Animation now"_text, .key = "with", .box = Box::Animation, .suggest = "none:back to normal"_suggest},
+                           .suggest = "none"_suggest, .group = "Animations"_group},
+                          {.type = Type::After, .name = "Animation now"_text, .key = "with", .box = Box::Animation, .suggest = "none"_suggest},
                           {.type = Type::Flag, .name = "The story waits"_text, .key = "and wait", .box = Box::YesNo, .choices = "no yes"_choices, .label = "Story waits for it"_text}};
 
 const Slot kMovieSlots[]{{.type = Type::Word, .name = "Movie"_text, .box = Box::Movie},
-                             {.type = Type::Flag, .name = "Loop"_text, .key = "loop", .box = Box::YesNo, .choices = "no yes"_choices},
-                             {.type = Type::Option, .name = "Can be skipped"_text, .key = "skip", .box = Box::YesNo, .choices = "yes no"_choices, .label = "Skippable"_text},
-                             {.type = Type::After, .name = "Volume"_text, .key = "volume", .box = Box::Volume, .hint = "100%"}};
+                         {.type = Type::Flag, .name = "Loop"_text, .key = "loop", .box = Box::YesNo, .choices = "no yes"_choices},
+                         {.type = Type::Option, .name = "Can be skipped"_text, .key = "skip", .box = Box::YesNo, .choices = "yes no"_choices, .label = "Skippable"_text},
+                         {.type = Type::After, .name = "Volume"_text, .key = "volume", .box = Box::Volume, .hint = "100%"}};
 
 const Slot kScreenSlots[]{{.type = Type::Word, .name = "Screen"_text, .box = Box::Screen}};
 
@@ -164,7 +164,7 @@ const Slot kCharacterSlots[]{
     {.type = Type::Option, .name = "Text appears"_text, .key = "text_appears", .box = Box::TextAppears, .choices = "usual letter word line"_choices, .group = "Lines"_group, .label = "Text appears"_text},
     {.type = Type::Option, .name = "Textbox"_text, .key = "textbox", .box = Box::Textbox, .hint = "textbox"},
     {.type = Type::Option, .name = "Voice files"_text, .key = "voice_files", .box = Box::VoiceFolder, .hint = "None"_hint,
-     .suggest = "yes:sounds/voices/ and its name|no"_suggest, .group = "Voice"_group, .label = "Voice files"_text},
+     .suggest = "yes|no"_suggest, .group = "Voice"_group, .label = "Voice files"_text},
     {.type = Type::Option, .name = "Made-up voice"_text, .key = "made_up_voice", .box = Box::MadeUpVoice, .hint = "None"_hint},
     {.type = Type::Option, .name = "Its speed"_text, .key = "made_up_voice_speed", .box = Box::Speed, .hint = "From Settings"_hint, .label = "Made-up voice speed"_text},
     {.type = Type::Option, .name = "Typing sound"_text, .key = "typing_sound", .box = Box::Sound, .hint = "None"_hint},
@@ -172,7 +172,7 @@ const Slot kCharacterSlots[]{
     {.type = Type::Option, .name = "Blinks every"_text, .key = "seconds_between_blinks", .box = Box::Seconds, .hint = "From Settings"_hint, .label = "Seconds between blinks"_text},
     {.type = Type::Option, .name = "Mouth moves"_text, .key = "mouth_moves", .box = Box::MouthMoves, .choices = "usual yes voice no"_choices},
     {.type = Type::Option, .name = "Mouth's speed"_text, .key = "mouth_speed", .box = Box::PerSecond, .hint = "From Settings"_hint, .label = "Mouth speed"_text},
-    {.type = Type::Option, .name = "Face"_text, .key = "face", .box = Box::Image, .hint = "None"_hint, .suggest = "yes:its image's name and _face|no"_suggest,
+    {.type = Type::Option, .name = "Face"_text, .key = "face", .box = Box::Image, .hint = "None"_hint, .suggest = "yes|no"_suggest,
      .group = "Face"_group, .label = "Image"_text},
     {.type = Type::Option, .name = "Face's side"_text, .key = "face_side", .box = Box::Side, .choices = "left right"_choices, .label = "Side"_text},
     {.type = Type::Option, .name = "Face copies"_text, .key = "face_copies", .box = Box::FaceCopies, .choices = "expression blink mouth"_choices, .commas = true, .label = "Copies from stage"_text},
@@ -360,21 +360,21 @@ const StoryEditor::BoxKind& StoryEditor::kindOf(Box box) {
         {.box = Box::Down, .suggest = kDown},
         {.box = Box::Layer, .suggest = kLayers},
         {.box = Box::Speed, .suggest = kSpeeds},
-        {.box = Box::Zoom, .suggest = "50%:half its size|100%:its size|150%|200%:twice its size"_suggest, .percent = true},
-        {.box = Box::Opacity, .suggest = "0%:unseen|25%|50%|75%|100%:fully seen"_suggest, .percent = true},
-        {.box = Box::Wipe, .suggest = "0%:none of it|50%:half of it|100%:all of it"_suggest, .percent = true},
-        {.box = Box::Volume, .suggest = "0%:silent|50%|100%"_suggest, .percent = true},
-        {.box = Box::Percent, .suggest = "50%:half|100%:as it is|150%|200%:double"_suggest, .percent = true},
-        {.box = Box::Rotation, .suggest = "-90|-45|0:straight|45|90|180"_suggest},
+        {.box = Box::Zoom, .suggest = "50%|100%|150%|200%"_suggest, .percent = true},
+        {.box = Box::Opacity, .suggest = "0%|25%|50%|75%|100%"_suggest, .percent = true},
+        {.box = Box::Wipe, .suggest = "0%|50%|100%"_suggest, .percent = true},
+        {.box = Box::Volume, .suggest = "0%|50%|100%"_suggest, .percent = true},
+        {.box = Box::Percent, .suggest = "50%|100%|150%|200%"_suggest, .percent = true},
+        {.box = Box::Rotation, .suggest = "-90|-45|0|45|90|180"_suggest},
         {.box = Box::Seconds, .suggest = "0.25|0.5|1|2"_suggest},
         {.box = Box::Pixels},
         {.box = Box::Count},
         {.box = Box::Number},
         {.box = Box::PerSecond},
-        {.box = Box::LineSpacing, .suggest = "1:single|1.2|1.5:one and a half|2:double"_suggest},
-        {.box = Box::TextSpeed, .suggest = "0:at once|10:slow|25|45|80:fast"_suggest},
-        {.box = Box::Pause, .suggest = "click:until a click|0.5:half a second|1:a second|2:two seconds"_suggest},
-        {.box = Box::Wind, .suggest = "-1:to the left|-0.5|0.5|1:to the right"_suggest},
+        {.box = Box::LineSpacing, .suggest = "1|1.2|1.5|2"_suggest},
+        {.box = Box::TextSpeed, .suggest = "0|10|25|45|80"_suggest},
+        {.box = Box::Pause, .suggest = "click|0.5|1|2"_suggest},
+        {.box = Box::Wind, .suggest = "-1|-0.5|0.5|1"_suggest},
         {.box = Box::WidthHeight, .suggest = "1280 720|1920 1080|1600 900|2560 1440|1024 768|800 600"_suggest},
         {.box = Box::Point, .suggest = "0 0|8 8|16 16"_suggest},
         {.box = Box::FontStyle, .suggest = "Regular|Bold|Italic|Bold Italic"_suggest},
@@ -389,12 +389,13 @@ const StoryEditor::BoxKind& StoryEditor::kindOf(Box box) {
         {.box = Box::SettingAction, .suggest = ToolsSuggestions(actionKindList("settings"))},
         {.box = Box::GalleryAction, .suggest = ToolsSuggestions(actionKindList("gallery"))},
         {.box = Box::PhoneAction, .suggest = ToolsSuggestions(actionKindList("phone"))},
+        {.box = Box::ToolsAction, .suggest = ToolsSuggestions(actionKindList("tools"))},
         {.box = Box::ContainerFit, .choices = "box parts"_choices, .labels = "Fills its box|As big as its parts"_labels},
         {.box = Box::Stack, .choices = "no down across"_choices, .labels = "By their places|One under another|Side by side"_labels},
-        {.box = Box::List, .suggest = "apps:the phone's apps|chats:its chats|messages:the open chat's messages|options:what the player can pick|calls:its calls|people:the people in it|notices:what's new, for its lock screen"_suggest},
-        {.box = Box::Playing, .suggest = "music:the music|sound:looping sounds|voice:the voice"_suggest},
-        {.box = Box::KeySlot, .suggest = "1:the first|2:the second|pad:its controller button"_suggest},
-        {.box = Box::SaveMode, .suggest = "save:saving|load:loading"_suggest},
+        {.box = Box::List, .suggest = "apps|chats|messages|options|calls|people|notices"_suggest},
+        {.box = Box::Playing, .suggest = "music|sound|voice"_suggest},
+        {.box = Box::KeySlot, .suggest = "1|2|pad"_suggest},
+        {.box = Box::SaveMode, .suggest = "save|load"_suggest},
         {.box = Box::YesNo, .choices = "yes no"_choices, .labels = "Yes|No"_labels},
         {.box = Box::YesNoStyle, .choices = "inherit yes no"_choices, .labels = "From its base style|Yes|No"_labels},
         {.box = Box::YesNoSettings, .choices = "usual yes no"_choices, .labels = "From Settings|Yes|No"_labels},
@@ -403,7 +404,7 @@ const StoryEditor::BoxKind& StoryEditor::kindOf(Box box) {
          .labels = "Smoothly|Evenly|Speeding up|Slowing down|Bouncing|Wobbling|Overshooting"_labels},
         {.box = Box::Plays, .choices = "once loop times"_choices, .labels = "Once|Looping|A number of times"_labels},
         {.box = Box::Condition, .pick = Pick::Conditions},
-        {.box = Box::SettingChoice}, // (the list is the setting's own: the Settings tab's box for it, as a list)
+        {.box = Box::SettingChoice}, // (the list is the setting's own: the Library's Settings' box for it, as a list)
         {.box = Box::GameLanguage, .pick = Pick::Languages},
         {.box = Box::Fit, .choices = "contain cover stretch original"_choices, .labels = "All of it shows|It fills the part|Stretched|Its own size"_labels},
         {.box = Box::TextAppears, .choices = "usual letter word line"_choices, .labels = "From Settings|A letter at a time|A word|A line"_labels},
@@ -417,7 +418,7 @@ const StoryEditor::BoxKind& StoryEditor::kindOf(Box box) {
         {.box = Box::ChatMessages, .choices = "typed click"_choices, .labels = "As they're typed|Each after a click"_labels},
         {.box = Box::TimeKind, .choices = "none story real days"_choices, .labels = "None|The story's own|Real time|Days and parts of the day"_labels},
         {.box = Box::Clock, .choices = "24 12"_choices, .labels = "24-hour|12-hour"_labels},
-        {.box = Box::TimeStart, .suggest = "8:00|morning|monday 8:00|2025-07-14 8:00:a date: its weekdays, dates and months"_suggest},
+        {.box = Box::TimeStart, .suggest = "8:00|morning|monday 8:00|2025-07-14 8:00"_suggest},
         {.box = Box::DayParts, .wide = true},
         {.box = Box::TimeWhen, .pick = Pick::TimeWords},
         {.box = Box::TimePasses, .pick = Pick::TimeSpans},
@@ -591,7 +592,7 @@ const std::set<std::string, std::less<>>& expressionWords() {
         std::set<std::string, std::less<>> out{"yes", "no", "true", "false", "and", "or", "not", "is", "at", "least", "most", "more", "less", "fewer",
                                                "greater", "than", "random", "min", "max", "abs", "round", "len", "str", "int", "upper", "lower", "if", "answer", "dropped"};
         for (const std::string_view w : kBuiltinValues) out.emplace(w);
-        for (const Setting& s : kSettings) // (the player's settings: the Settings tab's rows for new players')
+        for (const Setting& s : kSettings) // (the player's settings: the Library's Settings' rows for new players')
             if (s.name.starts_with("default.")) out.emplace(s.name.substr(8));
         return out;
     }();
@@ -601,9 +602,7 @@ const std::set<std::string, std::less<>>& expressionWords() {
 // Text in single quotes ("english" -> 'english'), as a part's options and actions need it: they're in double ones.
 std::string inSingleQuotes(const std::string& v) { return isQuoted(v) && !v.contains('\'') ? "'" + v.substr(1, v.size() - 2) + "'" : v; }
 
-// A value's fields: a box with what it can be (a variable from its list, or typed: yes, no, a number, random for a
-// random number...), and for a random number the lowest and highest it can be. Named `name`, `name from` and
-// `name to`.
+// A random number's lowest and highest, as written: random(1, 6), or random(6) for 0 to 5.
 std::optional<std::pair<std::string, std::string>> randomOf(std::string_view term) {
     term = trim(term);
     if (!lower(term).starts_with("random(") || !term.ends_with(')')) return std::nullopt;
@@ -613,6 +612,9 @@ std::optional<std::pair<std::string, std::string>> randomOf(std::string_view ter
     return std::nullopt;
 }
 
+// A value's fields: a box with what it can be (a variable from its list, or typed: yes, no, a number, random for a
+// random number...), and for a random number the lowest and highest it can be. Named `name`, `name from` and
+// `name to`.
 void addValueFields(std::vector<StoryEditor::Field>& out, const std::string& name, std::string_view label, std::string_view hint, std::string_view term,
                     Box box, const std::vector<std::string>& variables, bool asWritten = false) {
     if (const auto r = randomOf(term)) {
@@ -764,8 +766,7 @@ std::string conditionOf(const std::vector<Check>& checks) {
     return out;
 }
 
-// Commands with ; between them (outside quotes), and their fields: one for each, then an empty one
-// for another. Their names: "NAME", "NAME 2"...; the first is called `label`, the others "And then".
+// Commands with ; between them (outside quotes).
 std::vector<std::string> actionsOf(std::string_view text) {
     std::vector<std::string> out;
     char quote = 0;
@@ -790,113 +791,132 @@ std::vector<std::string> actionsOf(std::string_view text) {
 // (what the third box asks for, and what it lists; none: nothing more).
 struct ActionGroup {
     std::string_view word;
-    ToolsText about;
     Box box;               // the kinds of this group: their box's kind (None: one kind, with no box for it)
     ToolsText how = "How"; // what the form calls that box
 };
 
 const ActionGroup kActionGroups[]{
-    {"screen", "a screen", Box::ScreenAction},        {"story", "the story", Box::StoryAction},
-    {"variable", "a variable", Box::VariableAction},  {"sound", "music and sounds", Box::SoundAction},
-    {"saves", "the saves", Box::SaveAction},          {"gallery", "the gallery", Box::GalleryAction},
-    {"phone", "the phone", Box::PhoneAction},
-    {"settings", "a player's setting", Box::SettingAction, "Setting"},
-    {"language", "the language", Box::None},          {"quit", "quit the game", Box::None},
-    {"screenshot", "take a screenshot", Box::None},
-    {"other", "something else, written as a line", Box::None},
+    {"screen", Box::ScreenAction},
+    {"story", Box::StoryAction},
+    {"variable", Box::VariableAction},
+    {"sound", Box::SoundAction},
+    {"saves", Box::SaveAction},
+    {"gallery", Box::GalleryAction},
+    {"phone", Box::PhoneAction},
+    {"settings", Box::SettingAction, "Setting"},
+    {"language", Box::None},
+    {"quit", Box::None},
+    {"screenshot", Box::None},
+    {"tools", Box::ToolsAction, "What"}, // (the developer tools' own keys: nothing in the game)
+    {"other", Box::None},
 };
 
 struct ActionKind {
     std::string_view group, verb;
-    ToolsText about, detail;
+    ToolsText detail;
     Box box; // what comes after its word: its box's kind
     ToolsHint hint;
     ToolsSuggestions suggest;
     std::string_view context;
-    ActionKind(std::string_view g, std::string_view v, ToolsText a, ToolsText d = {}, Box b = Box::None, ToolsHint h = {}, ToolsSuggestions s = {}, std::string_view c = {})
-        : group(g), verb(v), about(a), detail(d), box(b), hint(h), suggest(s), context(c) {}
+    ActionKind(std::string_view g, std::string_view v, ToolsText d = {}, Box b = Box::None, ToolsHint h = {}, ToolsSuggestions s = {}, std::string_view c = {})
+        : group(g), verb(v), detail(d), box(b), hint(h), suggest(s), context(c) {}
 };
 
-// Every kind: kActionKinds, with a kind for each player setting (from the Settings tab's rows for new
+// Every kind: kActionKinds, with a kind for each player setting (from the Library's Settings' rows for new
 // players' settings: the same words and options) before the resets.
 const std::vector<ActionKind>& actionKinds();
 
-bool percentSetting(std::string_view setting);         // (a player setting the Settings tab writes as a percent: "85%")
-std::string_view settingOptions(std::string_view setting); // (what it can go to, as a list: the Settings tab's box for it, each option named)
+bool percentSetting(std::string_view setting);         // (a player setting the Library's Settings writes as a percent: "85%")
+std::string_view settingOptions(std::string_view setting); // (what it can go to, as a list: as the Library's Settings' box for it has it)
 const ActionKind kActionKinds[]{
-    {"screen", "open", "open a screen", "Screen", Box::Screen},
-    {"screen", "close", "close this screen"},
-    {"screen", "show screen", "show a screen over the others", "Screen", Box::Screen},
-    {"screen", "hide screen", "hide a screen", "Screen", Box::Screen},
-    {"screen", "answer", "close the screen the story waits for, with an answer", "Answer", Box::Text},
-    {"screen", "yes", "say yes (on a question screen)"},
-    {"screen", "no", "say no (on a question screen)"},
-    {"screen", "move up", "point at the part above"},
-    {"screen", "move down", "point at the part below"},
-    {"screen", "move left", "point at the part to the left (a slider pointed at: lower)"},
-    {"screen", "move right", "point at the part to the right (a slider pointed at: higher)"},
-    {"screen", "press", "press the part pointed at"},
-    {"screen", "scroll up", "scroll up (a history: to older lines)"},
-    {"screen", "scroll down", "scroll down"},
-    {"screen", "scroll to the top", "scroll to the top"},
-    {"screen", "scroll to the end", "scroll to the end"},
-    {"screen", "put back", "put back what's being dragged"},
-    {"variable", "set", "set a variable", "Variable and value", Box::Variable},
-    {"variable", "add", "add to a variable", "Amount and variable", Box::Text},
-    {"variable", "subtract", "take from a variable", "Amount and variable", Box::Text},
-    {"variable", "toggle", "turn a variable on or off", "Variable", Box::Variable},
-    {"story", "start", "start the story", "From", Box::Scene, "Beginning"},
-    {"story", "continue", "go on from the last save"},
-    {"story", "jump", "go to a scene", "Scene", Box::Scene},
-    {"story", "next line", "on to the next line"},
-    {"story", "rollback", "roll back a line"},
-    {"story", "skip", "skipping on or off"},
-    {"story", "auto", "auto-forward on or off"},
-    {"story", "hide ui", "hide the textbox until a click"},
-    {"story", "choose", "pick an option of the choice", "Option", Box::Count},
-    {"sound", "music", "play music", "Song", Box::Sound},
-    {"sound", "sound", "play a sound", "Sound", Box::Sound},
-    {"sound", "stop", "stop the music or a sound", "Stops", Box::Playing},
-    {"saves", "quick save", "save in the quick slot"},
-    {"saves", "quick load", "load the quick save"},
-    {"saves", "next page", "the next page of saves"},
-    {"saves", "previous page", "the page of saves before"},
-    {"saves", "delete save", "delete the save chosen"},
+    {"screen", "open", "Screen", Box::Screen},
+    {"screen", "close"},
+    {"screen", "show screen", "Screen", Box::Screen},
+    {"screen", "hide screen", "Screen", Box::Screen},
+    {"screen", "answer", "Answer", Box::Text},
+    {"screen", "yes"},
+    {"screen", "no"},
+    {"screen", "move up"},
+    {"screen", "move down"},
+    {"screen", "move left"},
+    {"screen", "move right"},
+    {"screen", "press"},
+    {"screen", "scroll up"},
+    {"screen", "scroll down"},
+    {"screen", "scroll to the top"},
+    {"screen", "scroll to the end"},
+    {"screen", "put back"},
+    {"variable", "set", "Variable and value", Box::Variable},
+    {"variable", "add", "Amount and variable", Box::Text},
+    {"variable", "subtract", "Amount and variable", Box::Text},
+    {"variable", "toggle", "Variable", Box::Variable},
+    {"story", "start", "From", Box::Scene, "Beginning"},
+    {"story", "continue"},
+    {"story", "jump", "Scene", Box::Scene},
+    {"story", "next line"},
+    {"story", "rollback"},
+    {"story", "skip"},
+    {"story", "auto"},
+    {"story", "hide ui"},
+    {"story", "choose", "Option", Box::Count},
+    {"sound", "music", "Song", Box::Sound},
+    {"sound", "sound", "Sound", Box::Sound},
+    {"sound", "stop", "Stops", Box::Playing},
+    {"saves", "quick save"},
+    {"saves", "quick load"},
+    {"saves", "next page"},
+    {"saves", "previous page"},
+    {"saves", "delete save"},
     // (a player's setting: the second box names it, the third says what it goes to; the settings themselves
-    // come from the Settings tab's rows, in actionKinds(), before these)
-    {"settings", "reset settings", "every setting back to how it started"},
-    {"settings", "reset controls", "the keys back to how they started"},
-    {"settings", "reset progress", "forget what's kept between games"},
-    {"gallery", "next image", "the next image in the gallery"},
-    {"gallery", "previous image", "the image before in the gallery"},
-    {"phone", "open app", "open one of the phone's apps", "App", Box::Name},
-    {"phone", "open chat", "open a chat on the phone", "With", Box::Text},
-    {"phone", "open image", "open an image on the phone, big", "Image", Box::Image},
-    {"phone", "back", "back a step on the phone"},
-    {"phone", "send", "send the option it's on (in a list of options)"},
-    {"phone", "phone call", "call someone", "Who", Box::Text},
-    {"phone", "answer call", "answer the call that rings"},
-    {"phone", "hang up", "end the player's call"},
-    {"phone", "decline call", "decline the call that rings"},
-    {"phone", "keypad", "a key of the lock screen's keypad", "Key", Box::Text},
-    {"phone", "unlock", "unlock the phone (without a passcode)"},
-    {"language", "setting language", "the language", "Language", Box::GameLanguage},
-    {"quit", "quit", "quit the game"},
-    {"screenshot", "screenshot", "take a screenshot"},
-    {"other", "other", "something else, written as a line", "Line", Box::Text},
+    // come from the Library's Settings' rows, in actionKinds(), before these)
+    {"settings", "reset settings"},
+    {"settings", "reset controls"},
+    {"settings", "reset progress"},
+    {"gallery", "next image"},
+    {"gallery", "previous image"},
+    {"phone", "open app", "App", Box::Name},
+    {"phone", "open chat", "With", Box::Text},
+    {"phone", "open image", "Image", Box::Image},
+    {"phone", "back"},
+    {"phone", "send"},
+    {"phone", "phone call", "Who", Box::Text},
+    {"phone", "answer call"},
+    {"phone", "hang up"},
+    {"phone", "decline call"},
+    {"phone", "keypad", "Key", Box::Text},
+    {"phone", "unlock"},
+    {"language", "setting language", "Language", Box::GameLanguage},
+    {"quit", "quit"},
+    {"screenshot", "screenshot"},
+    {"tools", "tools undo"},
+    {"tools", "tools redo"},
+    {"tools", "tools cut"},
+    {"tools", "tools copy"},
+    {"tools", "tools paste"},
+    {"tools", "tools duplicate"},
+    {"tools", "tools delete"},
+    {"tools", "tools select all"},
+    {"tools", "tools reload"},
+    {"tools", "tools quit"},
+    {"tools", "tools story"},
+    {"tools", "tools screens"},
+    {"tools", "tools library"},
+    {"tools", "tools play"},
+    {"tools", "tools stop here"},
+    {"other", "other", "Line", Box::Text},
 };
 
-// The window's size: the one setting with no row of its own in the Settings tab (a width and a height,
+// The window's size: the one setting with no row of its own in the Library's Settings (a width and a height,
 // in two boxes).
-const ActionKind kWindowSizeKind{"settings", "setting window_size", "The window's width and height, in pixels", "Width", Box::Pixels};
+const ActionKind kWindowSizeKind{"settings", "setting window_size", "Width", Box::Pixels};
 
-// What the group's box calls a kind: its word, or a setting's name alone ("setting vsync": vsync).
-std::string_view kindWord(const ActionKind& a) { return a.verb.starts_with("setting ") ? a.verb.substr(8) : a.verb; }
+// What the group's box calls a kind: its word, or a setting's name alone ("setting vsync": vsync), or what the tools do ("tools copy": copy).
+std::string_view kindWord(const ActionKind& a) { return a.verb.starts_with("setting ") ? a.verb.substr(8) : a.verb.starts_with("tools ") ? a.verb.substr(6) : a.verb; }
 
 const std::string& actionGroupList() { // (for the first box's list)
     static const std::string list = [] {
         std::string out;
-        for (const ActionGroup& g : kActionGroups) out += std::format("{}{}:{}", out.empty() ? "" : "|", g.word, g.about);
+        for (const ActionGroup& g : kActionGroups) out += std::format("{}{}", out.empty() ? "" : "|", g.word);
         return out;
     }();
     return list;
@@ -908,7 +928,7 @@ const std::string& actionKindList(std::string_view group) { // (for the second b
     if (it != lists.end()) return it->second;
     std::string out;
     for (const ActionKind& a : actionKinds())
-        if (a.group == group && a.verb != "other") out += std::format("{}{}:{}", out.empty() ? "" : "|", kindWord(a), a.about);
+        if (a.group == group && a.verb != "other") out += std::format("{}{}", out.empty() ? "" : "|", kindWord(a));
     return lists.emplace(std::string(group), std::move(out)).first->second;
 }
 
@@ -1238,6 +1258,7 @@ StoryEditor::PhoneLine StoryEditor::phoneLineOf(std::string_view text) const {
     }
     return p;
 }
+
 bool StoryEditor::hasScene(std::string_view name) const { return hasNamed(scenes_, name); }
 bool StoryEditor::hasScreen(std::string_view name) const { return hasNamed(screens_, name); }
 
@@ -1436,22 +1457,31 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
         out.push_back(setting("language").value_or("English")); // (as Settings has it)
         for (const std::string& file : filesIn("translations/", std::array{std::string_view{".vnscript"}})) out.push_back(lower(file));
         break;
-    case Pick::Expressions: { // the character's images (images/NAME_happy.png) and its atlas's expressions
+    case Pick::Expressions: { // the character's images (images/NAME_happy.png) and its atlas's expressions (not the images its eyes
+                              // blink and its mouth talks with: eyes ... image=NAME_eyes)
         std::string image = lower(context);
         std::ranges::replace(image, ' ', '_');
         for (const Character& c : characters())
             if (lower(c.name) == lower(context))
                 for (const std::string& word : rawWords(afterFirst(files_[c.file].lines[c.line])))
                     if (lower(word).starts_with("image=")) image = lower(unquote(word.substr(6)));
-        for (const std::string& name : filesIn("images/", kImageTypes))
-            if (lower(name).starts_with(image + "_") && !lower(name).ends_with("_face")) out.push_back(name.substr(image.size() + 1));
+        std::vector<std::string> atlased, layers;
         for (const File& f : files_)
             for (std::size_t i = 0; i < f.lines.size(); ++i)
                 if (indentOf(f.lines[i]) == 0 && lower(firstWord(f.lines[i])) == "atlas" && lower(firstWord(afterFirst(f.lines[i]))) == image)
-                    for (std::size_t j = i + 1; j < f.lines.size() && (blank(f.lines[j]) || indentOf(f.lines[j]) > 0); ++j)
-                        if (lower(firstWord(f.lines[j])) == "expressions")
-                            for (const std::string& e : rawWords(afterFirst(f.lines[j])))
-                                if (!e.contains('=') && !std::ranges::contains(out, e)) out.push_back(e);
+                    for (std::size_t j = i + 1; j < f.lines.size() && (blank(f.lines[j]) || indentOf(f.lines[j]) > 0); ++j) {
+                        std::string part = f.lines[j]; // ("eyes: open, half, closed" too)
+                        std::ranges::replace(part, ',', ' ');
+                        std::ranges::replace(part, ':', ' ');
+                        const std::string what = lower(firstWord(part));
+                        for (const std::string& w : rawWords(afterFirst(part)))
+                            if (what == "expressions" && !w.contains('=')) atlased.push_back(w);
+                            else if ((what == "eyes" || what == "mouth") && lower(w).starts_with("image=")) layers.push_back(lower(unquote(w.substr(6))));
+                    }
+        for (const std::string& name : filesIn("images/", kImageTypes))
+            if (lower(name).starts_with(image + "_") && !lower(name).ends_with("_face") && !std::ranges::contains(layers, lower(name))) out.push_back(name.substr(image.size() + 1));
+        for (const std::string& e : atlased)
+            if (!std::ranges::contains(out, e)) out.push_back(e);
         break;
     }
     }
@@ -1461,10 +1491,10 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
 std::string_view StoryEditor::kindName(Kind kind) {
     // (in Kind's order, one each; each said with tr() where it's shown)
     static const std::array<std::string_view, static_cast<std::size_t>(Kind::Other) + 1> names{
-        "Line"_text,    "Character"_text, "Background"_text, "Choice"_text,   "Option"_text, "If"_text,     "Else"_text,   "Set"_text,
-        "Jump"_text,    "Music"_text,      "Sound"_text,    "Voice"_text,  "Stop"_text,   "Wait"_text,   "Time"_text,   "Effect"_text,
-        "Weather"_text, "Camera"_text,    "Movie"_text,      "Screen"_text,   "Together"_text,
-        "Phone"_text,   "Phone"_text,     "Phone"_text,      "Missed"_text,   "Game"_text,   "Command"_text};
+        "Line"_text,    "Character"_text, "Background"_text, "Choice"_text, "Option"_text,   "If"_text,    "Else"_text, "Set"_text,
+        "Jump"_text,    "Music"_text,     "Sound"_text,      "Voice"_text,  "Stop"_text,     "Wait"_text,  "Time"_text, "Effect"_text,
+        "Weather"_text, "Camera"_text,    "Movie"_text,      "Screen"_text, "Together"_text, "Phone"_text, "Phone"_text, "Phone"_text,
+        "Missed"_text,  "Game"_text,      "Command"_text};
     return names[static_cast<std::size_t>(kind)];
 }
 
@@ -1699,9 +1729,15 @@ std::vector<StoryEditor::Field> StoryEditor::rowFields(const Row& row) const {
             if (i + 3 < w.size() && lower(w[i]) == "and" && lower(w[i + 1]) == "close" && lower(w[i + 2]) == "with") closing = w[i + 3], i += 4;
             if (more != out.end() && i == w.size()) out.erase(more);
             else if (more != out.end()) more->value = joined(std::vector(w.begin() + static_cast<std::ptrdiff_t>(i), w.end()));
-            out.push_back({.name = "Animation on open"_text, .value = opening, .box = Box::Animation, .hint = "Default"_hint, .suggest = "none:at once"_suggest,
-                           .group = "Animations"_group});
-            out.push_back({.name = "Animation on close"_text, .value = closing, .box = Box::Animation, .hint = "Default"_hint, .suggest = "none:at once"_suggest});
+            std::string ownOpening, ownClosing; // (without them: the screen's own)
+            if (const auto s = std::ranges::find_if(screens_, [&](const Screen& x) { return sameName(x.name, fieldValue(out, "Screen")); }); s != screens_.end()) {
+                const Part own = part(*s, s->line);
+                ownOpening = own.option("animation_on_open"), ownClosing = own.option("animation_on_close");
+            }
+            out.push_back({.name = "Animation on open"_text, .value = opening, .box = Box::Animation, .hint = ownOpening.empty() ? std::string("None"_hint) : ownOpening,
+                           .suggest = "none"_suggest, .group = "Animations"_group});
+            out.push_back({.name = "Animation on close"_text, .value = closing, .box = Box::Animation, .hint = ownClosing.empty() ? std::string("None"_hint) : ownClosing,
+                           .suggest = "none"_suggest});
         }
         return out;
     }
@@ -1713,16 +1749,8 @@ std::vector<StoryEditor::Field> StoryEditor::rowFields(const Row& row) const {
         std::string speaker, expression, words;
         std::string_view prefix, said;
         if (spoken(t, &prefix, &said)) {
-            speaker = prefix;
+            std::tie(speaker, expression) = speakerOf(prefix); // (Aiko (happy): or Aiko happy:)
             words = said;
-            if (prefix.ends_with(')') && prefix.find('(') != npos) { // Aiko (happy):
-                const auto open = prefix.rfind('(');
-                expression = trim(prefix.substr(open + 1, prefix.size() - open - 2));
-                speaker = trim(prefix.substr(0, open));
-            } else if (const auto space = prefix.rfind(' '); space != npos && !isCharacter(prefix) && isCharacter(prefix.substr(0, space))) {
-                speaker = prefix.substr(0, space); // Aiko happy:
-                expression = prefix.substr(space + 1);
-            }
         } else {
             words = unquote(t); // narration
         }
@@ -1796,11 +1824,11 @@ std::vector<StoryEditor::Field> StoryEditor::rowFields(const Row& row) const {
                                    {.name = "Flip"_text, .value = parseBool(flip).value_or(false) ? "yes" : "no", .label = "Flipped"_text, .box = Box::YesNo, .choices = "no yes"_choices},
                                    {.name = "Tint"_text, .value = setting("tint"), .box = Box::Colour, .hint = "None"_hint},
                                    {.name = "Animation"_text, .value = setting("animation"), .box = Box::Animation, .hint = "None"_hint,
-                                    .suggest = "none:stops the one it has"_suggest, .group = "Animations"_group},
-                                   {.name = "Animation on show"_text, .value = with, .box = Box::Animation, .hint = "From Settings"_hint, .suggest = "none:at once"_suggest},
+                                    .suggest = "none"_suggest, .group = "Animations"_group},
+                                   {.name = "Animation on show"_text, .value = with, .box = Box::Animation, .hint = "From Settings"_hint, .suggest = "none"_suggest},
                                    {.name = "Story waits"_text, .value = waits, .label = "Story waits for it"_text, .box = Box::YesNo, .choices = "no yes"_choices}});
         } else {
-            out.insert(out.end(), {{.name = "Animation on hide"_text, .value = with, .box = Box::Animation, .hint = "From Settings"_hint, .suggest = "none:at once"_suggest,
+            out.insert(out.end(), {{.name = "Animation on hide"_text, .value = with, .box = Box::Animation, .hint = "From Settings"_hint, .suggest = "none"_suggest,
                                     .group = "Animations"_group},
                                    {.name = "Story waits"_text, .value = waits, .label = "Story waits for it"_text, .box = Box::YesNo, .choices = "no yes"_choices}});
         }
@@ -1890,7 +1918,7 @@ std::vector<StoryEditor::Field> StoryEditor::rowFields(const Row& row) const {
         out.push_back({.name = "Does"_text, .value = p.does, .label = "Action"_text, .box = Box::MessageKind, .choices = "says sends sticker voice typing deletes edits reacts reads"_choices});
         if (p.does == "says" || p.does == "edits" || p.does == "reacts" || p.does == "sends" || p.does == "sticker" || p.does == "voice")
             out.push_back({.name = "Text"_text, .value = p.text, .label = p.does == "reacts" ? "Reaction"_text : p.does == "says" || p.does == "edits" ? "Text"_text : "Caption"_text,
-                           .hint = p.does == "says" || p.does == "edits" || p.does == "reacts" ? "" : "None"_hint, .rich = p.does != "reacts"});
+                           .hint = "None"_hint, .rich = p.does != "reacts"});
         if (p.does == "sends" || p.does == "sticker") out.push_back({.name = "Image"_text, .value = p.file, .label = "Image"_text, .box = Box::Image});
         if (p.does == "voice") out.push_back({.name = "Voice"_text, .value = p.file, .label = "Voice file"_text, .box = Box::Sound});
         if (p.does == "typing") out.push_back({.name = "Seconds"_text, .value = p.seconds, .label = "Duration (seconds)"_text, .box = Box::Seconds, .hint = "2"});
@@ -2356,10 +2384,7 @@ std::size_t StoryEditor::pasteCharacter(std::size_t after, const std::string& li
     return static_cast<std::size_t>(std::ranges::find(now, name, &Character::name) - now.begin());
 }
 
-std::string StoryEditor::fileName(std::size_t file) const {
-    std::string name = files_[file].path.substr(8); // (scripts/)
-    return stemOf(name); // (.vnscript)
-}
+std::string StoryEditor::fileName(std::size_t file) const { return stemOf(files_[file].path.substr(8)); } // (without scripts/ and .vnscript)
 
 void StoryEditor::include(std::string_view name) {
     if (!hasMain()) return;
@@ -2379,18 +2404,6 @@ bool StoryEditor::storyFile(std::size_t file) const {
                const std::string_view t = trim(l);
                return t.empty() || t.starts_with('#') || t.starts_with("include ");
            });
-}
-
-std::size_t StoryEditor::addFile() {
-    const std::string name = uniqueName("new_file", [&](const std::string& n) { // (one there already: new_file_2...)
-        return std::ranges::any_of(files_, [&](const File& f) { return lower(f.path) == scriptPath(n); }) || fileExists(root_ + scriptPath(n));
-    });
-    remember({});
-    files_.push_back({.path = scriptPath(name), .lines = {"# More of the story."}});
-    write(files_.size() - 1);
-    include(name);
-    rescan();
-    return files_.size() - 1;
 }
 
 bool StoryEditor::renameFile(std::size_t file, const std::string& name, const std::string& key) {
@@ -2651,6 +2664,11 @@ std::vector<std::size_t> blocksOf(const std::vector<StoryEditor::Row>& rows, std
     return out;
 }
 
+// A line moved from under `old` indentation to under `indent`: one further in stays as much further in.
+std::string reindented(const std::string& line, const std::string& old, const std::string& indent) {
+    return blank(line) ? line : line.starts_with(old) ? indent + line.substr(old.size()) : indent + std::string(trim(line));
+}
+
 } // namespace
 
 void StoryEditor::removeRows(const Scene& scene, const std::vector<std::size_t>& lines) {
@@ -2694,33 +2712,30 @@ std::vector<std::size_t> StoryEditor::moveRowsTo(const Scene& scene, const std::
         }
     if (depth > 0 && !parent) return {};
     if (std::ranges::any_of(blocks, [&](std::size_t b) { return !belongsIn(rs[b].kind, parent); })) return {};
-    auto& lines_ = files_[scene.file].lines;
+    auto& file = files_[scene.file].lines;
     std::string indent;
     for (std::ptrdiff_t j = above; j >= 0; --j) {
         const Row& r = rs[static_cast<std::size_t>(j)];
         if (r.depth <= depth) {
-            indent = leading(lines_[r.line]) + (r.depth < depth ? std::string(kIndent, ' ') : std::string{});
+            indent = leading(file[r.line]) + (r.depth < depth ? std::string(kIndent, ' ') : std::string{});
             break;
         }
     }
-    if (indent.empty()) indent = below < rs.size() && rs[below].depth == depth ? leading(lines_[rs[below].line]) : std::string(kIndent, ' ');
+    if (indent.empty()) indent = below < rs.size() && rs[below].depth == depth ? leading(file[rs[below].line]) : std::string(kIndent, ' ');
     remember({});
     std::vector<std::string> block;
     std::vector<std::size_t> starts;
     for (const std::size_t b : blocks) {
         starts.push_back(block.size());
-        const std::string old = leading(lines_[rs[b].line]);
-        for (std::size_t i = rs[b].line; i < rs[b].end; ++i) {
-            const std::string& l = lines_[i];
-            block.push_back(blank(l) ? l : l.starts_with(old) ? indent + l.substr(old.size()) : indent + std::string(trim(l)));
-        }
+        const std::string old = leading(file[rs[b].line]);
+        for (std::size_t i = rs[b].line; i < rs[b].end; ++i) block.push_back(reindented(file[i], old, indent));
     }
     std::size_t to = below < rs.size() ? rs[below].line : blockEnd(scene.file, scene.line);
     for (auto b = blocks.rbegin(); b != blocks.rend(); ++b) {
-        lines_.erase(lines_.begin() + static_cast<std::ptrdiff_t>(rs[*b].line), lines_.begin() + static_cast<std::ptrdiff_t>(rs[*b].end));
+        file.erase(file.begin() + static_cast<std::ptrdiff_t>(rs[*b].line), file.begin() + static_cast<std::ptrdiff_t>(rs[*b].end));
         if (rs[*b].line < to) to -= rs[*b].end - rs[*b].line;
     }
-    lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(to), block.begin(), block.end());
+    file.insert(file.begin() + static_cast<std::ptrdiff_t>(to), block.begin(), block.end());
     write(scene.file);
     rescan();
     for (std::size_t& start : starts) start += to;
@@ -2742,7 +2757,7 @@ void StoryEditor::moveRowToScene(const Scene& scene, const Row& row, const Scene
     const std::string indent = there.empty() ? std::string(kIndent, ' ') : leading(lines[there.front().line]);
     std::vector<std::string> put;
     put.reserve(block.size());
-    for (const std::string& l : block) put.push_back(blank(l) ? l : l.starts_with(old) ? indent + l.substr(old.size()) : indent + std::string(trim(l)));
+    for (const std::string& l : block) put.push_back(reindented(l, old, indent));
     lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(target->end), put.begin(), put.end());
     write(scene.file);
     if (target->file != scene.file) write(target->file);
@@ -2810,26 +2825,6 @@ std::size_t StoryEditor::changeLines(const std::function<std::optional<std::stri
             }
         if (touched) write(f);
     }
-    return count;
-}
-
-std::size_t StoryEditor::replaceAll(std::string_view what, const std::string& with) {
-    const std::string low = lower(what);
-    if (low.empty()) return 0;
-    remember({});
-    const std::size_t count = changeLines([&](std::size_t, std::size_t, const std::string& line) -> std::optional<std::string> {
-        std::string out;
-        std::size_t last = 0;
-        const std::string l = lower(line);
-        for (std::size_t at = l.find(low); at != npos; at = l.find(low, at + low.size())) {
-            out += line.substr(last, at - last) + with;
-            last = at + low.size();
-        }
-        if (last == 0) return std::nullopt;
-        return out + line.substr(last);
-    });
-    if (count == 0) undo_.pop_back(); // (nothing changed: no step to undo)
-    rescan();
     return count;
 }
 
@@ -3394,7 +3389,7 @@ std::size_t StoryEditor::addScreen(const std::vector<std::string>& needs, const 
         auto& in = files_[start->file].lines;
         const auto opens = [](const std::string& l) { return lower(trim(l)) == "open title"; };
         if (!std::any_of(in.begin() + static_cast<std::ptrdiff_t>(start->line), in.begin() + static_cast<std::ptrdiff_t>(start->end), opens)) {
-            std::string indent = "    ";
+            std::string indent(kIndent, ' ');
             for (std::size_t i = start->line + 1; i < start->end; ++i)
                 if (!blank(in[i])) {
                     indent = leading(in[i]);
@@ -3630,10 +3625,10 @@ bool StoryEditor::isSetting(std::size_t line) const {
 std::optional<std::string> StoryEditor::setting(std::string_view name) const {
     const auto line = settingLine(name);
     if (!line) return std::nullopt;
-    const auto gameSettings = settingOf(splitNote(files_[0].lines[*line]).first); // (not its note)
-    if (!gameSettings) return std::nullopt;
+    const auto parsed = settingOf(splitNote(files_[0].lines[*line]).first); // (not its note)
+    if (!parsed) return std::nullopt;
     std::vector<std::string> words;
-    for (const std::string& word : rawWords(gameSettings->second)) words.push_back(unquote(word));
+    for (const std::string& word : rawWords(parsed->second)) words.push_back(unquote(word));
     return joined(words);
 }
 
@@ -3670,7 +3665,7 @@ void StoryEditor::setSetting(std::string_view name, const std::string& value, bo
 
 namespace {
 
-// The Settings tab's row for a player setting's default ("setting vsync" or "vsync": default.vsync), if any.
+// The Library's Settings' row for a player setting's default ("setting vsync" or "vsync": default.vsync), if any.
 const Setting* settingRow(std::string_view setting) {
     if (setting.starts_with("setting ")) setting.remove_prefix(8);
     const std::string name = "default." + std::string(setting);
@@ -3687,19 +3682,12 @@ std::string_view settingOptions(std::string_view setting) {
     static std::map<std::string, std::string, std::less<>> lists; // (made once each)
     if (const auto it = lists.find(setting); it != lists.end()) return it->second;
     const Setting* row = settingRow(setting);
-    std::string list; // (its box's buttons as a list, each with what it says when that's more than the word; else what its box suggests)
+    std::string list; // (its box's buttons' words as a list; else what its box suggests)
     if (row) {
         const StoryEditor::BoxKind& kind = StoryEditor::kindOf(row->box);
-        if (!kind.choices.empty()) {
-            const auto choices = wordsOf(kind.choices), labels = wordsOf(kind.labels, '|');
-            for (std::size_t i = 0; i < choices.size(); ++i) {
-                std::string said(i < labels.size() ? labels[i] : std::string_view{});
-                if (!said.empty()) said[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(said[0])));
-                list += std::format("{}{}{}", list.empty() ? "" : "|", choices[i], said.empty() || said == choices[i] ? "" : ":" + said);
-            }
-        } else {
-            list = std::string(row->suggest.empty() ? kind.suggest : row->suggest);
-        }
+        if (!kind.choices.empty())
+            for (const std::string_view choice : wordsOf(kind.choices)) list += std::format("{}{}", list.empty() ? "" : "|", choice);
+        else list = std::string(row->suggest.empty() ? kind.suggest : row->suggest);
     }
     return lists.emplace(std::string(setting), std::move(list)).first->second;
 }
@@ -3711,11 +3699,11 @@ const std::vector<ActionKind>& actionKinds() {
         std::vector<ActionKind> out;
         bool settings = false;
         for (const ActionKind& a : kActionKinds) {
-            if (a.group == "settings" && !settings) { // (the settings themselves, from the Settings tab's rows, before the resets)
+            if (a.group == "settings" && !settings) { // (the settings themselves, from the Library's Settings' rows, before the resets)
                 settings = true;
                 for (const Setting& s : kSettings) { // (what each goes to: settingOptions(), once its box is asked for: the kinds of box aren't known yet here)
                     if (!s.name.starts_with("default.")) continue;
-                    out.emplace_back("settings", kept("setting " + std::string(s.name.substr(8))), s.help, "To"_text, Box::SettingChoice);
+                    out.emplace_back("settings", kept("setting " + std::string(s.name.substr(8))), "To"_text, Box::SettingChoice);
                     if (s.name == "default.fullscreen") out.push_back(kWindowSizeKind);
                 }
             }
@@ -3726,8 +3714,9 @@ const std::vector<ActionKind>& actionKinds() {
     return kinds;
 }
 
-// The languages as a box's list, by name (the code comes with the name: languageCode).
-const std::string& languageList() { // (each by its name, its code beside it: Japanese (ja); picked, its name)
+// The languages as a box's list: each by its name, its code beside it (Japanese (ja)); picked, its name (the
+// code comes with the name: languageCode).
+const std::string& languageList() {
     static const std::string list = [] {
         std::vector<std::string> entries;
         for (const Language& l : kLanguages) entries.push_back(std::format("{}:({})", l.name, l.code));
@@ -3908,6 +3897,7 @@ std::string shown(std::string_view value, const std::vector<std::string>& variab
 }
 
 bool hasField(const std::vector<StoryEditor::Field>& fields, std::string_view name) { return std::ranges::find(fields, name, &StoryEditor::Field::name) != fields.end(); }
+
 void addCheckFields(std::vector<StoryEditor::Field>& out, const std::string& name, std::string_view label, std::string_view hint,
                     std::string_view condition, Box box, const std::vector<std::string>& variables) {
     const auto checks = checksOf(condition);
@@ -3953,7 +3943,7 @@ void addActionFields(std::vector<StoryEditor::Field>& out, const std::string& na
         const ActionKind* kind = actionKind(verb);
         const ActionGroup* group = kind ? actionGroup(kind->group) : nullptr;
         out.push_back({.name = n, .value = group ? std::string(group->word) : std::string{}, .label = i == 0 ? std::string(label) : std::string("And then"_text), .box = Box::Action,
-                       .hint = i == 0 ? std::string(hint) : std::string("None")});
+                       .hint = i == 0 ? std::string(hint) : std::string("None"_hint)});
         out.push_back({.name = n + " was", .value = verb, .hidden = true});
         if (group && group->box != Box::None)
             out.push_back({.name = n + " how", .value = std::string(kindWord(*kind)), .label = std::string(group->how), .box = group->box});
@@ -3999,7 +3989,7 @@ std::string actionsFrom(const std::vector<StoryEditor::Field>& fields, const std
                 const std::string height(trim(fieldValue(fields, n + " height")));
                 if (!rest.empty() && !height.empty()) rest += " " + height;
             } else if (percentSetting(verb)) {
-                rest = percentText(rest); // (85 -> 85%, as the Settings tab writes it)
+                rest = percentText(rest); // (85 -> 85%, as the Library's Settings writes it)
             }
             action = verb == "other" ? rest : rest.empty() ? verb : verb + " " + rest;
         }

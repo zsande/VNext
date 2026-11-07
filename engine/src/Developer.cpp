@@ -3,12 +3,13 @@
 // meanwhile), and where the player would close (Quit, the story's end without a title screen) it
 // comes back to them. They are the engine's own, the same in every game, and never in a finished one
 // (a pack). Without a game, the player is just them. Their tabs are the visual editor: the game's
-// scenes, characters and lines as forms (Story), a map of the scenes, the screens, what the scripts
-// list by name and the game's files (Library), the setting lines (Settings) and the translations; all
-// are written to the files as they change.
+// scenes, characters and lines as forms, with a map of the scenes (Story); its screens (Screens); and
+// what the scripts list by name, the game's files, its translations and its settings (Library); all are
+// written to the files as they change.
 //
-// This file: opening and closing them, their events and tool buttons, the bar and the tab shown, the
-// files they add, and going to a line. Each tab has a file of its own (Developer*.cpp).
+// This file: opening and closing them, their events, their own part (the buttons at the window's foot)
+// and the tab shown, the files they add, and going to a line. Each tab has a file of its own
+// (Developer*.cpp).
 #include "DeveloperShared.hpp"
 #include "DeveloperUi.hpp"
 
@@ -18,17 +19,17 @@ namespace vn {
 
 namespace {
 
-enum Tool : int { kPlay, kNextLine, kPlayScene, kReload, kPack, kFolder, kNewGame, kLookAgain, kQuit };
-struct ToolButton {
-    Tool tool;
-    ToolsText label;
+// What the tools' own part's buttons do (ToolButton::id; Developer::toolButtons has them in their order).
+enum ToolCommand : int {
+    kNewGame = 1, kLookAgain, kReload, kPack, kFolder, kQuit,
+    kUndo, kRedo, kCut, kCopy, kPaste, kDuplicate, kDelete, kSelectAll,
+    kStoryTab, kScreensTab, kLibraryTab, kEditLayout, kResetLayout,
+    kPlay, kNextLine, kPlayScene, kStopHere,
+    kToolsTranslation, kAbout,
+    kToolsLanguage // (+ its place among the language buttons: 0 English, then the translations; last, so they come after every other)
 };
-
-const std::array kGameTools{ToolButton{kPlay, "Play"}, ToolButton{kPlayScene, "Play this scene"}, ToolButton{kReload, "Reload"},
-                                ToolButton{kPack, "Pack the game"}, ToolButton{kFolder, "Show the folder"}, ToolButton{kQuit, "Quit"}};
-
-const std::array kNoGameTools{ToolButton{kNewGame, "New game"}, ToolButton{kLookAgain, "Look again"},
-                                  ToolButton{kFolder, "Show the folder"}, ToolButton{kQuit, "Quit"}};
+constexpr std::array kTabs{std::pair{kStoryTab, View::Story}, std::pair{kScreensTab, View::Screens},
+                           std::pair{kLibraryTab, View::Library}}; // (in this order: their keys are tools_story, tools_screens and tools_library)
 
 // What New game writes: game/scripts/main.vnscript.
 constexpr std::string_view kNewGameScript = R"vnext(# The game starts here: its settings, then scene start, where the story begins.
@@ -111,22 +112,17 @@ void Developer::openDeveloper() {
     d.character.reset();
     if (engine.noGame()) {
         d.editor.clear();
-        d.view = View::Log;
         return;
     }
     const bool first = !d.editor.loaded();
     const std::string last = first || d.scene >= d.editor.scenes().size() ? "start" : d.editor.scenes()[d.scene].name;
     d.editor.load(engine.gameRoot());
     d.played = d.editor.version();
-    if (!d.editor.loaded()) {
-        if (d.view == View::Story || d.view == View::Map || d.view == View::Screens || d.view == View::Settings) d.view = View::Log;
-    } else if (first || (d.view == View::Settings && !d.editor.hasMain())) {
-        d.view = View::Story;
-    }
+    if (first && d.editor.loaded()) d.view = View::Story;
     // The Story tab shows where the story is (its line in sight, a few lines under the top), or the
     // scene it showed last.
     const auto& scenes = d.editor.scenes();
-    d.rowsScroll = 0.0f;
+    d.linesScroll = 0.0f;
     if (engine.mode() == Engine::Mode::Game && engine.game_->here() < engine.script().code.size()) {
         const Instruction& ins = engine.script().code[engine.game_->here()];
         const std::string& file = engine.script().files[ins.file];
@@ -139,7 +135,7 @@ void Developer::openDeveloper() {
         if (d.row && d.scene < scenes.size()) {
             const auto rows = d.editor.rows(scenes[d.scene]);
             if (const auto row = std::ranges::find(rows, *d.row, &StoryEditor::Row::line); row != rows.end())
-                d.rowsScroll = std::max(0.0f, static_cast<float>(row - rows.begin() - 4) * layout::listItemH * d.k);
+                d.linesScroll = std::max(0.0f, static_cast<float>(row - rows.begin() - 4) * layout::listItemH * d.k);
         }
     } else {
         const auto found = std::ranges::find(scenes, last, &StoryEditor::Scene::name);
@@ -150,6 +146,8 @@ void Developer::openDeveloper() {
 void Developer::closeDeveloper() {
     DeveloperTools& d = tools;
     d.open = false;
+    d.panelDrag.reset();
+    showPointer(std::nullopt);
     engine.sound().stopListening();
     d.stopMovie();
     d.focus.clear();
@@ -174,7 +172,7 @@ void Developer::backToEditor() {
     engine.storyStarted_ = false;
     openDeveloper();
     d.failed = engine.mode() == Engine::Mode::Error;
-    d.status = d.failed ? "The scripts need fixing: the Story tab and the log say where."_tr() : std::string{};
+    d.status = d.failed ? "The scripts need fixing: their mistakes are marked in red in the tabs."_tr() : std::string{};
 }
 
 void Developer::developerEvent(const SDL_Event& e) {
@@ -217,12 +215,68 @@ void Developer::developerEvent(const SDL_Event& e) {
     }
 }
 
-void Developer::useTool(int tool) {
+void Developer::runCommand(int command) {
     DeveloperTools& d = tools;
+    // A tab; what Undo, Cut and the others like them, and Stop here, do with what's chosen or typed into (as their
+    // keys, pressed now); Layout and Reset; the tools' language, and a file to translate them; About.
+    auto press = [&](ToolKey which) { // (its first key, so a box that's typed into does what it does; from its button: it's that whatever keys it has)
+        SDL_KeyboardEvent e{};
+        e.type = SDL_EVENT_KEY_DOWN;
+        if (const auto& keys = d.toolKeys[static_cast<std::size_t>(which)]; !keys.empty() && keys.front().device == KeyChord::Device::Keyboard) {
+            e.key = keys.front().key;
+            e.mod = keys.front().mods;
+        }
+        e.which = kToolButton;
+        e.raw = static_cast<Uint16>(which);
+        e.down = true;
+        d.keys.push_back(e);
+    };
+    auto show = [&](View view) {
+        if (d.view == view) return;
+        d.view = view;
+        d.aboutScroll = 0;
+        d.focus.clear();
+    };
+    if (const auto tab = std::ranges::find(kTabs, command, &std::pair<ToolCommand, View>::first); tab != kTabs.end()) return show(tab->second); // (without a game: what to do)
+    switch (command) {
+    case kAbout: return show(View::About);
+    case kUndo: return press(ToolKey::Undo);
+    case kRedo: return press(ToolKey::Redo);
+    case kCut: return press(ToolKey::Cut);
+    case kCopy: return press(ToolKey::Copy);
+    case kPaste: return press(ToolKey::Paste);
+    case kDuplicate: return press(ToolKey::Duplicate);
+    case kDelete: return press(ToolKey::Delete);
+    case kSelectAll: return press(ToolKey::SelectAll);
+    case kStopHere:
+        if (d.view == View::Story && d.stoppable) toggleStop(d.stoppable->first, d.stoppable->second);
+        return;
+    case kEditLayout: // (what's in the parts takes no pointer while they're moved: nothing's typed into or open then)
+        d.editLayout = !d.editLayout;
+        d.panelDrag.reset();
+        d.focus.clear();
+        d.popup.id.clear();
+        return;
+    case kResetLayout: return resetLayout();
+    case kToolsTranslation: return writeToolsTranslation();
+    default:
+        if (command >= kToolsLanguage) { // (English, or a translation: kept for the next time the tools open)
+            const auto i = static_cast<std::size_t>(command - kToolsLanguage);
+            const std::string id = i >= 1 && i <= d.toolsLanguages.size() ? d.toolsLanguages[i - 1].id : std::string{};
+            useToolsLanguage(id);
+            const std::string file = toolsFolder() + "language.txt";
+            if (!SDL_SaveFile(file.c_str(), id.data(), id.size())) logWarn("{}", "Can't save the developer tools' language: {}."_tr(SDL_GetError()));
+            return;
+        }
+        break;
+    }
+    // The rest: what the tools do with the game (or, without one, find it), each saying how it went if it needs to.
+    if (engine.noGame() ? command != kNewGame && command != kLookAgain && command != kFolder && command != kQuit : command == kNewGame || command == kLookAgain)
+        return;
     d.failed = false;
-    d.status.clear(); // (each tool says how it went, if it needs to)
+    d.status.clear();
     d.focus.clear();
-    switch (tool) {
+    switch (command) {
     case kPlay:
         backToGame();
         break;
@@ -240,7 +294,7 @@ void Developer::useTool(int tool) {
         }
         break;
     case kPlayScene: // (or from the chosen line)
-        if (d.scene < d.editor.scenes().size()) {
+        if (d.view == View::Story && d.scene < d.editor.scenes().size()) {
             d.playScene = d.editor.scenes()[d.scene].name;
             d.playLine.reset();
             if (d.view == View::Story && d.row && d.moreRows.empty() && !d.character &&
@@ -251,7 +305,6 @@ void Developer::useTool(int tool) {
         break;
     case kReload:
         engine.reloadRequested_ = true;
-        d.status = "Reloading..."_tr;
         break;
     case kPack: {
         if (const std::string folder = engine.finishedFolder(); SDL_GetPathInfo(folder.c_str(), nullptr)) { // (one packed before: replaced if the developer says so)
@@ -269,12 +322,11 @@ void Developer::useTool(int tool) {
                                          .colorScheme = nullptr};
             int clicked = 0;
             if (!SDL_ShowMessageBox(&box, &clicked) || clicked != 1) {
-                d.status = "The packed game in '{}' stays as it was."_tr(folder);
+                logInfo("{}", "The packed game in '{}' stays as it was."_tr(folder));
                 break;
             }
         }
-        d.packIn = 2; // after the next frame, which says what's happening
-        d.status = "Packing the game..."_tr;
+        d.packIn = 2; // (once the game's been read again, next frame)
         engine.reloadRequested_ = true; // (first the game is read again, so its scripts are checked as they are now)
         break;
     }
@@ -315,6 +367,169 @@ void Developer::useTool(int tool) {
     }
 }
 
+std::string_view Developer::viewName(View view) {
+    switch (view) {
+    case View::Story: return "Story"_tr;
+    case View::Screens: return "Screens"_tr;
+    case View::Library: return "Library"_tr;
+    case View::About: return "About"_tr;
+    }
+    return {};
+}
+
+// The tools' own part's buttons as the tools are now, group by group, in one row (two in a small window): the tabs;
+// playing the game (from the start or back to it, the scene or from the line chosen, the next line, Stop here);
+// changing what's chosen; the game's files (New game and Look again without one, Reload, Pack, its folder); the
+// layout (Layout, and Reset: the tab's put back); the tools' language (English, the translations, a file to
+// translate them); About and Quit. They're always all there, each in its place (one whose words change is as wide
+// as the longest of them): one that can't be pressed now is grey, one that's on is lit (the tab shown, Stop here,
+// Layout, the language in use, About), and a tab with a mistake in what it shows has the lists' red mark.
+std::vector<std::vector<ToolButton>> Developer::toolButtons() {
+    DeveloperTools& d = tools;
+    const bool game = !engine.noGame(), editing = game && d.editor.loaded();
+    auto button = [](int id, std::string_view label, bool enabled = true, bool on = false) {
+        return ToolButton{.id = id, .label = std::string(label), .longest = {}, .enabled = enabled, .on = on};
+    };
+    std::vector<std::vector<ToolButton>> out;
+
+    auto wrongIn = [&](const auto& items) { return std::ranges::any_of(items, [&](const auto& it) { return d.problemWithin(it.file, it.line, it.end); }); };
+    auto wrong = [&](View tab) {
+        if (!editing) return false;
+        switch (tab) {
+        case View::Story: return std::ranges::contains(d.wrongScenes(), true);
+        case View::Screens: return wrongIn(d.editor.screens());
+        case View::Library:
+            return wrongIn(d.editor.definitions("variable")) || std::ranges::any_of(d.problems, [&](const ScriptError& e) { return inSettings(d.editor, e); }) ||
+                   std::ranges::any_of(kDefinitionKinds, [&](const DefinitionKind& kind) { return wrongIn(d.editor.definitions(kind.kind)); });
+        default: return false;
+        }
+    };
+    std::vector<ToolButton> tabs;
+    for (const auto& [id, tab] : kTabs) {
+        ToolButton b = button(id, viewName(tab), true, d.view == tab);
+        b.wrong = wrong(tab);
+        tabs.push_back(std::move(b));
+    }
+    out.push_back(std::move(tabs));
+
+    const bool story = editing && d.view == View::Story, fromLine = story && d.row && d.moreRows.empty() && !d.character;
+    const bool stoppable = story && d.stoppable.has_value();
+    ToolButton play = button(kPlay, !game || engine.waiting_ ? "Play"_tr : "Resume"_tr, game);
+    ToolButton scene = button(kPlayScene, fromLine ? "Play from line"_tr : "Play scene"_tr, story && !d.editor.scenes().empty());
+    play.longest = "Resume"_tr;
+    scene.longest = "Play from line"_tr;
+    out.push_back({std::move(play), std::move(scene), button(kNextLine, "Next line"_tr, game && storyAt().has_value()),
+                   button(kStopHere, "Stop here"_tr, stoppable, stoppable && hasStop(d.stoppable->first, d.stoppable->second))});
+
+    // (undo and redo: the editor's steps, or the Library's translations' own)
+    const bool translating = d.view == View::Library && d.library == "translations", undoing = editing && d.view != View::About;
+    const bool undoes = translating ? !d.translateUndo.empty() : undoing && d.editor.canUndo();
+    const bool redoes = translating ? !d.translateRedo.empty() : undoing && d.editor.canRedo();
+    out.push_back({button(kUndo, "Undo"_tr, undoes), button(kRedo, "Redo"_tr, redoes), button(kCut, "Cut"_tr, editing), button(kCopy, "Copy"_tr, editing),
+                   button(kPaste, "Paste"_tr, editing), button(kDuplicate, "Duplicate"_tr, editing), button(kDelete, "Delete"_tr, editing),
+                   button(kSelectAll, "Select all"_tr, editing)});
+
+    out.push_back({button(kNewGame, "New game"_tr, !game), button(kLookAgain, "Look again"_tr, !game), button(kReload, "Reload"_tr, game),
+                   button(kPack, "Pack"_tr, game), button(kFolder, "Folder"_tr)});
+
+    const bool moved = std::ranges::any_of(d.panels, [&](const auto& placed) { return placed.first.starts_with(d.panelTab + "/"); });
+    out.push_back({button(kEditLayout, "Layout"_tr, true, d.editLayout), button(kResetLayout, "Reset"_tr, moved)});
+
+    // The developer tools' language: English, then the translations in 'developer tools translations/' by name, and a
+    // file to translate them (with one in use: the texts it doesn't have yet, added).
+    if (d.cachedFiles(toolsLanguagesFolder(), ".vnscript") != d.toolsLanguageFiles) findToolsLanguages(); // (one added or taken away)
+    std::vector<ToolButton> language{button(kToolsLanguage, "English", true, d.toolsLanguage.empty())};
+    for (std::size_t i = 0; i < d.toolsLanguages.size(); ++i)
+        language.push_back(button(kToolsLanguage + 1 + static_cast<int>(i), d.toolsLanguages[i].name, true, d.toolsLanguages[i].id == d.toolsLanguage));
+    language.push_back(button(kToolsTranslation, "Translate"_tr));
+    out.push_back(std::move(language));
+
+    out.push_back({button(kAbout, "About"_tr, true, d.view == View::About), button(kQuit, "Quit"_tr)});
+    return out;
+}
+
+// Where the tools' own part's buttons go, from (x, y) in `w`, group by group: each as wide as its longest words (small,
+// as a menu bar's), a group's side by side and the groups further apart with a line between them, on as many rows as
+// they take (a group that doesn't fit where its row is up to starts the next; one wider than a row goes on over the
+// next), each row in the middle of `w`; and how tall they are.
+Developer::ToolsPlaced Developer::placeToolButtons(DeveloperUi& ui, const std::vector<std::vector<ToolButton>>& groups, float x, float y, float w) {
+    const float k = ui.k, buttonH = layout::toolButtonH * k, gap = layout::toolGap * k, groupGap = layout::toolGroupGap * k;
+    auto widthOf = [&](const ToolButton& b) {
+        const float words = std::max(ui.width(b.label, layout::toolText), b.longest.empty() ? 0.0f : ui.width(b.longest, layout::toolText));
+        return std::min(w, std::round(words + 2 * layout::toolPad * k));
+    };
+    ToolsPlaced out;
+    float cx = x, cy = y;
+    for (const std::vector<ToolButton>& group : groups) {
+        float groupW = -gap;
+        for (const ToolButton& b : group) groupW += widthOf(b) + gap;
+        if (cx > x && cx + groupW > x + w) cx = x, cy += buttonH + gap;
+        else if (cx > x) out.lines.push_back({std::round(cx - groupGap / 2), cy, std::max(1.0f, std::round(k)), buttonH}); // (in the middle of the gap)
+        std::vector<SDL_FRect>& at = out.buttons.emplace_back();
+        for (const ToolButton& b : group) {
+            const float bw = widthOf(b);
+            if (cx > x && cx + bw > x + w) cx = x, cy += buttonH + gap;
+            at.push_back({cx, cy, bw, buttonH});
+            cx += bw + gap;
+        }
+        cx += groupGap - gap;
+    }
+    std::map<float, float> ends; // (each row's right end, by its top)
+    for (const auto& at : out.buttons)
+        for (const SDL_FRect& b : at) ends[b.y] = std::max(ends[b.y], b.x + b.w);
+    auto centre = [&](SDL_FRect& r) { r.x += std::floor((x + w - ends[r.y]) / 2); };
+    for (auto& at : out.buttons) std::ranges::for_each(at, centre);
+    std::ranges::for_each(out.lines, centre);
+    out.h = groups.empty() ? 0.0f : cy + buttonH - y;
+    return out;
+}
+
+// The tools' own part, at `at`: drawn as the tabs' parts are (but never lit: it isn't moved), with its buttons in the
+// middle; the one pressed is done as the next frame starts (with what it acts on as it is now).
+void Developer::drawToolsPart(DeveloperUi& ui, const std::vector<std::vector<ToolButton>>& groups, const SDL_FRect& at) {
+    DeveloperTools& d = tools;
+    const float k = ui.k;
+    draw::rect(ui.r, at, kPanel);
+    draw::outline(ui.r, at, kEdge);
+    const SDL_FPoint chrome = panelChrome(k);
+    const SDL_FRect box{at.x + chrome.x / 2, at.y + chrome.y / 2, std::max(0.0f, at.w - chrome.x), std::max(0.0f, at.h - chrome.y)};
+    const DeveloperUi::Clip clipped(ui, box);
+    const ToolsPlaced placed = placeToolButtons(ui, groups, box.x, box.y, box.w);
+    for (const SDL_FRect& line : placed.lines) draw::rect(ui.r, line, kEdge);
+    for (std::size_t g = 0; g < groups.size(); ++g)
+        for (std::size_t i = 0; i < groups[g].size(); ++i) {
+            const ToolButton& b = groups[g][i];
+            const SDL_FRect& place = placed.buttons[g][i];
+            if (ui.button(place, b.label, b.on, b.enabled, layout::toolText)) d.pressedTool = b.id;
+            if (b.wrong) draw::rect(ui.r, {place.x, place.y, layout::markW * k, place.h}, kBad);
+        }
+}
+
+// The tools' own keys: what each of their controls has (action="tools WHAT"; a game's own control of that name replaces
+// the built-in one, as in the game), as the scripts are now in the editor; without a game, the built-in ones.
+void Developer::readToolKeys() {
+    DeveloperTools& d = tools;
+    static const Script builtIn = Script::load("scripts/main.vnscript", [](const std::string&) { return std::optional<std::string>("scene start\n"); }, defaultUi()); // (without a game: the built-in controls, read with a story of nothing)
+    for (auto& keys : d.toolKeys) keys.clear();
+    for (const Control& c : (d.script ? *d.script : builtIn).controls)
+        if (const auto i = toolsVerbOf(c)) d.toolKeys[*i] = c.keys;
+}
+
+bool Developer::toolKey(const SDL_Event& e, ToolKey which) {
+    if (e.type != SDL_EVENT_KEY_DOWN) return false;
+    readToolKeys();
+    return tools.isKey(e.key, which);
+}
+
+// What a tool says (how it went wrong, or what it made where), in a window of its own with OK, as packing says how
+// it went. With SDL's offscreen video (the recorder's) there's no window: the log has it.
+void Developer::tell(const std::string& message, bool failed) {
+    const char* video = SDL_GetCurrentVideoDriver();
+    if (!video || std::string_view(video) == "offscreen") return;
+    if (!SDL_ShowSimpleMessageBox(failed ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_INFORMATION, "VNext", message.c_str(), engine.window()))
+        logWarn("Can't show a message: {}.", SDL_GetError());
+}
+
 void Developer::reloaded() {
     DeveloperTools& d = tools;
     d.played = d.editor.version();
@@ -331,7 +546,9 @@ void Developer::reloaded() {
     } else if (d.open) {
         d.editor.load(engine.gameRoot()); // (the files may have changed outside the player)
         d.failed = engine.mode() == Engine::Mode::Error;
-        if (d.packIn == 0) d.status = d.failed ? "The scripts need fixing: the Story tab and the log say where."_tr : "Reloaded the scripts, images and sounds."_tr;
+        if (d.packIn > 0) return; // (packing says how it went)
+        if (d.failed) d.status = "The scripts need fixing: their mistakes are marked in red in the tabs."_tr;
+        else logInfo("{}", "Reloaded the scripts, images and sounds."_tr());
     }
 }
 
@@ -342,16 +559,17 @@ void Developer::updateDeveloper() {
         d.open = false;
         if (std::exchange(engine.waiting_, false) && engine.mode() != Engine::Mode::Error) engine.play();
     }
-    const bool packNow = d.packIn == 1; // (the frame after "Packing..." was drawn)
+    const bool packNow = d.packIn == 1; // (the game read again)
     if (d.packIn > 0) --d.packIn;
     if (packNow) {
         const auto packed = engine.finishGame();
         const std::string& said = packed ? *packed : packed.error(); // (a sentence or two a line)
-        d.failed = !packed;
-        d.status = said;
-        std::ranges::replace(d.status, '\n', ' '); // (the log has it on one line)
-        // Said in a window of its own too (the log isn't always in view): its title says how it went, the
-        // rest a line apart, and after a pack there's the way to it.
+        std::string line = said;
+        std::ranges::replace(line, '\n', ' '); // (the log has it on one line)
+        if (packed) logInfo("{}", line);
+        else logWarn("{}", line);
+        // Said in a window of its own: its title says how it went, the rest a line apart, and after a pack there's
+        // the way to it.
         const std::string title = packed ? "Packed the game"_tr() : "Can't pack the game"_tr(), showFolder = "Show the folder"_tr(), ok = "OK"_tr();
         std::string body = said.starts_with(title + ": ") ? upperFirst(said.substr(title.size() + 2)) : said;
         for (std::size_t at = body.find('\n'); at != std::string::npos; at = body.find('\n', at + 2)) body.insert(at, 1, '\n');
@@ -368,7 +586,10 @@ void Developer::updateDeveloper() {
         int clicked = 0;
         if (SDL_ShowMessageBox(&box, &clicked) && clicked == 1) {
             const std::string folder = engine.finishedFolder();
-            if (!SDL_OpenURL(fileUrl(folder).c_str())) d.status += " " + "Can't show '{}': {}."_tr(folder, SDL_GetError());
+            if (!SDL_OpenURL(fileUrl(folder).c_str())) {
+                d.failed = true;
+                d.status = "Can't show '{}': {}."_tr(folder, SDL_GetError());
+            }
         }
     }
 }
@@ -426,7 +647,6 @@ void Developer::drawDeveloper() {
     const float density = SDL_GetWindowPixelDensity(window), shown = SDL_GetWindowDisplayScale(window);
     const float own = density > 0.0f && shown > 0.0f ? std::clamp(shown / density, 0.5f, 4.0f) : 1.0f;
     const float k = own * std::floor(std::min({1.0f, w / (layout::leastW * own), h / (layout::leastH * own)}) * 16.0f) / 16.0f;
-    const float margin = layout::margin * k;
     d.k = k;
     d.size = {w, h};
     DeveloperUi ui(engine, r, engine.toolsFonts_, d, k);
@@ -453,8 +673,7 @@ void Developer::drawDeveloper() {
         if (d.editor.changedOutside()) {
             d.editor.load(engine.gameRoot());
             d.focus.clear();
-            d.failed = false;
-            d.status = "The scripts changed in another program, so the developer tools read them again."_tr;
+            logInfo("{}", "The scripts changed in another program, so the developer tools read them again."_tr());
         }
     }
     // The game's size changed in Settings (and its box was left): the screens' places and shares fit any
@@ -478,7 +697,7 @@ void Developer::drawDeveloper() {
         d.dropPreviews(); // (it plays the scripts read before)
         auto before = std::move(d.script);
         d.script = std::make_unique<Script>(Script::load("scripts/main.vnscript", [this](const std::string& p) { return readTextFile(engine.gameRoot() + p); }, defaultUi()));
-        if (before) // (the texts changed keep their translations; the Translate tab shows them as they are now)
+        if (before) // (the texts changed keep their translations; the Library shows them as they are now)
             for (const std::string& id : keepTranslations(engine.gameRoot(), *before, *d.script))
                 if (id == d.translation.id) d.translation.lines = linesOf(*readTextFile(engine.gameRoot() + "translations/" + id + ".vnscript"));
         d.problems = d.script->errors;
@@ -501,99 +720,84 @@ void Developer::drawDeveloper() {
         std::ranges::move(missingFiles(*d.script), std::back_inserter(d.problems));
     }
 
-    // The bar: the tabs on the left, the tools on the right; in a window too narrow for both, the tools
-    // go on a row of their own under the tabs (and what's still too wide is drawn narrower).
-    std::vector<std::pair<View, std::string_view>> tabs;
-    if (editing) {
-        tabs = {{View::Story, "Story"_tr}, {View::Map, "Map"_tr}, {View::Screens, "Screens"_tr}, {View::Library, "Library"_tr}};
-        if (d.editor.hasMain()) tabs.emplace_back(View::Settings, "Settings"_tr);
-        tabs.emplace_back(View::Translate, "Translate"_tr);
-    }
-    tabs.emplace_back(View::Log, "Log"_tr);
-    tabs.emplace_back(View::About, "About"_tr);
-    const auto toolSet = engine.noGame() ? std::span<const ToolButton>(kNoGameTools) : std::span<const ToolButton>(kGameTools);
-    std::vector<ToolButton> toolButtons(toolSet.begin(), toolSet.end());
-    for (ToolButton& t : toolButtons) {
-        if (t.tool == kPlay && !engine.waiting_) t.label = "Back to the game"_text;
-        if (t.tool == kPlayScene && d.view == View::Story && d.row && d.moreRows.empty() && !d.character) t.label = "Play from this line"_text;
-    }
-    if (!engine.noGame() && storyAt()) toolButtons.insert(toolButtons.begin() + 1, ToolButton{kNextLine, "Next line"_text}); // (a story under the tools)
-    const float pad = layout::tabPad * k, gap = layout::toolGap * k, between = 24 * k, room = w - 2 * margin;
-    float tabsW = 0.0f, toolsW = 0.0f;
-    for (const auto& tab : tabs) tabsW += ui.width(tab.second, layout::tabText) + pad;
-    for (const ToolButton& t : toolButtons) toolsW += ui.width(tr(t.label), layout::toolText) + pad + gap;
-    const bool twoRows = (room - between) / (tabsW + toolsW) < layout::barLeast;
-    const float tabsFit = std::min(1.0f, twoRows ? room / tabsW : (room - between) / (tabsW + toolsW)), toolsFit = twoRows ? std::min(1.0f, room / toolsW) : tabsFit;
-    auto shrunk = [](float size, float fit) { return fit < 1.0f ? std::max(10.0f, std::floor(size * fit)) : size; }; // (whole sizes: a font each)
-    const float barH = (twoRows ? layout::tabsRowH : layout::barH) * k, toolsY = twoRows ? barH : 0.0f, barsH = twoRows ? barH + layout::toolsRowH * k : barH;
-    draw::rect(r, {0, 0, w, barsH}, kBar);
-    float x = margin;
-    for (const auto& [view, label] : tabs) {
-        const float bw = (ui.width(label, layout::tabText) + pad) * tabsFit;
-        auto wrongIn = [&](const auto& items) { return std::ranges::any_of(items, [&](const auto& it) { return d.problemWithin(it.file, it.line, it.end); }); };
-        const bool wrong = editing && (view == View::Screens ? wrongIn(d.editor.screens())
-                                       : view == View::Library ? wrongIn(d.editor.definitions("variable")) ||
-                                                                     std::ranges::any_of(kDefinitionKinds, [&](const DefinitionKind& kind) { return wrongIn(d.editor.definitions(kind.kind)); })
-                                       : view == View::Story || view == View::Map ? std::ranges::contains(d.wrongScenes(), true)
-                                                               : view == View::Settings && std::ranges::any_of(d.problems, [&](const ScriptError& e) { return inSettings(d.editor, e); }));
-        if (ui.tab({x, 0, bw, barH}, label, d.view == view, wrong, shrunk(layout::tabText, tabsFit)) && d.view != view) {
-            d.view = view;
-            d.scroll = 0;
-            d.focus.clear();
-        }
-        x += bw;
-    }
-    x = w - margin;
-    const float toolH = (twoRows ? layout::toolsRowH - 6 : layout::barH - 16) * k; // (in the middle of its row)
-    for (const ToolButton& t : toolButtons | std::views::reverse) {
-        const float bw = (ui.width(tr(t.label), layout::toolText) + pad) * toolsFit;
-        x -= bw;
-        const bool enabled = t.tool != kPlayScene || (d.view == View::Story && !d.editor.scenes().empty());
-        const float rowH = twoRows ? layout::toolsRowH * k : barH;  // (the tools' own row, or the tabs')
-        if (ui.button({x, toolsY + (rowH - toolH) / 2, bw, toolH}, tr(t.label), t.tool == kPlay, enabled, shrunk(layout::toolText, toolsFit))) useTool(t.tool);
-        x -= gap * toolsFit;
-    }
+    // The tools' own keys as their controls have them now, and the tools' own part's button pressed last frame: done
+    // first, as the tools are drawn.
+    readToolKeys();
+    if (const auto pressed = std::exchange(d.pressedTool, std::nullopt)) runCommand(*pressed);
+    const std::vector<std::vector<ToolButton>> buttons = toolButtons();
+    d.stoppable.reset(); // (the Story tab says it again as it's drawn)
 
-    // What the last tool did goes to the log (the Log tab), once, as it changes.
+    // What the last tool said goes to the log and shows in a window of its own (tell), once: the same words said
+    // again show again, but a save that can't be written says so once, until one can be.
     if (!d.editor.problem().empty()) {
         d.failed = true;
         d.status = d.editor.problem();
     }
-    if (d.status != d.loggedStatus) {
+    if (!d.status.empty() && d.status != d.loggedStatus) {
         d.loggedStatus = d.status;
-        if (d.failed && !d.status.empty()) logWarn("{}", d.status);
-        else if (!d.status.empty()) logInfo("{}", d.status);
+        std::string line = d.status;
+        std::ranges::replace(line, '\n', ' ');
+        if (d.failed) logWarn("{}", line);
+        else logInfo("{}", line);
+        tell(d.status, d.failed);
     }
+    if (d.editor.problem().empty()) d.loggedStatus.clear();
+    d.status.clear();
+    d.failed = false;
     if (engine.noGame() && !d.saidNoGame) {
         d.saidNoGame = true;
         logInfo("{}", "There's no game yet: make a New game, or put a game folder or game.vnext next to the player and Look again."_tr());
     }
 
-    const SDL_FRect area{margin, barsH + margin, w - 2 * margin, std::max(0.0f, h - barsH - 2 * margin)}; // (the same room on each side)
-    if (d.view == View::Story && editing) drawStory(ui, area);
-    else if (d.view == View::Map && editing) drawMap(ui, area);
-    else if (d.view == View::Screens && editing) drawScreens(ui, area);
-    else if (d.view == View::Library && editing) drawLibrary(ui, area);
-    else if (d.view == View::Translate && editing) drawTranslations(ui, area);
-    else if (d.view == View::Settings && editing && d.editor.hasMain()) drawSettings(ui, area);
-    else if (d.view == View::About) { // (the tools' language over it)
-        const float used = drawToolsLanguage(ui, area);
-        drawLines(ui, {area.x, area.y + used, area.w, std::max(0.0f, area.h - used)});
-    } else drawLines(ui, area);
+    // The tools' own part, at the window's foot in every tab (as wide as the window, as tall as its buttons: it's
+    // neither moved nor resized), and the room over it for the tab, to the window's edges: its parts, each a
+    // sub-window (drawPanels).
+    const SDL_FPoint chrome = panelChrome(k);
+    const float toolsH = std::min(h, chrome.y + placeToolButtons(ui, buttons, 0.0f, 0.0f, std::max(0.0f, w - chrome.x)).h);
+    const SDL_FRect toolsAt{0.0f, h - toolsH, w, toolsH};
+    d.room = {0.0f, 0.0f, w, toolsAt.y}; // (the parts end where the tools' own starts)
+    d.wantPointer.reset();
+    const SDL_FRect area = d.room;
+    auto one = [&](std::string_view tab, Panel part) {
+        std::array panels{std::move(part)};
+        drawPanels(ui, tab, panels);
+    };
+    if (d.view == View::About) {
+        one("about", titledPanel(ui, "about", "About"_tr, area, [&](const SDL_FRect& box) { return drawAbout(ui, box), false; }));
+    } else if (!editing) { // (no game yet: what to do)
+        const std::string_view say = "There's no game yet: make a New game, or put a game folder or game.vnext next to the player and Look again."_tr;
+        one("no_game", titledPanel(ui, "no_game", "No game"_tr, area, [&](const SDL_FRect& box) { return ui.text(say, box.x, box.y, layout::noteText, theme::dim, box.w), false; }));
+    } else if (d.view == View::Story) drawStory(ui, area);
+    else if (d.view == View::Screens) drawScreens(ui, area);
+    else drawLibrary(ui, area);
+    drawToolsPart(ui, buttons, toolsAt);
+    showPointer(d.wantPointer);
     drawPopup(ui);
     drawTip(ui);
 
-    // Keys nothing else took.
+    // Keys nothing else took: the tools' own that act on them as a whole (undo and redo, the tabs, Reload, Quit; the
+    // others are the keys of what they act on, as their controls have them), and Esc, back to the game.
+    std::vector<int> commands;
     for (const SDL_KeyboardEvent& key : d.keys) {
-        const bool command = key.mod & (SDL_KMOD_GUI | SDL_KMOD_CTRL);
-        if (key.key == SDLK_ESCAPE && !engine.noGame() && !engine.waiting_) {
+        const bool undo = d.isKey(key, ToolKey::Undo), redo = d.isKey(key, ToolKey::Redo);
+        if (key.key == SDLK_ESCAPE && key.which != kToolButton && !engine.noGame() && !engine.waiting_) {
             closeDeveloper();
-        } else if (command && (key.key == SDLK_Z || key.key == SDLK_Y) && editing && d.view != View::Log && d.view != View::About && d.view != View::Translate) {
+        } else if ((undo || redo) && editing && d.view != View::About && !(d.view == View::Library && d.library == "translations")) {
             d.focus.clear();
-            const bool redo = key.key == SDLK_Y || (key.mod & SDL_KMOD_SHIFT); // (Cmd+Shift+Z, or Ctrl+Y)
-            if (!(redo ? d.editor.redo() : d.editor.undo())) d.status = redo ? "Nothing to redo."_tr : "Nothing to undo."_tr;
+            static_cast<void>(redo ? d.editor.redo() : d.editor.undo());
+        } else if (d.isKey(key, ToolKey::Story)) {
+            commands.push_back(kStoryTab);
+        } else if (d.isKey(key, ToolKey::Screens)) {
+            commands.push_back(kScreensTab);
+        } else if (d.isKey(key, ToolKey::Library)) {
+            commands.push_back(kLibraryTab);
+        } else if (d.isKey(key, ToolKey::Reload)) {
+            commands.push_back(kReload);
+        } else if (d.isKey(key, ToolKey::Quit)) {
+            commands.push_back(kQuit);
         }
     }
+    for (const int command : commands) runCommand(command);
     if (d.clicked) d.focus.clear(); // a click on nothing
     if (d.focus.empty()) d.focusOwner.clear();
     d.keys.clear();
@@ -767,10 +971,12 @@ void Developer::importFiles() {
         }
     }
     d.editor.movedFiles(std::move(moves));
-    d.failed = copied == 0;
-    d.status = copied == 1 ? "Imported '{}'."_tr(last) : copied > 1 ? "Imported {} files."_tr(copied)
-             : !skipped.empty() ? "'{}' isn't an image, sound, movie or font file the game can use there."_tr(skipped)
-                                : "Can't copy that into the game folder."_tr;
+    if (copied > 0) {
+        logInfo("{}", copied == 1 ? "Imported '{}'."_tr(last) : "Imported {} files."_tr(copied));
+    } else {
+        d.failed = true;
+        d.status = !skipped.empty() ? "'{}' isn't an image, sound, movie or font file the game can use there."_tr(skipped) : "Can't copy that into the game folder."_tr();
+    }
     // An image dropped on the screen open in the Screens tab: a part showing it, where it was dropped
     // (in the part chosen there when it landed on that, else the screen), placed by its corner.
     bool placed = false;
@@ -791,15 +997,15 @@ void Developer::importFiles() {
             const std::string line = std::format("image \"{}\" x={} y={}", firstImage, unitText(placeFor(px - box.x, 0.0f, box.w)), unitText(-placeFor(py - box.y, 0.0f, box.h)));
             d.part = d.editor.addPart(*sc, into ? &*into : nullptr, line);
             d.moreParts.clear();
-            d.status = "Imported '{}', and put it on the screen."_tr(last);
+            logInfo("{}", "Imported '{}', and put it on the screen."_tr(last));
             placed = true;
         }
     if (copied > 0 && !placed) d.view = DeveloperTools::View::Library;
 }
 
 // Opens where a line of the scripts is (`line` counting from 0): its scene's line in the Story tab,
-// its screen's part in Screens, its setting, its character, or what it lists in the Library. False
-// when it's none of those.
+// its screen's part in Screens, its character, or what it lists in the Library (a setting: its Settings).
+// False when it's none of those.
 bool Developer::goTo(const std::string& path, std::size_t line) {
     DeveloperTools& d = tools;
     StoryEditor& editor = d.editor;
@@ -808,7 +1014,6 @@ bool Developer::goTo(const std::string& path, std::size_t line) {
         if (lower(editor.path(f)) == lower(path)) file = f;
     if (!file) return false;
     d.focus.clear();
-    d.find.clear();
     const auto& scenes = editor.scenes();
     for (std::size_t i = 0; i < scenes.size(); ++i)
         if (scenes[i].file == *file && scenes[i].line <= line && line < std::max(scenes[i].end, scenes[i].line + 1)) {
@@ -820,7 +1025,7 @@ bool Developer::goTo(const std::string& path, std::size_t line) {
             const auto rows = editor.rows(scenes[i]);
             if (const auto row = std::ranges::find(rows, line, &StoryEditor::Row::line); row != rows.end()) {
                 d.row = line;
-                d.rowsScroll = std::max(0.0f, static_cast<float>(row - rows.begin() - 4) * layout::listItemH * d.k); // (a few lines over it in sight)
+                d.linesScroll = std::max(0.0f, static_cast<float>(row - rows.begin() - 4) * layout::listItemH * d.k); // (a few lines over it in sight)
             }
             return true;
         }
@@ -835,7 +1040,8 @@ bool Developer::goTo(const std::string& path, std::size_t line) {
             return true;
         }
     if (*file == 0 && editor.isSetting(line)) {
-        d.view = View::Settings;
+        d.view = View::Library;
+        d.library = "settings";
         return true;
     }
     const auto characters = editor.characters();
@@ -896,7 +1102,7 @@ bool Developer::goTo(const std::string& path, std::size_t line) {
     return false;
 }
 
-// The developer tools' own folder (with --data, that one): it keeps the language chosen for them.
+// The developer tools' own folder (with --data, that one): it keeps the language chosen for them, and their layout.
 std::string Developer::toolsFolder() const {
     if (engine.dataFolder_) return engine.prefPath();
     const SdlOwned<char> pref{SDL_GetPrefPath("VNext", "Developer")};
@@ -957,44 +1163,6 @@ void Developer::startToolsLanguage() {
     }
 }
 
-// About's row: the developer tools' language (English, or a translation), and a file to translate
-// them; under it, where translations are.
-float Developer::drawToolsLanguage(DeveloperUi& ui, const SDL_FRect& area) {
-    DeveloperTools& d = tools;
-    const float k = ui.k, buttonH = layout::buttonH * k, gap = layout::gap * k;
-    if (d.cachedFiles(toolsLanguagesFolder(), ".vnscript") != d.toolsLanguageFiles) findToolsLanguages(); // (one added or taken away)
-    const std::string_view make = "Make a file to translate them"_tr;
-    const float makeW = ui.buttonWidth(make, layout::buttonText, layout::widerButtonW);
-    const float room = area.w - makeW - gap; // (left of that button)
-    const float labelW = ui.textFitted("The developer tools' language"_tr, area.x, area.y + buttonH / 2, layout::labelText, theme::dim, room / 2);
-    // The languages (English, then the translations by name): a button each, all as wide, while they fit; else one box whose
-    // list has them all. Their words are their places in that order.
-    StoryEditor::Field f{.name = "language", .value = "0", .choices = "0", .labels = "English"};
-    float widest = std::max(layout::toggleW * k, ui.width(f.labels, layout::buttonText) + layout::choicePad * k);
-    for (std::size_t i = 0; i < d.toolsLanguages.size(); ++i) {
-        const DeveloperTools::ToolsLanguage& l = d.toolsLanguages[i];
-        f.choices += std::format(" {}", i + 1);
-        f.labels += "|" + l.name;
-        if (l.id == d.toolsLanguage) f.value = std::format("{}", i + 1);
-        widest = std::max(widest, ui.width(l.name, layout::buttonText) + layout::choicePad * k);
-    }
-    const auto count = static_cast<float>(d.toolsLanguages.size() + 1);
-    const float x = area.x + labelW + 2 * gap;
-    const SDL_FRect languages{x, area.y, std::max(0.0f, std::min(count * (widest + gap) - gap, area.x + room - gap - x)), buttonH};
-    if (const auto picked = ui.choices("tools language", languages, f)) {
-        const std::size_t i = std::strtoul(picked->c_str(), nullptr, 10);
-        const std::string id = i >= 1 && i <= d.toolsLanguages.size() ? d.toolsLanguages[i - 1].id : std::string{};
-        useToolsLanguage(id);
-        const std::string file = toolsFolder() + "language.txt";
-        if (!SDL_SaveFile(file.c_str(), id.data(), id.size())) logWarn("{}", "Can't save the developer tools' language: {}."_tr(SDL_GetError()));
-    }
-    if (ui.button({area.x + area.w - makeW, area.y, makeW, buttonH}, make, false, true, layout::buttonText)) writeToolsTranslation();
-    const float noteY = area.y + buttonH + gap;
-    const float noteH = ui.text("A translation of the developer tools is a file in 'developer tools translations/', next to VNext, with every text they show, each with its translation under it. Make a file to translate them writes one, ready to translate; with a translation in use, it adds the texts that one doesn't have yet."_tr,
-                                area.x, noteY, layout::noteText, theme::dim, area.w).y;
-    return noteY + noteH + gap - area.y;
-}
-
 void Developer::writeToolsTranslation() {
     DeveloperTools& d = tools;
     const std::string folder = toolsLanguagesFolder();
@@ -1008,7 +1176,7 @@ void Developer::writeToolsTranslation() {
                                : "# The developer tools' texts in another language: under each one, indented, its translation (one left as \"\"\n"
                                  "# stays in English). Keep each {} in it: a name, a number or a file goes there. Change the language line to\n"
                                  "# the language's own name and its code (es, pt-br, ja...), name the file after the language\n"
-                                 "# (spanish.vnscript), keep it here, next to VNext, and choose it in About.\n"
+                                 "# (spanish.vnscript), keep it here, next to VNext, and choose it with its button in the developer tools.\n"
                                  "language \"New language\"\n";
     std::size_t added = 0;
     for (const std::string& text : toolsTexts()) {

@@ -325,8 +325,8 @@ void Assets::setSubImages(const std::vector<SubImage>& parts) {
 
 Image Assets::image(std::string_view name, Frame frame, unsigned looks) {
     const auto sub = subImages_.find(lower(name));
-    if (sub == subImages_.end()) return whole(name, frame, looks);
-    const Image all = whole(sub->second.image, frame, looks);
+    if (sub == subImages_.end()) return frameOrFile(name, frame, looks);
+    const Image all = file(sub->second.image, looks); // (cut_from= is a file, as pixels() cuts it)
     if (!all) return {};
     SDL_FRect part{};
     const SDL_FRect bounds{0.0f, 0.0f, all.w(), all.h()};
@@ -336,15 +336,17 @@ Image Assets::image(std::string_view name, Frame frame, unsigned looks) {
     return out;
 }
 
-Image Assets::whole(std::string_view name, Frame frame, unsigned looks) {
+Image Assets::file(std::string_view name, unsigned looks) {
+    SDL_Texture* tex = loadTexture(name, looks);
+    if (!tex) return {};
+    float w = 0, h = 0;
+    SDL_GetTextureSize(tex, &w, &h);
+    return {.texture = tex, .src = {0, 0, w, h}};
+}
+
+Image Assets::frameOrFile(std::string_view name, Frame frame, unsigned looks) {
     const auto it = frames_.find(lower(name));
-    if (it == frames_.end()) {
-        SDL_Texture* tex = loadTexture(name, looks);
-        if (!tex) return {};
-        float w = 0, h = 0;
-        SDL_GetTextureSize(tex, &w, &h);
-        return {.texture = tex, .src = {0, 0, w, h}};
-    }
+    if (it == frames_.end()) return file(name, looks);
     const Atlas& a = atlases_[it->second.first];
     SDL_Texture* tex = loadTexture(a.image, looks);
     if (!tex) return {};

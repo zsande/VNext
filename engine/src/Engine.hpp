@@ -56,7 +56,7 @@ public:
     [[nodiscard]] const std::string& logFile() const { return logFile_; }
     [[nodiscard]] SDL_Window* window() const { return window_.get(); }
     Image image(std::string_view name, Frame frame = {});
-    // What a button does (`item`: a list item's values when it's in one: {chat.name}, and what send, like... act on).
+    // What a button does (`item`: a list item's values when it's in one: {chat.name}, and what send acts on).
     void run(const Commands& commands, const std::string& confirm = {}, const Variables& item = {});
     // What a screen does as it opens (or closes): the music and the voice line stop when its stop_music_on_open=
     // and stop_voice_on_open= (or _on_close=) say so, then its action_on_open= (action_on_close=) runs.
@@ -71,6 +71,7 @@ public:
     [[nodiscard]] Sound& sound() { return sound_; }
     [[nodiscard]] std::uint64_t frameNumber() const { return frameNumber_; }
     [[nodiscard]] std::uint64_t pointerMoves() const { return pointerMoves_; } // (how many times the pointer has moved: screens tell whether the last move came to them)
+    [[nodiscard]] bool padInUse() const { return padInUse_; } // the last thing pressed was a controller's (an input's keyboard comes up by itself)
     [[nodiscard]] float time() const { return time_; } // the game's clock: it stands still while the developer tools are open over it
     [[nodiscard]] float toolsTime() const { return toolsTime_; }
     [[nodiscard]] Settings& settings() { return settings_; }
@@ -173,23 +174,21 @@ private:
         Session& operator=(Session&&) VN_DELETED("one: it shuts SDL down");
         ~Session();
     };
-    // SDL's log: also written to <player data>/log.txt (GUI builds have no console), and the newest
-    // messages kept for the developer tools.
+    // SDL's log: also written to <player data>/log.txt (GUI builds have no console); the messages from before
+    // the file is open are kept for it till then.
     struct Log {
         struct Entry {
             SDL_LogPriority priority = SDL_LOG_PRIORITY_INFO;
             std::string text;
         };
         std::mutex mutex; // (sound can log from its own thread)
-        std::deque<Entry> recent; // the newest last
+        std::deque<Entry> early; // the newest last
         IOStreamPtr io;
         SDL_LogOutputFunction previous = nullptr;
         void* previousData = nullptr;
         bool started = false;
         void start();                       // keeps messages from now on
-        void open(const std::string& path); // and writes them to this file too (the ones so far first)
-        [[nodiscard]] std::vector<Entry> newest(std::size_t count, std::size_t skip);
-        [[nodiscard]] std::size_t size();
+        void open(const std::string& path); // and writes them to this file (the ones so far first)
         Log() = default;
         Log(const Log&) VN_DELETED("one: SDL's log goes to it");
         Log& operator=(const Log&) VN_DELETED("one: SDL's log goes to it");
@@ -211,7 +210,7 @@ private:
     [[nodiscard]] std::expected<std::string, std::string> pack(const std::string& file) const;
     [[nodiscard]] std::expected<std::string, std::string> packInto(const std::string& file) const; // (what pack() and finishGame() share)
     [[nodiscard]] std::string packPath() const;
-    // Pack the game (and --pack): game.vnext and licences.txt in a folder named after the game, next to
+    // Pack (and --pack): game.vnext and licences.txt in a folder named after the game, next to
     // the game folder (finishedFolder()): what was made, or why not.
     [[nodiscard]] std::expected<std::string, std::string> finishGame() const;
     [[nodiscard]] std::string finishedFolder() const;
@@ -258,7 +257,11 @@ private:
     void showPhone(const cmd::Ui& c);                      // the story's: a chat scene, a call or a message shown on it
     void hidePhone();                                      // ...over: it goes, if the story opened it
     [[nodiscard]] ScreenView* topView(); // the screen on top: the top overlay, else the title on the title screen
-    [[nodiscard]] ScreenView* keyView(); // the screen a control's move, press and scroll actions work on
+    // The screens a control's move, press and scroll actions work on, and what those do there. idle(): actions that
+    // would do nothing now (each moves, presses or scrolls, with nothing there for it), so their key goes on.
+    [[nodiscard]] std::vector<ScreenView*> keyViews();
+    void moveKeys(int dx, int dy);
+    [[nodiscard]] bool idle(const Commands& actions);
     [[nodiscard]] ScreenView* textbox();
     // A screen opened over the rest, playing `opening` and later `closing` this time (with NAME and close
     // with NAME; none: its own animation_on_open= and animation_on_close=).
@@ -285,6 +288,7 @@ private:
     void quickSave();
     void quickLoad();
     void autosave();
+    void countSaves(); // whether there are saves (has_save), and quick saves (has_quick_save)
     bool saveToSlot(const std::string& slot);
     bool loadFromSlot(const std::string& slot);
     std::expected<std::string, std::string> resume(std::string_view state);
@@ -297,9 +301,11 @@ private:
     void saveSettings();
     void toggleFullscreen();
     void screenshot(const std::string& path);
-    void drawGame(bool thumbnail);
+    void drawGame(bool thumbnail); // (thumbnail: a save's picture, with what's open over the story that lets it go on, like the phone, but no notices)
+    [[nodiscard]] bool stopsStory(const std::string& screen) const; // a menu: the story waits while it's open (not story=goes_on)
     void drawErrors();
     [[nodiscard]] std::string windowTitle() const;
+    void showTitle(); // (when it's changed)
 
     // The developer tools
     [[nodiscard]] bool developerMode() const { return noGame_ || gameSettings().developer; }
@@ -340,6 +346,7 @@ private:
     std::vector<Translation> translations_;
     std::uint64_t frameNumber_ = 0;
     std::uint64_t pointerMoves_ = 0;
+    bool padInUse_ = false;
     bool covered_ = false; // a menu covers the game (its voice and movie wait)
     std::unique_ptr<Game> game_;                          // idle (not started) on the title screen
     std::map<std::string, ScreenView, std::less<>> views_; // every screen of the script
@@ -395,10 +402,11 @@ private:
     std::string question_;
     std::function<void()> confirmYes_;
     std::vector<SDL_Point> windowSizes_;
-    bool hasSave_ = false;
+    bool hasSave_ = false, hasQuickSave_ = false; // (any save; a quick save)
     bool thumbnail_ = false;
     bool reloadRequested_ = false;
     bool clickThrough_ = false; // (the developer tools are open: a click that brings the window forward clicks too)
+    std::string shownTitle_;     // the window's title, as it was last set
     TextBlock errorTitle_, errorText_, errorHint_;
 
     std::string gameRoot_; // the game folder, or the pack, with a slash after it
