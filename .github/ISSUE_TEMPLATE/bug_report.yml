@@ -21,7 +21,7 @@ body:
     id: version
     attributes:
       label: VNext version
-      description: The first line of About, in the developer tools, names it (for example 0.6.1).
+      description: The first line of About (a button at the foot of the developer tools) names it, for example 0.8.0.
     validations:
       required: true
   - type: dropdown
@@ -43,7 +43,9 @@ body:
     id: log
     attributes:
       label: Log
-      description: If you can, paste VNext's log.txt here. The Log tab in the developer tools says which folder it's in ("The player's data is in …").
+      description: >-
+        If you can, paste VNext's log.txt here. It's in a folder inside VNext's folder in your computer's app data:
+        %APPDATA%\VNext on Windows, ~/Library/Application Support/VNext on macOS, ~/.local/share/VNext on Linux.
       render: text
   - type: textarea
     id: files
