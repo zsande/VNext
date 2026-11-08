@@ -1,0 +1,57 @@
+name: Accessibility barrier
+description: Something in VNext, or in a game made with it, keeps you from playing or making a game, or makes it harder
+labels: ["accessibility"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for telling me! You don't need to say why you need something, only what got in the way.
+  - type: textarea
+    id: what
+    attributes:
+      label: What got in the way?
+      description: What you were trying to do, and what happened instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Playing a game
+        - Making a game (the editor)
+    validations:
+      required: true
+  - type: dropdown
+    id: how-much
+    attributes:
+      label: How much does it stop you?
+      options:
+        - I can't go on at all
+        - I can, with a way around it
+        - It's harder than it should be
+        - A small thing
+    validations:
+      required: true
+  - type: textarea
+    id: use
+    attributes:
+      label: What you use
+      description: For example a screen reader, a controller, only a keyboard, a magnifier, or settings such as Text size, High contrast or Read aloud.
+  - type: input
+    id: version
+    attributes:
+      label: VNext version
+      description: The first line of About (a button at the foot of the developer tools) names it, for example 0.8.0. In a game, say which game.
+  - type: dropdown
+    id: computer
+    attributes:
+      label: Computer
+      options:
+        - Windows
+        - macOS
+        - Linux
+  - type: textarea
+    id: files
+    attributes:
+      label: Pictures, recordings or files
+      description: If you like, drag screenshots, a screen recording or a small game into this box.
