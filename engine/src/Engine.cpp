@@ -275,7 +275,7 @@ std::string Engine::openGame() {
     return problem;
 }
 
-// The player's own folder for the game (VNext/<its save_folder=, else its title>, or --data): settings, the log, and saves and
+// The player's own folder for the game (VNext/<its save_folder setting, else its title>, or --data): settings, the log, and saves and
 // progress, unless the game is a pack that keeps those itself: game.vnext does, unless --data was given
 // or it can't (its file can't be written to, or it's inside an app). Without a game: VNext/Developer.
 void Engine::loadPlayerData() {

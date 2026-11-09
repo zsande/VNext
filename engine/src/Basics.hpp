@@ -267,7 +267,7 @@ std::string percentEscaped(std::string_view text, std::string_view safe = "/-_.~
 // (/ \ : * ? " < > |) or control characters, no dots or spaces at its ends, and not a name Windows keeps for itself (con,
 // nul, com1...: those get an _). Empty: nothing was left of it.
 std::string fileNameOf(std::string_view text);
-// The folder a game's players' data goes in (in VNext's own): its save_folder=, else its title, as a folder can be called
+// The folder a game's players' data goes in (in VNext's own): its save_folder setting, else its title, as a folder can be called
 // (fileNameOf), else VNext.
 std::string saveFolderNameOf(std::string_view saveFolder, std::string_view title);
 std::string upper(std::string_view s);

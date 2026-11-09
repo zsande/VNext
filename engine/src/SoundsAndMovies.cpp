@@ -3,8 +3,8 @@
 
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <charconv>
 #include <climits>
-#include <cstdio>
 #include <format>
 #include <ranges>
 
@@ -63,9 +63,19 @@ std::vector<Game::Subtitle> Game::subtitlesOf(const Assets& assets, std::string_
     const auto path = assets.findSubtitles(movie);
     const auto text = path ? assets.files().readText(*path) : std::nullopt;
     if (!text) return out;
-    auto seconds = [](std::string_view s) -> std::optional<double> { // (HH:MM:SS,mmm)
+    auto seconds = [](std::string_view s) -> std::optional<double> { // (HH:MM:SS,mmm, or a point for the comma)
+        s = trim(s);
+        auto read = [&](int& n, std::string_view then) { // (a whole number, then one of `then`'s characters if it has any)
+            const auto [stop, error] = std::from_chars(s.data(), s.data() + s.size(), n);
+            if (error != std::errc{}) return false;
+            s.remove_prefix(static_cast<std::size_t>(stop - s.data()));
+            if (then.empty()) return true;
+            if (s.empty() || !then.contains(s.front())) return false;
+            s.remove_prefix(1);
+            return true;
+        };
         int h = 0, m = 0, sec = 0, ms = 0;
-        if (std::sscanf(std::string(trim(s)).c_str(), "%d:%d:%d%*[,.]%d", &h, &m, &sec, &ms) != 4) return std::nullopt;
+        if (!read(h, ":") || !read(m, ":") || !read(sec, ",.") || !read(ms, {})) return std::nullopt;
         return h * 3600.0 + m * 60.0 + sec + ms / 1000.0;
     };
     Subtitle now;
