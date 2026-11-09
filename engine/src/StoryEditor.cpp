@@ -157,6 +157,34 @@ const std::vector<StoryEditor::Character>& StoryEditor::characters() const {
     return characters_.second;
 }
 
+const std::vector<StoryEditor::AtlasLines>& StoryEditor::atlases() const {
+    if (atlases_.first == version_) return atlases_.second;
+    std::vector<AtlasLines> out;
+    for (const File& f : files_)
+        for (std::size_t i = 0; i < f.lines.size(); ++i) {
+            if (indentOf(f.lines[i]) != 0 || lower(firstWord(f.lines[i])) != "atlas") continue;
+            const std::string rest(afterFirst(f.lines[i]));
+            AtlasLines a{.name = lower(firstWord(rest)), .image = lower(firstWord(rest))};
+            for (const std::string& w : rawWords(afterFirst(rest)))
+                if (lower(w).starts_with("image=")) a.image = lower(imageName(unquote(w.substr(6))));
+                else if (lower(w).starts_with("same_names_as="))
+                    if (const auto it = std::ranges::find(out, lower(unquote(w.substr(14))), &AtlasLines::name); it != out.end()) a.expressions = it->expressions;
+            for (std::size_t j = i + 1; j < f.lines.size() && (blank(f.lines[j]) || indentOf(f.lines[j]) > 0); ++j) {
+                std::string part = f.lines[j]; // ("eyes: open, half, closed" too)
+                std::ranges::replace(part, ',', ' ');
+                std::ranges::replace(part, ':', ' ');
+                std::vector<std::string> listed;
+                for (const std::string& w : rawWords(afterFirst(part)))
+                    if (lower(w).starts_with("image=")) a.layers.push_back(lower(imageName(unquote(w.substr(6)))));
+                    else if (!w.contains('=')) listed.push_back(lower(w));
+                if (lower(firstWord(part)) == "expressions" && !listed.empty()) a.expressions = std::move(listed);
+            }
+            out.push_back(std::move(a));
+        }
+    atlases_ = {version_, std::move(out)};
+    return atlases_.second;
+}
+
 bool StoryEditor::isCharacter(std::string_view name) const { return hasNamed(characters(), name); }
 
 std::pair<std::string, std::string> StoryEditor::speakerOf(std::string_view who) const {
@@ -265,6 +293,13 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
     static constexpr std::string_view kColourNames[]{"white", "black", "grey", "silver", "red", "darkred", "orange", "gold", "yellow",
                                                     "lime", "green", "darkgreen", "teal", "cyan", "skyblue", "lightblue", "blue", "navy",
                                                     "purple", "violet", "magenta", "pink", "hotpink", "brown", "beige", "transparent"};
+    auto shown = [&] { // (the images to show: not one only atlases use, as their eyes' and mouths' or a sheet named otherwise)
+        std::vector<std::string> images = filesIn("images/", kImageTypes);
+        std::erase_if(images, [&](const std::string& image) {
+            return std::ranges::any_of(atlases(), [&](const AtlasLines& a) { return std::ranges::contains(a.layers, lower(image)) || (a.image == lower(image) && a.name != a.image); });
+        });
+        return images;
+    };
     std::vector<std::string> out;
     switch (pick) {
     case Pick::None:
@@ -272,15 +307,15 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
     case Pick::Characters:
     case Pick::Shown:
         for (const Character& c : characters()) out.push_back(c.name);
-        if (pick == Pick::Shown) std::ranges::copy(filesIn("images/", kImageTypes), std::back_inserter(out));
+        if (pick == Pick::Shown) std::ranges::copy(shown(), std::back_inserter(out));
         if (pick == Pick::Shown) std::ranges::copy(defined("sub-image"), std::back_inserter(out));
         break;
     case Pick::Images: // (the images alone: the first for a new part)
-        out = filesIn("images/", kImageTypes);
+        out = shown();
         for (std::string& p : defined("sub-image")) add(out, std::move(p));
         break;
     case Pick::ImagesOrColours: // (an image's box: context "files" leaves out the sub-images, for one cut from a file)
-        out = filesIn("images/", kImageTypes);
+        out = shown();
         if (context != "files")
             for (std::string& p : defined("sub-image")) add(out, std::move(p));
         for (std::string& c : defined("colour")) add(out, std::move(c));
@@ -429,32 +464,14 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
                               // talks with, nor the face beside the textbox (aiko_face).
         const std::string base = imageBaseOf(context), prefix = base + "_";
         std::vector<std::string> notShown, atlased; // (atlases' names and images, and their eyes' and mouths'; their expressions)
-        std::map<std::string, std::vector<std::string>, std::less<>> expressionsOf; // (each atlas's, for same_names_as=)
-        for (const File& f : files_)
-            for (std::size_t i = 0; i < f.lines.size(); ++i) {
-                if (indentOf(f.lines[i]) != 0 || lower(firstWord(f.lines[i])) != "atlas") continue;
-                const std::string rest(afterFirst(f.lines[i])), name = lower(firstWord(rest));
-                std::vector<std::string> expressions;
-                notShown.push_back(name);
-                for (const std::string& w : rawWords(afterFirst(rest)))
-                    if (lower(w).starts_with("image=")) notShown.push_back(lower(imageName(unquote(w.substr(6)))));
-                    else if (lower(w).starts_with("same_names_as="))
-                        if (const auto it = expressionsOf.find(lower(unquote(w.substr(14)))); it != expressionsOf.end()) expressions = it->second;
-                for (std::size_t j = i + 1; j < f.lines.size() && (blank(f.lines[j]) || indentOf(f.lines[j]) > 0); ++j) {
-                    std::string part = f.lines[j]; // ("eyes: open, half, closed" too)
-                    std::ranges::replace(part, ',', ' ');
-                    std::ranges::replace(part, ':', ' ');
-                    std::vector<std::string> listed;
-                    for (const std::string& w : rawWords(afterFirst(part)))
-                        if (lower(w).starts_with("image=")) notShown.push_back(lower(imageName(unquote(w.substr(6)))));
-                        else if (!w.contains('=')) listed.push_back(lower(w));
-                    if (lower(firstWord(part)) == "expressions" && !listed.empty()) expressions = std::move(listed);
-                }
-                if (name == base) std::ranges::copy(expressions, std::back_inserter(atlased));
-                else if (name.starts_with(prefix))
-                    for (const std::string& e : expressions) atlased.push_back(name.substr(prefix.size()) + "_" + e);
-                expressionsOf.insert_or_assign(name, std::move(expressions));
-            }
+        for (const AtlasLines& a : atlases()) {
+            notShown.push_back(a.name);
+            notShown.push_back(a.image);
+            std::ranges::copy(a.layers, std::back_inserter(notShown));
+            if (a.name == base) std::ranges::copy(a.expressions, std::back_inserter(atlased));
+            else if (a.name.starts_with(prefix))
+                for (const std::string& e : a.expressions) atlased.push_back(a.name.substr(prefix.size()) + "_" + e);
+        }
         for (const std::string& name : filesIn("images/", kImageTypes))
             if (const std::string l = lower(name); l.starts_with(prefix) && !l.ends_with("_face") && !std::ranges::contains(notShown, l))
                 add(out, name.substr(prefix.size()));

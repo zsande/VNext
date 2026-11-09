@@ -114,6 +114,12 @@ public:
         std::size_t file = 0, line = 0;
         std::string name;
     };
+    // An atlas as its lines have it: its name, the image it's cut from (its image=, else its name), its expressions (its
+    // own, else its same_names_as= atlas's) and the images its eyes and mouth are drawn from (all lower-case).
+    struct AtlasLines {
+        std::string name, image;
+        std::vector<std::string> expressions, layers;
+    };
 
     void load(const std::string& root); // the game folder, with a slash
     void clear() { *this = {}; }
@@ -123,6 +129,7 @@ public:
     // A scene a character's chat= or call= names ("chat", "call"; else ""): it plays when the player opens their chat or calls them.
     [[nodiscard]] std::string_view phoneSceneOf(const Scene& scene) const;
     [[nodiscard]] const std::vector<Character>& characters() const;
+    [[nodiscard]] const std::vector<AtlasLines>& atlases() const; // (in the order they're written)
     [[nodiscard]] std::vector<std::string> names(Pick pick, std::string_view context = {}) const;
     [[nodiscard]] const std::vector<std::string>& variables() const; // the ones the scripts change, or an input or a slider sets
     [[nodiscard]] const std::string& path(std::size_t file) const { return files_[file].path; } // "scripts/main.vnscript"
@@ -411,6 +418,7 @@ private:
     mutable std::pair<std::size_t, std::vector<std::string>> variables_{SIZE_MAX, {}}; // (at a version)
     // What's read from the lines often, kept from a version of them until they change.
     mutable std::pair<std::size_t, std::vector<Character>> characters_{SIZE_MAX, {}};
+    mutable std::pair<std::size_t, std::vector<AtlasLines>> atlases_{SIZE_MAX, {}};
     mutable std::pair<std::size_t, std::vector<Link>> links_{SIZE_MAX, {}};
     mutable std::pair<std::size_t, std::map<std::string, std::size_t, std::less<>>> settingLines_{SIZE_MAX, {}}; // each setting's line
     mutable std::map<std::string, std::pair<std::size_t, std::vector<Definition>>, std::less<>> definitions_;    // by kind
