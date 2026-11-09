@@ -29,11 +29,11 @@ Your characters text the player. Their messages type out as they write them, and
 - **Words** that can be bold, italic, underlined, crossed out or coloured, speed up or slow down, pause, appear a letter, a word or a line at a time, carry furigana, show a variable, or unlock a tip that explains them, in a textbox or as whole pages of text, novel style.
 - **Choices** with a time limit, options locked until something is true or marked once picked, and menus that come back after an option. Variables and conditions keep track of everything, and some of them last between plays.
 - **Time**: the story's own clock and calendar, the player's real one, or days split into morning, afternoon, evening and night. Backgrounds and the phone follow it, and a calendar shows each new day.
-- **The stage**: backgrounds (images, colours or gradients), characters that come, go and move with animations, effects (greyscale, sepia, invert, blur, pixelate, noise, glitch), weather (rain, snow, petals, leaves, embers), a camera that zooms, pans and shakes, and movies.
-- **Sound**: music that fades in, out and from one song to the next and quietens while someone speaks, sounds and loops, and a voice file for every line, with the words keeping time with the voice.
-- **Screens**: a title screen, pause menu, saving and loading, settings, a history, a choice menu, questions, the phone, credits, a calendar and a box to type a name into, all ready-made and yours to restyle. Or build your own from parts (buttons, sliders, bars, text boxes, lists, scrolling boxes with scrollbars and fading edges), with styles, drag and drop, and animations made on a timeline.
-- **Extras**: a gallery, a music room, endings, achievements, tips, and a flowchart that takes players back to any choice.
-- **For players**: saves with pictures, autosave, quick save and quick load, rewind, skip and auto-play (Menu, Skip, Auto, Q.Save, Q.Load and Phone buttons on the textbox, and keys), a history that replays voices and goes back, and settings for text speed, text size, volumes, high contrast, text read aloud, language and every key and button. Every menu works with a mouse, a keyboard or a controller, with an on-screen keyboard for typing a name.
+- **The stage**: backgrounds (images, colours or gradients), characters that come, go and move with animations, effects (greyscale, sepia, invert, blur, pixelate, noise, glitch, and vibration players feel in their controller), weather (rain, snow, petals, leaves, embers), a camera that zooms, pans and shakes, and movies with subtitles.
+- **Sound**: music that fades in, out and from one song to the next and quietens while someone speaks, sounds and loops with captions that say what they are, and a voice file for every line, with the words keeping time with the voice.
+- **Screens**: a title screen, pause menu, saving and loading, settings, a history, a choice menu, questions, the phone, credits, a calendar, a box to type a name into and an on-screen keyboard, all ready-made and yours to restyle. Or build your own from ten kinds of part (text, images, buttons, sliders, boxes to type in, and boxes that hold others: lists of anything, scrolling with scrollbars and fading edges), with styles, drag and drop, and animations made on a timeline.
+- **Extras**: a gallery, a music room, endings, achievements, tips, and a flowchart that takes players back to any choice, each a ready-made screen.
+- **For players**: saves with pictures, autosave, quick save and quick load, rewind, skip and auto-play (Menu, Skip, Auto, Q.Save, Q.Load and Phone buttons on the textbox, and keys), a history that replays voices and goes back, and settings for text speed, text size, volumes, high contrast, reading aloud (through VoiceOver, Narrator, NVDA, JAWS or Orca when one is running), captions, time limits, animations, vibration, language and every key and button. Every menu works with a mouse, a keyboard or a controller, with an on-screen keyboard for typing a name. [Accessibility](.github/ACCESSIBILITY.md) says what VNext does for players and its limits.
 - **Every language**: translations, with a spreadsheet for translators, right-to-left scripts, Japanese and Chinese line breaking, and the developer tools themselves can be translated too.
 
 <p align="center">
@@ -43,21 +43,21 @@ Your characters text the player. Their messages type out as they write them, and
 
 ## The editor
 
-Open VNext in developer mode and you get an editor that fits any window size, in three tabs:
+Open VNext in developer mode and you get an editor that fits any window size, in three pages:
 
 - **Story**: scenes and their lines as forms, every kind of line a button away, and the map, where every scene is a box: drag one's dot to another and the story jumps there.
 - **Screens**: the title screen, menus and textbox, designed by dragging their parts around on a picture of the game.
 - **Library**: images, sounds, voices, movies and fonts (drop files on the window to add them), the colours, styles, animations, variables, endings, achievements, tips and controls a game uses (with the variables' values shown as you play), the game's settings, and its translations, with a spreadsheet for translators.
 
-Every part of a tab is a window of its own to move and resize, and the editor's buttons run along its foot: Play, or Play from line to see the game from any line, Undo and Redo, Pack and the rest, with the same keys you know. Mistakes are marked in red and said in plain words, and every change can be undone.
+Every part of a page can be moved and resized, and the editor's buttons run along its foot: Play, or Play from line to see the game from any line, Undo and Redo, Pack and the rest, with the same keys you know. All of it works with a mouse, the keys or a controller. Mistakes are marked in red and said in plain words, and every change can be undone.
 
-<p align="center"><img src=".github/design-a-screen.gif" width="100%" alt="The Screens tab: the title screen's New game button is dragged to a new place on the preview and renamed Start the story in its form, and Play shows the title screen with it there"></p>
+<p align="center"><img src=".github/design-a-screen.gif" width="100%" alt="The Screens page: the title screen's New game button is dragged to a new place on the preview and renamed Start the story in its form, and Play shows the title screen with it there"></p>
 
 <p align="center">
-  <img src=".github/editor-story.png" width="48%" alt="The Story tab: a scene's lines, and the form of the chosen one: Haru saying “Yo. You made it.”">
-  <img src=".github/editor-chat.png" width="48%" alt="The Story tab on a chat: its phone lines, and the form of Haru's reaction">
-  <img src=".github/editor-screens.png" width="48%" alt="The Screens tab: the phone's parts, the phone with an app button chosen, and the button's settings">
-  <img src=".github/editor-map.png" width="48%" alt="The Story tab with its map made big: eight scenes as boxes, with arrows from start to two endings">
+  <img src=".github/editor-story.png" width="48%" alt="The Story page: a scene's lines, and the form of the chosen one: Haru saying “Yo. You made it.”">
+  <img src=".github/editor-chat.png" width="48%" alt="The Story page on a chat: its phone lines, and the form of Haru's reaction">
+  <img src=".github/editor-screens.png" width="48%" alt="The Screens page: the phone's parts, the phone with an app button chosen, and the button's settings">
+  <img src=".github/editor-map.png" width="48%" alt="The Story page with its map made big: eight scenes as boxes, with arrows from start to two endings">
 </p>
 
 ## How it's made
