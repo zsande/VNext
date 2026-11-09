@@ -1,6 +1,6 @@
-// What macOS offers the player through its own frameworks: spelling, reading text aloud and movies
-// other than MPEG-1 (System.hpp says what each does; other systems have stand-ins in System.cpp).
-#include "System.hpp"
+// What macOS offers the player through its own frameworks: spelling, reading text aloud, VoiceOver and movies
+// other than MPEG-1 (Platform.hpp says what each does; other systems have stand-ins in Platform.cpp).
+#include "Platform.hpp"
 
 #import <AppKit/AppKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -60,6 +60,19 @@ void speak(std::string_view words) {
     @autoreleasepool {
         [synthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
         if (!words.empty()) [synthesizer speakUtterance:[AVSpeechUtterance speechUtteranceWithString:text(words)]];
+    }
+}
+
+bool screenReaderOn() {
+    return [NSWorkspace sharedWorkspace].voiceOverEnabled;
+}
+
+void announce(std::string_view words) {
+    if (words.empty()) return; // (VoiceOver: the next one stops it)
+    @autoreleasepool {
+        id from = NSApp.keyWindow ? static_cast<id>(NSApp.keyWindow) : static_cast<id>(NSApp);
+        NSAccessibilityPostNotificationWithUserInfo(from, NSAccessibilityAnnouncementRequestedNotification,
+                                                    @{NSAccessibilityAnnouncementKey: text(words), NSAccessibilityPriorityKey: @(NSAccessibilityPriorityHigh)});
     }
 }
 

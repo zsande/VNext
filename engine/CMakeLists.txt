@@ -21,7 +21,7 @@ endif()
 # C++26 for VNext's own code (the libraries keep their own: see the player below). Visual C++ has no switch
 # by that name yet: CMake gives it /std:c++latest for 23 (all of C++23 and what it has of C++26); and Apple's
 # compilers before clang 21 stop at Apple's own headers in C++26 (they mix enum types), so they get 23 too.
-# What's C++26-only is used where a compiler has it (VN_DELETED in System.hpp).
+# What's C++26-only is used where a compiler has it (VN_DELETED in Basics.hpp).
 if(MSVC OR (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 21))
     set(vn_cxx 23)
 else()
@@ -153,28 +153,87 @@ file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/pl_mpeg.c CONTENT [=[
 ]=])
 
 add_executable(vnext
-    src/Engine.cpp                # the player: window, menus, saving, settings, reload (and main)
-    src/Developer.cpp             # developer mode: the developer tools (opening them, their own buttons, the tab shown)
-    src/DeveloperStory.cpp        # ...the Story tab, and About
-    src/DeveloperPreview.cpp      # ...the games they play on their own (Play from this line, the Screens tab's sample)
-    src/DeveloperScreens.cpp      # ...the Screens tab
-    src/DeveloperMap.cpp          # ...the Story tab's map
-    src/DeveloperLibrary.cpp      # ...the Library tab
-    src/DeveloperTranslations.cpp # ...the Library's translations
-    src/DeveloperForms.cpp        # ...the forms, and the Library's Settings
-    src/DeveloperPanels.cpp       # ...the tabs' parts as sub-windows (Layout)
-    src/DeveloperUi.cpp           # ...their widgets
-    src/DeveloperShared.cpp       # ...the helpers the tabs share
-    src/StoryEditor.cpp           # ...the editor: the scripts as forms
-    src/Script.cpp                # the .vnscript language: lines and words, the parser, the built-in screens
-    src/Expr.cpp                  # ...its expressions and values
-    src/Presentation.cpp          # ...keys, colours and what the player shows
-    src/Translation.cpp           # ...translations
-    src/Game.cpp                  # the story as it plays: the game, the stage, the flowchart
-    src/Screens.cpp               # fonts, text, shapes and the script's screens
-    src/Assets.cpp                # images, sound, made-up voices and movies
-    src/System.cpp                # helpers, the game's files (folder or pack), saves, the player's settings
-    src/Licences.cpp              # the licences of what's built in (licences.txt), for About and next to packs
+    # The player
+    src/Main.cpp                # where SDL starts the player, and its events and frames go to it
+    src/Engine.cpp              # the player: starting, the game found and read, the title screen, the story's end, packing
+    src/Frame.cpp               # ...each frame: the game going on and drawn, the window's view, the mistakes screen
+    src/Input.cpp               # ...events: mouse, keys, controllers, touch; who's in charge; the keys on the screens
+    src/Actions.cpp             # ...what buttons and keys do, and the questions they ask
+    src/OpenScreens.cpp         # ...the screens open over the game
+    src/PlayerSettings.cpp      # ...the player's settings
+    src/Controls.cpp            # ...controls: keys and buttons, and changing them
+    src/Saves.cpp               # ...saves: the game saved and loaded, rollback, the save slots
+    src/Progress.cpp            # ...the player's progress, kept across plays
+    src/Extras.cpp              # ...the extras: what's unlocked, the music room
+    src/ReadAloud.cpp           # ...Read aloud
+    src/BuiltInValues.cpp       # ...the values texts and conditions can use
+    src/Translations.cpp        # ...a game's translations, and the language picked
+    # The story as it plays
+    src/Story.cpp               # the story going on: its lines run, its values, what it waits for
+    src/StoryLines.cpp          # ...what's said: textboxes, words appearing, voices and mouths
+    src/Choices.cpp             # ...choices
+    src/SoundsAndMovies.cpp     # ...its music, sounds, voices and movies, captions and subtitles
+    src/GameTime.cpp            # ...the game's time
+    src/Stage.cpp               # ...the stage: characters, images, backgrounds, the camera, weather, effects
+    src/Phone.cpp               # ...the phone: chats, calls, the people in it, its screen
+    src/Flowchart.cpp           # ...the flowchart
+    # The game's screens
+    src/Screens.cpp             # a screen as it's open: its parts' state
+    src/ScreenLayout.cpp        # ...laid out
+    src/ScreenDrawing.cpp       # ...drawn
+    src/ScreenLists.cpp         # ...its lists (list=)
+    src/ScreenInput.cpp         # ...the mouse, keys and controller on it
+    src/Typing.cpp              # ...typing into a box, and the on-screen keyboard
+    src/Text.cpp                # fonts and text
+    src/Shapes.cpp              # shapes and wipes
+    # Images, sound and movies
+    src/Assets.cpp              # the game's images (and where its sounds and movies are)
+    src/Sound.cpp               # sound: music, sounds, voices
+    src/MadeUpVoice.cpp         # made-up voices
+    src/Movie.cpp               # movies
+    # The .vnscript language
+    src/Script.cpp              # the scripts as read, looked up by name
+    src/ScriptWords.cpp         # ...how their lines are written: notes, quotes, words
+    src/ScriptParser.cpp        # ...reading them: files, lines, mistakes, names
+    src/ScriptStory.cpp         # ...the story's lines
+    src/ScriptLibrary.cpp       # ...what the Library lists, and the game's settings
+    src/ScriptScreens.cpp       # ...screens and their parts
+    src/BuiltInScreens.cpp      # ...the player's built-in screens and keys
+    src/Expressions.cpp         # ...expressions, values and random numbers
+    src/Animations.cpp          # ...animations: easing, and where one is at a moment
+    # The developer tools
+    src/Developer.cpp           # developer mode: the developer tools opened and closed, each frame of them
+    src/DeveloperButtons.cpp    # ...their own part: the buttons at the window's foot
+    src/DeveloperInput.cpp      # ...their input: keys, a controller, moving between stops
+    src/DeveloperKeyboard.cpp   # ...their on-screen keyboard
+    src/DeveloperWindows.cpp    # ...their messages and questions, and choosing files
+    src/DeveloperLanguage.cpp   # ...their own words, and translating them
+    src/DeveloperUi.cpp         # ...their widgets
+    src/PageParts.cpp           # ...the pages' page parts (Layout)
+    src/Forms.cpp               # ...the forms
+    src/Popups.cpp              # ...a box's list or colour wheel, and tips
+    src/StoryPage.cpp           # ...the Story page
+    src/StoryMap.cpp            # ...its map
+    src/PlayFromLine.cpp        # ...Play from this line, Stop here, the lines reached
+    src/ScreensPage.cpp         # ...the Screens page
+    src/ReadyMadeScreens.cpp    # ...the ready-made screens it starts from
+    src/LibraryPage.cpp         # ...the Library page
+    src/LibraryAnimations.cpp   # ...its animations
+    src/LibraryImages.cpp       # ...its atlases and sub-images
+    src/LibraryTranslations.cpp # ...its translations, and the languages
+    src/About.cpp               # ...About
+    src/StoryEditor.cpp         # the editor: the scripts as the pages show them, read
+    src/StoryEditorForms.cpp    # ...its forms: each kind of box, each line's fields and back
+    src/StoryEditorChanges.cpp  # ...its changes: undo, scenes, lines and characters
+    src/StoryEditorScreens.cpp  # ...the Screens page's screens and parts in the scripts
+    src/StoryEditorLibrary.cpp  # ...what the Library lists, and the game's settings
+    src/ScriptEdits.cpp         # ...the scripts' text as it changes: lines, names renamed everywhere
+    # Basics
+    src/Basics.cpp              # helpers for words, numbers and names
+    src/Colours.cpp             # colours read and said
+    src/Files.cpp               # the game's files (its folder or its pack), packing, the Trash
+    src/Platform.cpp            # what the player does without the system's help (Apple.mm, Windows.cpp, Linux.cpp: with it)
+    src/Licences.cpp            # the licences of what's built in (licences.txt), for About and next to packs
     ${CMAKE_CURRENT_BINARY_DIR}/pl_mpeg.c
 )
 set_target_properties(vnext PROPERTIES OUTPUT_NAME "VNext"
@@ -186,14 +245,14 @@ target_include_directories(vnext PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/generat
 target_include_directories(vnext SYSTEM PRIVATE ${pl_mpeg_SOURCE_DIR})
 target_link_libraries(vnext PRIVATE SDL3_mixer::SDL3_mixer SDL3_ttf::SDL3_ttf SDL3_image::SDL3_image SDL3::SDL3 vn_sheenbidi)
 if(APPLE)
-    # What macOS offers: spelling (the editor), reading text aloud and MP4 movies (for players), in Objective-C++.
+    # What macOS offers: spelling (the editor), reading text aloud, VoiceOver and MP4 movies (for players), in Objective-C++.
     target_sources(vnext PRIVATE src/Apple.mm)
     set_source_files_properties(src/Apple.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(vnext PRIVATE "-framework CoreFoundation" "-framework Foundation" # finding the real place of a downloaded app; the Trash
                                         "-framework AppKit" "-framework AVFoundation" "-framework CoreMedia" "-framework CoreVideo")
 elseif(WIN32)
     target_link_libraries(vnext PRIVATE shell32) # the Recycle Bin
-    # Spelling (its spell checker), reading aloud (SAPI) and MP4/MOV/M4V movies (Media Foundation): src/Windows.cpp
+    # Spelling (its spell checker), reading aloud (SAPI), screen readers (UI Automation) and MP4/MOV/M4V movies (Media Foundation): src/Windows.cpp
     target_sources(vnext PRIVATE src/Windows.cpp)
     target_link_libraries(vnext PRIVATE ole32 mfplat mfreadwrite mfuuid)
 endif()
@@ -205,7 +264,7 @@ else()
     target_compile_options(vnext PRIVATE "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-Wno-missing-field-initializers>")
 endif()
 
-# Linux: spelling (Hunspell), reading aloud (speech-dispatcher) and MP4/MOV/M4V movies (GStreamer), where the
+# Linux: spelling (Hunspell), reading aloud (speech-dispatcher, Orca's voice too) and MP4/MOV/M4V movies (GStreamer), where the
 # player's system has them (looked for when needed: nothing more to install to build it): src/Linux.cpp.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(vnext PRIVATE src/Linux.cpp)
@@ -347,11 +406,3 @@ endif()
 # "cmake --install build --prefix DIR" puts the player in DIR: with --prefix .. (from
 # this folder) next to the game folder, where it plays the game being made.
 install(TARGETS vnext BUNDLE DESTINATION . COMPONENT player RUNTIME DESTINATION . COMPONENT player)
-
-# The web: the page plays the game folder next to this engine/ folder, if there is one.
-if(EMSCRIPTEN)
-    set_target_properties(vnext PROPERTIES SUFFIX ".html")
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../game)
-        target_link_options(vnext PRIVATE "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/../game@/game")
-    endif()
-endif()

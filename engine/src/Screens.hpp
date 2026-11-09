@@ -1,257 +1,32 @@
 #pragma once
 
-// What the player draws: fonts and text, shapes, and the script's screens.
+// The script's screens as they're shown (ScreenView): laid out, drawn, and what the mouse, keys and a controller do
+// on them.
 
-#include "Assets.hpp"
 #include "Script.hpp"
-#include "System.hpp"
+#include "Text.hpp"
+#include "Shapes.hpp"
+#include "Assets.hpp"
+#include "Saves.hpp"
+#include "Movie.hpp"
 
-#include <SDL3_ttf/SDL_ttf.h>
+#include <climits>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
-#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Text and shapes
-// ---------------------------------------------------------------------------
-// Fonts, text layout and the basic shapes everything is drawn with.
 namespace vn {
 
-namespace draw {
-void rect(SDL_Renderer* r, const SDL_FRect& rect, SDL_Color c);
-void outline(SDL_Renderer* r, const SDL_FRect& rect, SDL_Color c);
-void gradient(SDL_Renderer* r, const SDL_FRect& rc, SDL_Color top, SDL_Color bottom);
-void circle(SDL_Renderer* r, float cx, float cy, float radius, SDL_Color c);
-void quad(SDL_Renderer* r, SDL_FPoint a, SDL_FPoint b, SDL_FPoint c, SDL_FPoint d, SDL_Color colour);
-// A box with round corners `radius` across, smoothed over a pixel (on whole pixels, sharp along its straight
-// edges), or over `soft` pixels all round (a shadow's).
-void roundRect(SDL_Renderer* r, const SDL_FRect& given, float radius, SDL_Color c, float soft = 1.0f);
-SDL_Color hsv(float h, float s, float v, Uint8 alpha = 255);
-} // namespace draw
-
-// Something drawn with only part of it showing, as an animation's wipe has it (Animation::Look::wipe):
-// `shown` of it, straight from the left of `box`, or where the image `shape` is darkest first (its
-// pixels stretched over `box`, softly at the edge). paint() draws it as it is; `canvas`: the game's
-// size, what the drawing's places are in. Where the graphics can't shape it, a straight one.
-class Wiper {
-public:
-    Wiper() = default;
-    Wiper(const Wiper&) VN_DELETED("its textures are its own");
-    Wiper& operator=(const Wiper&) VN_DELETED("its textures are its own");
-    Wiper(Wiper&&) = default;
-    Wiper& operator=(Wiper&&) = default;
-    ~Wiper() = default;
-    void draw(SDL_Renderer* r, Assets& assets, SDL_FPoint canvas, const SDL_FRect& box, float shown, const std::string& shape,
-              const std::function<void()>& paint);
-
-private:
-    // A shape's image as read (at most 480 across): how bright each pixel is, the mask made of them, and
-    // how much that shows now. (No texture: the image can't be read, or the graphics can't cut with it.)
-    struct Mask {
-        std::vector<Uint8> brightness;
-        int w = 0, h = 0;
-        TexturePtr texture;
-        float shown = -1.0f;
-    };
-    Mask* maskOf(SDL_Renderer* r, Assets& assets, const std::string& shape); // (each read once: several can wipe at a time; none: a straight wipe)
-    std::map<std::string, Mask, std::less<>> masks_;
-    TexturePtr layer_; // (what's wiped in a shape is drawn here first)
-    int layerW_ = 0, layerH_ = 0;
-};
-
-// Colours for the engine's own drawing (error screen, placeholders). Game screens use script styles.
-namespace theme {
-inline constexpr SDL_Color text{240, 240, 245, 255};
-inline constexpr SDL_Color dim{150, 150, 165, 255};
-} // namespace theme
-
-using FontPtr = std::unique_ptr<TTF_Font, SdlDeleter<TTF_CloseFont>>; // (a font file open)
-
-// A TTF font that renders at the window's real pixel density, so text stays sharp when the
-// game's canvas is scaled up. Falls back to SDL's built-in debug font if no TTF is found.
-class Font {
-public:
-    Font() = default;
-    ~Font();
-    Font(const Font&) = delete;
-    Font& operator=(const Font&) = delete;
-    Font(Font&&) = delete;
-    Font& operator=(Font&&) = delete;
-
-    // Tries each candidate path in order. Returns false if it fell back to the debug font. `style`
-    // picks a named style of a font file that has several (variable fonts); empty means Regular.
-    // `fallbacks` are fonts for the letters this one doesn't have (Japanese, emoji...).
-    bool load(std::span<const std::string> candidates, float pointSize, std::string_view style = {},
-              std::span<const std::string> fallbacks = {}, const GameFiles& files = GameFiles::disk());
-    void setPixelScale(float scale);
-
-    [[nodiscard]] bool isFallback() const { return font_ == nullptr; }
-    [[nodiscard]] float lineHeight() const;
-    [[nodiscard]] float measure(std::string_view text) const;
-    [[nodiscard]] std::uint32_t generation() const { return generation_; }
-    [[nodiscard]] float pixelScale() const { return scale_; }
-    // This font bold, italic, underlined or struck through (TTF_STYLE_* bits; a font file's own
-    // Bold / Italic styles when it has them), and/or `size` times as big. Made when first needed.
-    [[nodiscard]] const Font& variant(TTF_FontStyleFlags style, float size = 1.0f) const;
-
-    // White glyphs, physical pixel size; tint with SDL_SetTextureColorMod.
-    [[nodiscard]] TexturePtr render(SDL_Renderer* renderer, std::string_view text) const;
-    void drawFallback(SDL_Renderer* renderer, float x, float y, std::string_view text, SDL_Color colour) const;
-
-private:
-    [[nodiscard]] float fallbackScale() const;
-
-    FontPtr font_;
-    const GameFiles* files_ = &GameFiles::disk(); // (what its files are read from: its variants' too)
-    float pointSize_ = 24.0f;
-    float scale_ = 1.0f;
-    std::uint32_t generation_ = 0;
-    std::string path_, style_;
-    std::vector<std::string> fallbackPaths_;
-    const Font* upright_ = nullptr; // a slanted (made-italic) font: the same upright, for measuring
-    std::vector<FontPtr> fallbacks_; // (taken off font_ before they're closed: see closeFont, which the destructor runs)
-    void closeFont();
-    mutable std::map<std::pair<TTF_FontStyleFlags, int>, std::unique_ptr<Font>> variants_;
-};
-
-// A styled range of a TextBlock's text, in codepoints: colour, bold / italic / underline /
-// crossed out (TTF_STYLE_* bits) and furigana (a reading shown small above it).
-struct TextSpan {
-    std::size_t begin = 0, end = 0;
-    std::optional<SDL_Color> colour;
-    TTF_FontStyleFlags style = 0;
-    std::string ruby;
-};
-
-// A text and the spans that style it (made from text tags by richText(), in Game.hpp).
-struct RichText {
-    std::string text;
-    std::vector<TextSpan> spans;
-};
-
-// Word-wrapped, cached text with a typewriter reveal and styled spans. Lines break at spaces, and
-// anywhere in Japanese and Chinese (not before closing punctuation, nor inside furigana).
-class TextBlock {
-public:
-    static constexpr std::size_t kAll = std::numeric_limits<std::size_t>::max();
-
-    // `lineSpacing`: rows this many times the font's line height apart.
-    void set(const Font& font, std::string_view text, float wrapWidth = 0.0f, float lineSpacing = 1.0f);
-    void setSpans(std::vector<TextSpan> spans);
-    [[nodiscard]] const std::string& text() const { return text_; }
-    [[nodiscard]] SDL_FPoint size();
-    [[nodiscard]] std::size_t lines(); // how many it takes
-    [[nodiscard]] std::size_t length(); // codepoints in the text
-    // How much to show when `reveal` codepoints are typed out: in Word and Line mode the word or
-    // line being typed appears whole.
-    [[nodiscard]] std::size_t visible(std::size_t reveal, TextAppears mode);
-
-    // Where codepoints [begin, end) are, a box on each row they're on, as drawn by draw() at 0, 0
-    // (words that can be clicked).
-    [[nodiscard]] std::vector<SDL_FRect> boxes(std::size_t begin, std::size_t end);
-
-    // `reveal`: how many codepoints of the text (counting spaces and line breaks) are visible.
-    void draw(SDL_Renderer* renderer, float x, float y, SDL_Color colour, std::size_t reveal = kAll,
-              const TextShadow& shadow = {});
-    // Each line positioned inside `box` by `align` / `alignVertically` (0 = start, 0.5 = centre, 1 = end).
-    void drawIn(SDL_Renderer* renderer, const SDL_FRect& box, float align, float alignVertically, SDL_Color colour,
-                std::size_t reveal = kAll, const TextShadow& shadow = {});
-
-private:
-    struct Piece { // a run of one style, colour and direction on a line
-        std::size_t begin = 0, end = 0; // codepoints, from the line's start
-        TTF_FontStyleFlags style = 0;
-        std::optional<SDL_Color> colour;
-        int level = 0;                  // odd: right to left (Arabic, Hebrew...)
-        float x = 0.0f, width = 0.0f;   // x: where it is on the line (pieces are in reading order, not left to right)
-        std::vector<float> advance; // advance[i] = width of its first i+1 codepoints (made when needed)
-        TexturePtr texture;
-    };
-    struct Ruby {
-        std::string text;
-        std::size_t end = 0;  // shown once the line's first `end` codepoints are
-        float centre = 0.0f;  // over this x, from the line's start
-        TexturePtr texture;
-    };
-    struct Line {
-        std::size_t rawBegin = 0; // codepoint index of the line's first character in the text
-        std::size_t codepoints = 0;
-        bool rtl = false;         // its paragraph reads right to left (it starts at the right, "start" is right)
-        float width = 0.0f;
-        float y = 0.0f;           // from the block's top
-        std::vector<Piece> pieces;
-        std::vector<Ruby> rubies;
-    };
-
-    void layout();
-    void wrapParagraph(std::size_t from, std::size_t to);
-    // A line, its codepoints with their levels (Unicode's bidirectional algorithm: odd, right to left;
-    // see wrapParagraph), in pieces put in their order on screen.
-    void addLine(std::size_t from, std::size_t to, bool rtl, const std::vector<int>& level);
-    [[nodiscard]] bool canBreakBefore(std::size_t i, std::size_t from, std::size_t to) const;
-    [[nodiscard]] float measure(std::size_t from, std::size_t to) const; // codepoints of the text, in their styles
-    [[nodiscard]] std::string_view slice(std::size_t from, std::size_t to) const;
-    void drawLines(SDL_Renderer* renderer, float x0, float y, float align, float width, SDL_Color colour,
-                   std::size_t reveal, const TextShadow& shadow);
-    [[nodiscard]] float lineStep() const;
-
-    const Font* font_ = nullptr;
-    std::string text_;
-    float wrap_ = 0.0f;
-    float spacing_ = 1.0f;
-    std::vector<Line> lines_;
-    std::vector<TextSpan> spans_;
-    std::vector<std::size_t> offsets_; // byte offset of each codepoint (and the end)
-    std::vector<Uint32> codes_;        // the codepoints
-    std::vector<TTF_FontStyleFlags> styles_; // each codepoint's style bits
-    std::vector<std::optional<SDL_Color>> colours_;
-    std::uint32_t generation_ = std::numeric_limits<std::uint32_t>::max();
-    std::size_t length_ = 0;
-    SDL_FPoint size_{};
-};
-
-// Fonts by (name, size), as named in the script's `font` lines. Every font falls back to the
-// "default" font, then to a system font, then to SDL's debug font. The name "" is the system font
-// (the player's own text: the developer tools, the mistakes screen).
-class FontCache {
-public:
-    explicit FontCache(const GameFiles& source = GameFiles::disk()) : source_(source) {} // (what the fonts are read from)
-    struct File {
-        std::string path;
-        std::string style;
-    };
-    // `fallbacks`: fonts for letters the others don't have, in order.
-    void configure(std::map<std::string, File, std::less<>> files, std::vector<std::string> systemFonts,
-                   std::vector<std::string> fallbacks = {});
-    Font& get(const std::string& name, float size);
-    void setPixelScale(float scale);
-    void clear() { fonts_.clear(); }
-
-private:
-    std::map<std::pair<std::string, int>, std::unique_ptr<Font>> fonts_;
-    std::map<std::string, File, std::less<>> files_;
-    std::vector<std::string> system_, fallbacks_;
-    const GameFiles& source_;
-    float scale_ = 1.0f;
-};
-
-// ---------------------------------------------------------------------------
-// Screens
-// ---------------------------------------------------------------------------
-
 class Engine;
-
-// A place on the screen across, -1 to 1 like the stage's, as the left edge of something `size` wide on a
-// `screen` that wide: ±1 lines its edge up with the screen's, past that it goes off, and at ±2 it's just off
-// the screen. (Down: pass minus the place, as 1 is the top; it gives the top edge.)
-[[nodiscard]] float placeEdge(float place, float size, float screen);
 
 // A screen from the script, live: draws its elements and handles input for them.
 class ScreenView {
@@ -302,9 +77,13 @@ public:
     [[nodiscard]] SDL_FRect partRect(std::size_t part) const;
     [[nodiscard]] SDL_FRect partBox(std::size_t part) const;
     [[nodiscard]] std::size_t partIndex(const Element& el) const { return static_cast<std::size_t>(&el - source_->elements.data()); }
-    // The words of what the mouse (or the keys) is on: a button's label or an option (read aloud);
-    // empty when it's on nothing.
-    [[nodiscard]] std::string pointedText();
+    // Read aloud: the words of what the keys are on (with `mouse`, else what the pointer is on): a button's, a slider's
+    // or a box's with the texts beside it in the part it's in (its label at its left, or over it there; then the others
+    // on its row, a value), an option, or a list's item (its texts); empty when they're on nothing. And the words as the
+    // screen opens: its texts that aren't in a list or in a part that scrolls (a phone's: the ones in the app it shows),
+    // its title or its question.
+    [[nodiscard]] std::string pointedText(bool mouse);
+    [[nodiscard]] std::string openingText();
     // A button's click_animation= is over: what it does (and its question first, and its list item's values
     // when it's in one), to run. None when the button (or its screen) went away meanwhile.
     struct Pressed {
@@ -317,9 +96,26 @@ public:
     // the move actions point at parts, the nearest that way on any of those screens.
     [[nodiscard]] bool takesClicks() const { return !targets_.empty(); }
     [[nodiscard]] bool takesKeys();                          // it has a part the move actions can point at, or something to scroll
-    [[nodiscard]] std::optional<SDL_FRect> pointedRect() const; // where the part pointed at (by the keys or the pointer) is
+    // Where the keys go on from: the part pointed at (by the keys or the pointer), else the one pointed at or clicked last
+    // (the pointer moved onto nothing since).
+    [[nodiscard]] std::optional<SDL_FRect> pointedRect() const;
     [[nodiscard]] bool keysPoint() const;                     // the keys point at one of its parts (press presses it)
-    [[nodiscard]] bool typing() const { return keyboard_.has_value(); } // an input's keyboard is up (only its keys are pointed at)
+    [[nodiscard]] SDL_FPoint pointer() const { return mouse_; } // where the pointer is, as this screen saw it last
+    // The wheel turned (`up` turns up, `across` to the right) at a place on it: what scrolls there scrolls (false: nothing).
+    bool wheelAt(SDL_FPoint at, float up, float across);
+    // Opened by the keys (a question, the on-screen keyboard): once it's drawn, the ring on the answer that keeps things as
+    // they are (a button that does no), or on its first letter.
+    enum class Ring : std::uint8_t { None, Keep, FirstLetter };
+    void ringWhenDrawn(Ring at) { ringAt_ = at; }
+    [[nodiscard]] bool hasKey(const SDL_Event& e); // one of its parts shown has this key (keys=)
+    void keyboardShut() { keyboardShut_ = true; }  // the on-screen keyboard was put away: not by itself again until a box is pressed
+    // A box (an input part) typed into by the on-screen keyboard (Engine::keyboardKey): letters added, the last one taken
+    // away, Enter (what the box does: its action=), and what it holds.
+    void typeIntoBox(std::size_t index, std::string_view typed) { typeInto(index, typed); }
+    void eraseInBox(std::size_t index) { eraseLast(index); }
+    void enterBox(std::size_t index);
+    [[nodiscard]] std::string boxText(std::size_t index) const;
+    [[nodiscard]] std::optional<std::size_t> boxTypedInto() { return typedInto(); } // (the box typing goes to, if it has one)
     // How far the nearest part that way from the part at `from` is (the distance on, with what's off to the side
     // counting double; one in line with it first), for comparing screens; none when there's none.
     [[nodiscard]] std::optional<float> toward(const SDL_FRect& from, int dx, int dy) const;
@@ -368,13 +164,19 @@ private:
     bool hasLists_ = false;
     std::vector<std::size_t> sourceOf_, firstOf_;
     std::vector<std::shared_ptr<const Variables>> bound_;
+    using Looks = std::map<std::string, std::vector<TextSpan>, std::less<>>; // (an item's words' looks: {line.text}'s colours, bold...)
+    std::vector<std::shared_ptr<const Looks>> boundLooks_;
     std::vector<std::string> keyOf_;
     std::map<std::string, std::string, std::less<>> listContext_; // each list's last chat...: new items there play item_animation=
     void expand();
     struct ListItem {
         std::string key;
         Variables values;
+        Looks looks = {}; // (its words that have a look of their own: a history line's, a choice's)
     };
+    // A part's words as they look: its own text tags, or (a part showing just {line.text}, {option.text}) its item's
+    // words with their own look.
+    [[nodiscard]] RichText wordsOf(std::size_t index, std::string_view text);
     // A list's items now; `context`: what they're of (a chat's name...).
     [[nodiscard]] std::vector<ListItem> listItems(const Element& list, std::string& context);
     void seen(const Element& list);                       // what it shows has been seen (messages read, missed calls seen...)
@@ -399,14 +201,10 @@ private:
     [[nodiscard]] float shareOf(std::size_t index, bool across) const;
 
     enum class Look : std::uint8_t { Idle, Hover, Selected, Disabled };
-    // What can be clicked: a part, or one of its items (a choice, a tab, a save...), or a small
-    // button on an item: a save's delete button, a history line's "hear it again" and "go back", a key
-    // of an input's keyboard (its item: which key).
-    enum class Button : std::uint8_t { None, Delete, Voice, Back, Key };
+    // What can be clicked: a part, or one of its items (the flowchart's points: which one).
     struct Spot {
         std::size_t element = 0;
         int item = 0;
-        Button button = Button::None;
         int option = -1;
         bool operator==(const Spot&) const = default;
     };
@@ -427,8 +225,7 @@ private:
     };
     // (item_width=, spacing=... are shares of the box the part is in; without them, these pixels)
     [[nodiscard]] Grid grid(const Element& el, Grid defaults) const;
-    [[nodiscard]] Grid recordsGrid(const Element& el) const; // a list of records' (the gallery's cards three to a row, the rest a row each)
-    [[nodiscard]] float share(const Element& el, std::string_view key, bool across, float fallback) const; // (name_width=, wide_tab_width=...)
+    [[nodiscard]] float share(const Element& el, std::string_view key, bool across, float fallback) const; // (item_width=, spacing_across=...)
     void layout(); // where each part is now (its place and size in its box)
     struct ElementState {
         SDL_FRect rect{}; // where the part is on the screen, in the game's pixels (laid out every frame; w/h 0: automatic)
@@ -437,7 +234,7 @@ private:
         std::vector<TextBlock> items, extra, buttons;
         std::vector<std::string> cache;
         float scroll = 0.0f;
-        std::unique_ptr<Movie> movie; // a movie part: playing
+        std::unique_ptr<Movie> movie; // an image part's movie: playing
         std::string movieName;
         float movieTime = 0.0f;       // the engine's time when it last played
         std::uint64_t movieFrame = 0; // the frame it was last drawn in
@@ -474,23 +271,18 @@ private:
     [[nodiscard]] std::optional<SDL_FRect> cutBy(std::size_t index, const std::vector<Shift>* shifts = nullptr) const;
     bool startAside(SDL_Renderer* r, float& scale); // aside_ the window's size (scale: its pixels per one of the game's)
     TexturePtr aside_; // what a container with edges=fade holds, drawn here first
-    // Dragging scrolls a container with scroll=yes, a grid, a history, a phone and a flowchart (it glides on
-    // when let go moving, as glide=, glide_speed= and glide_distance= say; Element::dragDirection() says
-    // which way). scrollableAt(): the innermost one under a point. glideStep(): a glide's next moment;
+    // Dragging scrolls a container with scroll=yes and the flowchart (it glides on when let go moving, as
+    // glide=, glide_speed= and glide_distance= say; Element::dragDirection() says which way). scrollableAt(): the innermost one under a point. glideStep(): a glide's next moment;
     // settle(): a list's scroll glided on and kept from 0 to `most`, stopping at an end.
     [[nodiscard]] std::optional<std::size_t> scrollableAt(float x, float y);
     void glideStep(std::size_t index);
     void settle(std::size_t index, float most);
-    // A part's scrollbars (scrollbar=yes: a container, a list of records, a history, a flowchart) at its right
-    // edge and (`across`) along its bottom, and the thumb on each (a history's from its latest line, at the
-    // bottom); the bars, drawn after what's in it.
+    // A part's scrollbars (scrollbar=yes: a container, the flowchart) at its right edge and (`across`) along its
+    // bottom, and the thumb on each; the bars, drawn after what's in it.
     [[nodiscard]] SDL_FRect barOf(std::size_t index, bool across) const;
     [[nodiscard]] SDL_FRect thumbOf(std::size_t index, bool across) const;
     [[nodiscard]] float barRoom(std::size_t index) const; // (how much of its right edge its scrollbar takes: a list's items stay clear of it)
     void drawScrollbar(SDL_Renderer* r, std::size_t index, float alpha);
-    // Whether this screen shows one of `names` (in a part's words or image, or when it shows, takes clicks or
-    // looks chosen): what clicking a gallery's image or a tip picks ({gallery_image}, {tip_text}...).
-    [[nodiscard]] bool shows(std::span<const std::string_view> names) const;
     void reveal(const Target& t); // (in a container that scrolls: scrolled into view)
     // Dragging scrolls a container: its parts (once the mouse has moved a few pixels: then the button
     // under it isn't clicked), or its scrollbar's thumb. Which, where the mouse went down, and how far
@@ -522,40 +314,29 @@ private:
     // `flip` mirrors it (on top of the element's flip=); `box`: where (else the element's own box).
     void image(SDL_Renderer* r, const Image& pic, const Element& el, std::string_view fit, float ax, float ay, float alpha,
                  bool flip = false, const SDL_FRect* box = nullptr);
-    void drawNamebox(SDL_Renderer* r, std::size_t index, float alpha);
-    void drawChoices(SDL_Renderer* r, std::size_t index, float alpha);
-    void drawHistory(SDL_Renderer* r, std::size_t index, float alpha);
-    void drawRecords(SDL_Renderer* r, std::size_t index, float alpha); // the gallery, endings, songs, achievements, tips
     void drawFlowchart(SDL_Renderer* r, std::size_t index, float alpha);
     [[nodiscard]] bool shows(std::size_t index); // its when= lets it, and on the phone its app (app=) is the one open
     [[nodiscard]] int newOn(const Element& app); // what's new in an app (a container with app=, the script's): in the lists in it, and its count=
     [[nodiscard]] const CharacterDef* characterNamed(std::string_view name) const; // the character the phone calls that
-    void drawPage(SDL_Renderer* r, std::size_t index, float alpha);
-    void drawPages(SDL_Renderer* r, std::size_t index, float alpha);
-    void drawSlots(SDL_Renderer* r, std::size_t index, float alpha);
     void drawInput(SDL_Renderer* r, std::size_t index, float alpha);
-    void drawBar(SDL_Renderer* r, std::size_t index, float alpha);
-    void drawSlider(SDL_Renderer* r, std::size_t index, float alpha);
-    void drawMovie(SDL_Renderer* r, std::size_t index, float alpha);
+    void drawSlider(SDL_Renderer* r, std::size_t index, float alpha); // (value=: the value, filling it)
+    // An image part's movie (one named so: it plays, as the image), drawn as its fit= has it; false: it isn't one.
+    bool drawMovie(SDL_Renderer* r, std::size_t index, const std::string& name, float alpha);
     [[nodiscard]] float number(const Element& el, std::string_view key, float fallback);
     bool handleInput(const SDL_Event& e);
-    // The input box that takes typing: the one clicked last (typing_), else the first shown.
+    // The input box that takes typing: the one the keys are on, else the one pressed last (typing_), else the first shown.
     [[nodiscard]] std::optional<std::size_t> typedInto();
     void typeInto(std::size_t index, std::string_view typed); // letters added to what it holds (up to its most_letters=)
     void eraseLast(std::size_t index);                        // ...its last letter taken away
-    // An input's keyboard, for typing with a controller (or by clicking its keys): its rows of letters, and
-    // Shift, Space, Delete and Done, on a panel under the box (over it, without the room there), in the box's
-    // style. It comes up when the box is pressed with the keys, and by itself while a controller is in use
-    // (until it's put away: Done, or typing on a real keyboard). typeKey(): one of its keys pressed.
-    void openKeyboard(std::size_t index);
-    void drawKeyboard(SDL_Renderer* r, std::size_t index, const Shift& by, float alpha);
-    void typeKey(std::size_t index, int key);
-    std::optional<std::size_t> keyboard_; // the input whose keyboard is up
-    bool keyboardShut_ = false;           // ...put away: it doesn't come up by itself again until the screen opens again
-    bool capital_ = false;                // the next letter a capital (Shift; at the start of an empty box)
+    bool keyboardShut_ = false; // the on-screen keyboard put away: it doesn't come up by itself again until a box is pressed, or the screen opens again
+    // What a button types (an on-screen keyboard's key: its one action, type LETTER), a capital while Shift is on; else
+    // nothing. Without words of its own, it shows that.
+    [[nodiscard]] std::string keyLetter(const Element& el) const;
     void adjustSlider(std::size_t element, int delta);
     [[nodiscard]] SDL_FRect sliderBox(std::size_t element) const;
-    void box(SDL_Renderer* r, const SDL_FRect& rect, const Style& s, Look look, float alpha);
+    // A part's box in a look (`chosen`: a chosen one pointed at; `holds`: one other parts are drawn on, a container's or a
+    // colour's, whose chosen look in high contrast is its edge, not a fill).
+    void box(SDL_Renderer* r, const SDL_FRect& rect, const Style& s, Look look, float alpha, bool chosen = false, bool holds = false);
     void text(SDL_Renderer* r, TextBlock& block, std::string_view str, const SDL_FRect& rect, const Style& s,
               SDL_Color colour, float alpha, std::size_t reveal = TextBlock::kAll, std::vector<TextSpan> spans = {});
     [[nodiscard]] static const Style::State* stateOf(const Style& s, Look look); // its look then (nullptr: its own)
@@ -570,7 +351,9 @@ private:
     [[nodiscard]] ButtonLook buttonLook(std::size_t index, const SDL_FRect& hit);
     void sizeButton(std::size_t index); // one without a width (or a height): as big as its image now, or its words
     void sizeOwn(std::size_t index);    // any part without a width (or a height): as big as what it shows, and placed by that
-    [[nodiscard]] SDL_Color textColour(const Style& s, Look look) const;
+    [[nodiscard]] SDL_Color textColour(const Style& s, Look look, bool chosen = false) const; // (on its box: `chosen` as box()'s)
+    [[nodiscard]] static bool hasBox(const Style& s, Look look); // a background, an edge or an image in that look (high contrast draws it)
+    [[nodiscard]] static bool filledLook(Look look, bool chosen); // high contrast: chosen (pointed at or not), filled yellow
     [[nodiscard]] float boxAlpha(const Style& s, float alpha);
     Font& styleFont(const Style& s); // its font, at the player's text size when it has text_size_follows=yes
     [[nodiscard]] std::string interpolate(std::string_view text);
@@ -583,17 +366,16 @@ private:
     [[nodiscard]] bool live(std::size_t index); // shown now: its when= lets it, and the part it's in was drawn last time
     [[nodiscard]] bool enabled(const Element& el);
     [[nodiscard]] bool selected(const Element& el);
-    [[nodiscard]] bool focused(std::size_t element, int item = 0, Button button = Button::None, int option = -1) const {
-        return focus_ == Spot{element, item, button, option};
-    }
+    [[nodiscard]] bool focused(std::size_t element, int item = 0, int option = -1) const { return focus_ == Spot{element, item, option}; }
     [[nodiscard]] const Target* targetAt(float x, float y) const;
     [[nodiscard]] const Target* focusedTarget() const;
+    [[nodiscard]] const Target* placeTarget() const; // the part pointed at, else the one the keys go on from (place_)
 
     void setFocus(const Target& t);
     void activate(const Target& t, std::optional<float> mouseX);
     void clicked(const Element& el); // its click_sound
-    // The move actions: what they can point at (with an input's keyboard up, only its keys), and the nearest
-    // of those that way from the part at `from` (`score`: how far; see toward()).
+    // The move actions: what they can point at, and the nearest of those that way from the part at `from`
+    // (`score`: how far; see toward()).
     [[nodiscard]] bool keyReachable(const Target& t) const;
     [[nodiscard]] const Target* nearest(const SDL_FRect& from, int dx, int dy, float* score = nullptr) const;
     void pointByKeys(const Target& t); // pointed at by the keys, and scrolled into view
@@ -602,7 +384,6 @@ private:
     [[nodiscard]] std::optional<std::size_t> scroller();
     void slide(std::size_t element, float x);
     void run(const Element& el);
-    bool scrollWidgets(const SDL_Event& e);
 
     const ScreenDef* def_;
     Engine& engine_;
@@ -620,7 +401,10 @@ private:
     std::uint64_t drawnFrame_ = 0; // the frame it was last drawn in
     std::vector<Target> targets_; // from the last draw, topmost last
     std::optional<Spot> focus_;
+    std::optional<Spot> place_;           // the part pointed at or clicked last: the keys go on from it while nothing's pointed at
     bool keyFocus_ = false;               // ...pointed at by the keys (a controller's d-pad...), not the pointer
+    Ring ringAt_ = Ring::None;            // (ringWhenDrawn)
+    float pageTurns_ = 0.0f;              // the wheel's turns over the saves' pages, not yet a whole one
     std::optional<std::size_t> typing_;   // the input box clicked last
     std::optional<std::size_t> dragging_; // a slider being dragged
     // A button with drag= the player holds: it follows the pointer once moved (from where on it they
@@ -636,5 +420,18 @@ private:
     void drop(const Element& target);
     SDL_FPoint mouse_{-1.0f, -1.0f};
 };
+
+// What the screens' files (Screens, ScreenLists, ScreenInput) share: a mouse, key, controller or touch event; a save's
+// time as its list shows it; a box's middle; whether a part holds parts; a colour as a value ("#e07090").
+[[nodiscard]] bool isInput(const SDL_Event& e);
+[[nodiscard]] std::string formatTime(SDL_Time time);
+[[nodiscard]] SDL_FPoint centre(const SDL_FRect& r);
+[[nodiscard]] bool isBox(ElementKind kind);
+[[nodiscard]] std::string hexOf(SDL_Color c);
+// Where the keys' arrows go, on the game's screens and in the developer tools alike: of `boxes`, the nearest the way dx,
+// dy goes from `from` (one in line with it first: in its row moving across, in its column moving up or down; else one past
+// it that way, not one beside it in the next row), and how far (`score`: the distance on, what's off to the side counting
+// half in line, double past it); none when there's none that way.
+[[nodiscard]] std::optional<std::size_t> nearestThatWay(const SDL_FRect& from, std::span<const SDL_FRect> boxes, int dx, int dy, float* score = nullptr);
 
 } // namespace vn

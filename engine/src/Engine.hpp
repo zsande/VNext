@@ -3,15 +3,25 @@
 // The player: the window, the game's screens and menus, saving, the player's settings, and the
 // developer tools around them.
 
-#include "Assets.hpp"
 #include "Developer.hpp"
 #include "Game.hpp"
 #include "Screens.hpp"
 #include "Script.hpp"
-#include "System.hpp"
+#include "Translations.hpp"
+#include "Assets.hpp"
+#include "Sound.hpp"
+#include "Movie.hpp"
+#include "Saves.hpp"
+#include "PlayerSettings.hpp"
+#include "Files.hpp"
+#include "Platform.hpp"
+#include "DeveloperLanguage.hpp"
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <deque>
+#include <expected>
 #include <functional>
 #include <map>
 #include <memory>
@@ -19,6 +29,8 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace vn {
@@ -27,6 +39,13 @@ inline constexpr const char* kVersion = VN_VERSION; // the player's (CMakeLists.
 
 // The licences of the software built into the player (Licences.cpp).
 [[nodiscard]] std::string_view licences();
+std::string sdlVersion();
+
+// The game's screens and the developer tools go the same way with a controller: a move held goes again after
+// kRepeatAfter seconds, then every kRepeatEvery (a key held: at the system's rate); the left stick is the d-pad, and a
+// trigger its button, once pushed past kStickPushed (let go under kStickBack); the right stick turns the wheel past
+// kStickScrolls, up to kStickTurns turns a second.
+inline constexpr float kRepeatAfter = 0.4f, kRepeatEvery = 0.1f, kStickPushed = 0.6f, kStickBack = 0.3f, kStickScrolls = 0.2f, kStickTurns = 12.0f;
 
 class DeveloperUi;
 
@@ -56,7 +75,7 @@ public:
     [[nodiscard]] const std::string& logFile() const { return logFile_; }
     [[nodiscard]] SDL_Window* window() const { return window_.get(); }
     Image image(std::string_view name, Frame frame = {});
-    // What a button does (`item`: a list item's values when it's in one: {chat.name}, and what send acts on).
+    // What a button does (`item`: a list item's values when it's in one: {chat.name}, and what choose acts on).
     void run(const Commands& commands, const std::string& confirm = {}, const Variables& item = {});
     // What a screen does as it opens (or closes): the music and the voice line stop when its stop_music_on_open=
     // and stop_voice_on_open= (or _on_close=) say so, then its action_on_open= (action_on_close=) runs.
@@ -71,15 +90,19 @@ public:
     [[nodiscard]] Sound& sound() { return sound_; }
     [[nodiscard]] std::uint64_t frameNumber() const { return frameNumber_; }
     [[nodiscard]] std::uint64_t pointerMoves() const { return pointerMoves_; } // (how many times the pointer has moved: screens tell whether the last move came to them)
-    [[nodiscard]] bool padInUse() const { return padInUse_; } // the last thing pressed was a controller's (an input's keyboard comes up by itself)
+    [[nodiscard]] bool padInUse() const { return padInUse_; } // the last thing pressed was a controller's (the on-screen keyboard comes up by itself)
+    [[nodiscard]] bool keysInCharge() const { return keysInCharge_; } // a key or a controller's button came after the pointer last moved or clicked
+    [[nodiscard]] bool keyboardUsed() const { return keyboardUsed_; } // a real keyboard's key came (a click doesn't bring up the on-screen one)
+    void pointedIn(const ScreenView& view); // a part of this screen is pointed at now (by the pointer or the keys): the others' the keys work on with it go
     [[nodiscard]] float time() const { return time_; } // the game's clock: it stands still while the developer tools are open over it
     [[nodiscard]] float toolsTime() const { return toolsTime_; }
     [[nodiscard]] Settings& settings() { return settings_; }
     void settingsChanged(bool testSound);
     [[nodiscard]] SlotBrowser& slots() { return slots_; }
-    // A save slot clicked (the questions, if any, before saving over a save and before loading while a
-    // game is on) and its delete button (the question before deleting).
-    void slotPressed(std::size_t index, std::string overwriteQuestion, std::string loadQuestion);
+    // The saves on the page open (save N, load N, delete save N): saving into the index-th (the question, if any, asked
+    // when it would save over a save), loading it (asked while a game is on) and deleting it (asked first).
+    void saveSlot(std::size_t index, std::string question);
+    void loadSlot(std::size_t index, std::string question);
     void slotDelete(std::size_t index, std::string question);
     // The history's buttons: hear entry `entry`'s voice again; go back to its line (closing the menus).
     void historyVoice(std::size_t entry);
@@ -100,8 +123,6 @@ public:
     // index-th of a kind, and how many they have.
     [[nodiscard]] bool has(RecordKind kind, std::size_t index) const;
     [[nodiscard]] int count(RecordKind kind) const;
-    void viewGalleryImage(std::size_t index) { galleryImage_ = index; } // the gallery image being looked at ({gallery_image})
-    [[nodiscard]] bool galleryMovie(std::size_t index) const; // the index-th in the gallery is a movie (movies/NAME.mpg)
     // The tip being read ({tip}); a tip the player has but hasn't read yet is new.
     void viewTip(std::size_t index);
     [[nodiscard]] bool newTip(std::size_t index) const;
@@ -130,6 +151,18 @@ public:
     void pickOnPhone(std::size_t option); // an option of a chat or call scene's choice waiting on the phone
     void answerCall(bool answer);
     void keypad(std::string_view key); // the lock screen's keypad: a digit (once there are enough, they're tried), or back
+    // The on-screen keyboard: the screen keyboard (built in, or the game's own), open over a box being typed into, when the box
+    // is pressed with a controller, or clicked while no real keyboard's been used, or typed into while a controller is in
+    // use (`keys`: the ring goes to its first letter at once). Its buttons' type actions go into that box: a letter (a
+    // capital with Shift, which goes after one, and is on for a box's first letter), shift, space, delete, done (what Enter
+    // does in the box: its action, and the keyboard goes). A real keyboard's key puts it away (Esc only that), and so does a
+    // controller's B (what's typed stays); then it stays away until the box is pressed again.
+    void wantKeyboard(const ScreenView& view, std::size_t element, bool keys);
+    void keyboardKey(std::string_view key);
+    void closeKeyboard();
+    [[nodiscard]] bool keyboardOpen() const { return keyboardFor_.has_value(); }
+    [[nodiscard]] bool keyboardShift() const { return keyboardFor_ && keyboardFor_->shift; }
+    [[nodiscard]] std::string keyboardText() const; // what the box it types into holds
     // Languages: the game's own first, then its translations (the "language" setting).
     [[nodiscard]] std::vector<std::string> languageNames() const;
     [[nodiscard]] int languageIndex() const;
@@ -262,6 +295,7 @@ private:
     [[nodiscard]] std::vector<ScreenView*> keyViews();
     void moveKeys(int dx, int dy);
     [[nodiscard]] bool idle(const Commands& actions);
+    void stickScroll(float up, float across); // the right stick: as the wheel turns, where the keys are, else under the pointer
     [[nodiscard]] ScreenView* textbox();
     // A screen opened over the rest, playing `opening` and later `closing` this time (with NAME and close
     // with NAME; none: its own animation_on_open= and animation_on_close=).
@@ -325,7 +359,15 @@ private:
     std::unique_ptr<Assets> assets_;
     CursorPtr cursor_;
     std::vector<GamepadPtr> pads_;
-    std::array<int, SDL_GAMEPAD_AXIS_COUNT> axes_{}; // each stick / trigger: -1, 0 or 1 (pushed that way)
+    std::array<bool, SDL_GAMEPAD_AXIS_COUNT> pulled_{}; // each trigger: pulled (its button down)
+    SDL_FPoint leftStick_{}, rightStick_{};          // (-1 to 1)
+    std::optional<int> stickWay_;                     // the d-pad's button the left stick holds down
+    struct PadRepeat {                                // a controller's move held: it goes again
+        int button = 0;
+        std::size_t control = 0;
+        float next = 0.0f; // (toolsTime_)
+    };
+    std::optional<PadRepeat> padRepeat_;
     struct Touch {
         SDL_FingerID finger = 0;
         bool down = false, moved = false, second = false, longPressed = false;
@@ -341,12 +383,12 @@ private:
     std::optional<std::string> musicBeforeSongs_; // what played before the music room (a path; empty: nothing)
     std::string topScreen_;                       // the screen on top, and since when (close_after=)
     float topSince_ = 0.0f;
-    [[nodiscard]] bool songsOpen() const;         // a screen with a songs part is open
+    [[nodiscard]] bool songsOpen() const;         // a screen with a list of songs is open
     Script script_;
     std::vector<Translation> translations_;
     std::uint64_t frameNumber_ = 0;
     std::uint64_t pointerMoves_ = 0;
-    bool padInUse_ = false;
+    bool padInUse_ = false, keysInCharge_ = false, keyboardUsed_ = false;
     bool covered_ = false; // a menu covers the game (its voice and movie wait)
     std::unique_ptr<Game> game_;                          // idle (not started) on the title screen
     std::map<std::string, ScreenView, std::less<>> views_; // every screen of the script
@@ -370,23 +412,30 @@ private:
     Flowchart flowchart_;                                         // the flowchart, kept in flowchart.txt
     std::vector<std::vector<KeyChord>> controlKeys_;      // keys in effect, one list per script_.controls
     std::optional<std::pair<std::string, std::size_t>> rebinding_; // control + slot waiting for a key
-    std::size_t galleryImage_ = 0;                                  // gallery image being looked at
-    mutable std::map<std::string, bool, std::less<>> movies_; // gallery names that are movies (looked up once)
     std::optional<std::size_t> tip_;                      // tip being read
     struct PhoneView {
         std::string app, chat, image; // (see phoneApp())
         std::vector<std::string> back;     // the apps before it (Back goes to them)
         bool locked = false;               // its lock screen is up (whenever the player opens it: it locks as it's put away)
         bool straight = false;             // (opening for the story: no lock screen)
-        bool pinned = false;               // (the Screens tab's preview: on `app`, even while a call is on)
+        bool pinned = false;               // (the Screens page's preview: on `app`, even while a call is on)
         std::string code;                  // the lock screen's keypad: the passcode so far
         std::optional<float> wrongAt;      // ...and when a wrong one was tried
     } phone_;
     float ringPulse_ = 0.0f; // a call coming: seconds to the controllers' next buzz
+    float vibrating_ = 0.0f, vibrateFor_ = 0.0f; // effect vibration: how strongly the controllers rumble, and until they're asked again
+    struct KeyboardFor {
+        std::string screen;      // the box's screen
+        std::size_t element = 0; // the box (its part there)
+        bool shift = false;
+    };
+    std::optional<KeyboardFor> keyboardFor_;                            // the box the on-screen keyboard is open for
+    std::optional<std::pair<KeyboardFor, bool>> keyboardWanted_; // (asked for while drawing: opened as the frame ends; with the keys on it)
     bool dataFolder_ = false;                             // --data: everything, saves too, goes there
     bool packed_ = false;                                 // the game is a pack (game.vnext): finished
     bool inPack_ = false;                                 // ...that keeps its players' saves and progress itself
     bool noGame_ = false;                                 // there's no game: just developer mode
+    bool cantOpen_ = false;                               // the game (--game's folder or pack) can't be opened: the error screen says so
     bool storyStarted_ = false;                           // without a title screen, the story's end closes the player
     bool waiting_ = false;                                // developer mode: no game is going on, the developer tools wait for Play
     bool textInputWanted_ = false, textInputActive_ = false;
@@ -396,7 +445,15 @@ private:
     Variables beforeTitle_; // what the story set before it opened the title screen (a language picked...): the title screen and New Game keep it
     // While the developer tools point at a sample of theirs (the Library's style): what it would do isn't done.
     bool sampling_ = false;
-    std::string spoken_; // what was read aloud last
+    // Read aloud: what it said last of each (the story's line or options, the screen on top as it opened (and its phone
+    // app), what the keys were on), and whether it's said anything since it was last stopped.
+    std::string readLine_, readScreen_, readPointed_;
+    bool readOpened_ = false, readAny_ = false;
+    // Whether a screen reader is running (looked at every two seconds): what's read aloud goes through it then.
+    [[nodiscard]] bool screenReader();
+    void say(std::string_view words); // (read aloud: through a screen reader that's running, else in the system's voice)
+    bool screenReader_ = false;
+    Uint64 screenReaderAt_ = 0;
 
     Mode mode_ = Mode::Title;
     std::string question_;

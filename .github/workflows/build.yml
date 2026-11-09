@@ -16,8 +16,15 @@ on:
     paths-ignore: ['README.md', 'LICENCE.txt', '.github/*.png', '.github/FUNDING.yml']
   workflow_dispatch:
 
+# The token each job gets: only what it uses (reading the code; the release's own job writes it).
+permissions:
+  contents: read
+
 jobs:
   build:
+    permissions:
+      contents: read
+      actions: read # (SignPath reads the job's details and downloads the player to sign with it)
     strategy:
       fail-fast: false
       matrix:

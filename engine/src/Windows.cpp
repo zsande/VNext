@@ -1,6 +1,7 @@
 // What Windows offers the player through its own parts: spelling (its spell checker), reading text
-// aloud (SAPI) and movies other than MPEG-1 (Media Foundation: MP4, MOV and M4V). System.hpp says what
-// each does; Apple.mm and Linux.cpp are the Mac's and Linux's own.
+// aloud (SAPI), screen readers (UI Automation's notifications) and movies other than MPEG-1 (Media
+// Foundation: MP4, MOV and M4V). Platform.hpp says what each does; Apple.mm and Linux.cpp are the Mac's and
+// Linux's own.
 #ifndef _WIN32_WINNT // (Windows 10 on: what the spell checker and the movie reader need)
 #define _WIN32_WINNT 0x0A00
 #endif
@@ -13,11 +14,13 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include "System.hpp"
+#include "Platform.hpp"
 
 #include <windows.h>
 #include <objbase.h>
+#include <oleauto.h>
 #include <sapi.h>
+#include <uiautomation.h>
 #include <spellcheck.h>
 #include <mfapi.h>
 #include <mferror.h>
@@ -187,6 +190,131 @@ void speak(std::string_view words) {
         return;
     }
     voice->Speak(wide(words).c_str(), static_cast<DWORD>(SPF_ASYNC | SPF_PURGEBEFORESPEAK | SPF_IS_NOT_XML), nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Screen readers: Narrator, NVDA and JAWS hear UI Automation's notifications, from the window's own element (its
+// root, which the window gives them). UIAutomationCore's functions are found as it runs (notifications: Windows 10's
+// Fall Creators Update on; before it, words are read aloud instead).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+class Notifier final : public IRawElementProviderSimple {
+public:
+    explicit Notifier(HWND window) : window_(window) {}
+    Notifier(const Notifier&) = delete;
+    Notifier& operator=(const Notifier&) = delete;
+    Notifier(Notifier&&) = delete;
+    Notifier& operator=(Notifier&&) = delete;
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (!out) return E_POINTER;
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(IRawElementProviderSimple)) {
+            *out = static_cast<IRawElementProviderSimple*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return static_cast<ULONG>(InterlockedIncrement(&refs_)); }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const LONG left = InterlockedDecrement(&refs_);
+        if (left == 0) delete this;
+        return static_cast<ULONG>(left);
+    }
+    HRESULT STDMETHODCALLTYPE get_ProviderOptions(ProviderOptions* options) override {
+        if (!options) return E_POINTER;
+        *options = static_cast<ProviderOptions>(ProviderOptions_ServerSideProvider | ProviderOptions_UseComThreading);
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetPatternProvider(PATTERNID, IUnknown** provider) override {
+        if (!provider) return E_POINTER;
+        *provider = nullptr;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetPropertyValue(PROPERTYID id, VARIANT* value) override {
+        if (!value) return E_POINTER;
+        VariantInit(value);
+        if (id == UIA_ControlTypePropertyId) {
+            value->vt = VT_I4;
+            value->lVal = UIA_WindowControlTypeId;
+        }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE get_HostRawElementProvider(IRawElementProviderSimple** host) override;
+    [[nodiscard]] HWND window() const { return window_; }
+
+private:
+    ~Notifier() = default;
+    HWND window_;
+    LONG refs_ = 1;
+};
+
+struct Uia {
+    using Host = HRESULT(WINAPI*)(HWND, IRawElementProviderSimple**);
+    using Give = LRESULT(WINAPI*)(HWND, WPARAM, LPARAM, IRawElementProviderSimple*);
+    using Listening = BOOL(WINAPI*)();
+    using Notify = HRESULT(WINAPI*)(IRawElementProviderSimple*, int, int, BSTR, BSTR); // (NotificationKind, NotificationProcessing)
+    HMODULE dll = LoadLibraryW(L"UIAutomationCore.dll");
+    Host host = dll ? reinterpret_cast<Host>(reinterpret_cast<void (*)()>(GetProcAddress(dll, "UiaHostProviderFromHwnd"))) : nullptr;
+    Give give = dll ? reinterpret_cast<Give>(reinterpret_cast<void (*)()>(GetProcAddress(dll, "UiaReturnRawElementProvider"))) : nullptr;
+    Listening listening = dll ? reinterpret_cast<Listening>(reinterpret_cast<void (*)()>(GetProcAddress(dll, "UiaClientsAreListening"))) : nullptr;
+    Notify notify = dll ? reinterpret_cast<Notify>(reinterpret_cast<void (*)()>(GetProcAddress(dll, "UiaRaiseNotificationEvent"))) : nullptr;
+    static Uia& get() {
+        static Uia one;
+        return one;
+    }
+};
+
+HRESULT STDMETHODCALLTYPE Notifier::get_HostRawElementProvider(IRawElementProviderSimple** host) {
+    if (!host) return E_POINTER;
+    *host = nullptr;
+    return Uia::get().host ? Uia::get().host(window_, host) : S_OK;
+}
+
+Notifier* notifier = nullptr; // (the window's, while it's there)
+WNDPROC sdlProc = nullptr;    // (SDL's own, under ours)
+
+// The window's own: its element, when a screen reader asks for it; the rest SDL's.
+LRESULT CALLBACK withNotifier(HWND window, UINT message, WPARAM w, LPARAM l) {
+    if (message == WM_GETOBJECT && static_cast<LONG>(l) == UiaRootObjectId && notifier && notifier->window() == window && Uia::get().give)
+        return Uia::get().give(window, w, l, notifier);
+    if (message == WM_DESTROY && notifier && notifier->window() == window) {
+        SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(sdlProc));
+        if (Uia::get().give) Uia::get().give(window, 0, 0, nullptr); // (none of it kept by screen readers)
+        notifier->Release();
+        notifier = nullptr;
+        return CallWindowProcW(std::exchange(sdlProc, nullptr), window, message, w, l);
+    }
+    return CallWindowProcW(sdlProc, window, message, w, l);
+}
+
+} // namespace
+
+bool screenReaderOn() {
+    BOOL on = FALSE;
+    return SystemParametersInfoW(SPI_GETSCREENREADER, 0, &on, 0) && on;
+}
+
+void announce(std::string_view words) {
+    const Uia& uia = Uia::get();
+    HWND window = GetActiveWindow();
+    if (!window || !uia.notify || !uia.give || (uia.listening && !uia.listening())) return speak(words);
+    if (words.empty()) return;
+    if (!notifier || notifier->window() != window) {
+        if (!notifier) {
+            notifier = new Notifier(window);
+            sdlProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&withNotifier)));
+        } else {
+            return speak(words); // (another window of ours: read aloud)
+        }
+    }
+    const std::wstring w = wide(words);
+    BSTR text = SysAllocStringLen(w.data(), static_cast<UINT>(w.size())), id = SysAllocString(L"VNext");
+    uia.notify(notifier, 4 /* NotificationKind_Other */, 1 /* NotificationProcessing_ImportantMostRecent */, text, id);
+    SysFreeString(text);
+    SysFreeString(id);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,17 +1,21 @@
 // What Linux offers the player, where the player's system has it: spelling (Hunspell, with the
-// dictionaries in /usr/share/hunspell), reading text aloud (speech-dispatcher) and movies other than
-// MPEG-1 (GStreamer: MP4, MOV and M4V, with the plugins for them). Each library is looked for once by
-// its name; without it the player does as on any system without one (System.hpp says what each does;
+// dictionaries in /usr/share/hunspell), reading text aloud (speech-dispatcher, which Orca speaks through too)
+// and movies other than MPEG-1 (GStreamer: MP4, MOV and M4V, with the plugins for them). Each library is looked for once by
+// its name; without it the player does as on any system without one (Platform.hpp says what each does;
 // Apple.mm and Windows.cpp are the Mac's and Windows' own). Nothing here needs those libraries' headers.
-#include "System.hpp"
+#include "Platform.hpp"
+#include "Files.hpp"
 
 #include <dlfcn.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -265,6 +269,23 @@ private:
 
 void speak(std::string_view words) {
     SpeechDispatcher::get().speak(words);
+}
+
+// Orca: one of the running programs is it.
+bool screenReaderOn() {
+    std::error_code e;
+    for (const auto& entry : std::filesystem::directory_iterator("/proc", e)) {
+        const std::string name = entry.path().filename().string();
+        if (name.empty() || !std::isdigit(static_cast<unsigned char>(name.front()))) continue;
+        std::ifstream comm(entry.path() / "comm");
+        std::string program;
+        if (std::getline(comm, program) && program == "orca") return true;
+    }
+    return false;
+}
+
+void announce(std::string_view words) {
+    speak(words); // (Orca speaks through speech-dispatcher too: the same voice)
 }
 
 // ---------------------------------------------------------------------------

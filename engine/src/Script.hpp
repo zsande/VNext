@@ -1,13 +1,17 @@
 #pragma once
 
-// The .vnscript language: expressions, the scripts as the player reads them, and translations.
+// The .vnscript language: how its lines are written, and the scripts as the player reads them (Script): characters,
+// styles, animations, screens and their parts, controls, the game's settings and the story's code.
 
+#include "Commands.hpp"
 #include "Assets.hpp"
-#include "System.hpp"
+#include "DeveloperLanguage.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <format>
 #include <functional>
 #include <map>
 #include <memory>
@@ -15,14 +19,10 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <variant>
+#include <utility>
 #include <vector>
 
 namespace vn {
-
-// ---------------------------------------------------------------------------
-// Lines and words: how a .vnscript line is read (the parser and the editor read it alike)
-// ---------------------------------------------------------------------------
 
 // Where a line's note starts: '#' as its first character after any spaces, or after a space with a
 // space (or the end) after it, outside quotes (so colours like #ff9ecf still work). None: no note.
@@ -46,310 +46,10 @@ struct ScriptWord {
 };
 [[nodiscard]] std::expected<std::vector<ScriptWord>, std::string> splitWords(std::string_view line);
 
-// ---------------------------------------------------------------------------
-// Expressions
-// ---------------------------------------------------------------------------
-
-// A script value: a whole number (yes/no are 1/0), a number with a fraction (2.5), or a text. A
-// sum that comes out whole is a whole number again.
-using Value = std::variant<int, double, std::string>;
-using Variables = std::map<std::string, Value, std::less<>>;
-// Finds a variable's value; names are lower case. Unset variables are 0.
-using Lookup = std::function<Value(std::string_view name)>;
-
-[[nodiscard]] bool truthy(const Value& v);        // non-zero / non-empty
-[[nodiscard]] int toInt(const Value& v);          // texts are read as numbers, 0 if they aren't; fractions are cut off
-[[nodiscard]] double toNumber(const Value& v);    // (with its fraction)
-[[nodiscard]] Value number(double n);             // whole when it is
-[[nodiscard]] std::string toString(const Value& v); // fractions to at most 4 places: 2.5, 0.3333
-// "add" (op '+') and "subtract" (op '-'): numbers add up, texts are joined.
-[[nodiscard]] Value combine(const Value& old, char op, const Value& v);
-// One value per line in save files: "i 42", "d 2.5" or "s text" (spaces, newlines and backslashes escaped).
-[[nodiscard]] std::string encodeValue(const Value& v);
-[[nodiscard]] Value decodeValue(std::string_view s);
-
-// random()'s numbers come in a sequence (splitmix64: its whole state is one number). A game's commands
-// draw from the game's own state, put in effect while they run (a RandomScope); saves, and so rollback,
-// keep it, so going back and forward again rolls the same numbers. Anything else (a screen's text
-// drawn) draws from a state of its own, and doesn't move the game's on.
-class RandomScope {
-public:
-    explicit RandomScope(std::uint64_t& state);
-    ~RandomScope();
-    RandomScope(const RandomScope&) = delete;
-    RandomScope& operator=(const RandomScope&) = delete;
-    RandomScope(RandomScope&&) = delete;
-    RandomScope& operator=(RandomScope&&) = delete;
-
-private:
-    std::uint64_t*& source_; // (where random() draws from)
-    std::uint64_t* was_;
-};
-[[nodiscard]] std::uint64_t newRandomState(); // (a game's, to begin with: from the system)
-// What random(lo, hi) gives: a whole number from lo to hi (the next in that sequence).
-[[nodiscard]] int randomNumber(int lo, int hi);
-
-// A formula, as used by set/add, if, choice conditions, {...} in texts and screen conditions.
-// Numbers (2, 2.5), "text" or 'text', true/false, variables, + - * / %, parentheses, comparisons
-// (= == != < <= > >= or the words is, is not, at least, at most, more than, less than),
-// and / or / not, and the functions random(a, b), random(n), min, max, abs, round, len, str, int,
-// upper, lower and if(condition, then, otherwise). Names are case-insensitive. Dividing gives a fraction
-// when it doesn't come out whole.
-class Expr {
-public:
-    static std::expected<Expr, std::string> parse(std::string_view source);
-
-    [[nodiscard]] Value eval(const Lookup& lookup) const;
-    [[nodiscard]] bool test(const Lookup& lookup) const { return truthy(eval(lookup)); }
-    [[nodiscard]] std::optional<Value> constant() const; // its value, when it's just one (3, yes, "Mia")
-    [[nodiscard]] std::vector<std::string> names() const; // the names it reads (variables and values), each once
-
-private:
-    friend class ExprParser;
-
-    enum class Kind : std::uint8_t { Literal, Variable, Not, Negate, Binary, Call };
-    enum class BinOp : std::uint8_t { Add, Sub, Mul, Div, Mod, Eq, Ne, Lt, Le, Gt, Ge, And, Or };
-
-    struct Node {
-        Kind kind = Kind::Literal;
-        BinOp op = BinOp::Add;
-        Value value = 0;
-        std::string name;
-        int lhs = -1;
-        int rhs = -1;
-        std::vector<int> args;
-    };
-
-    [[nodiscard]] Value evalNode(int index, const Lookup& lookup) const;
-
-    std::vector<Node> nodes_;
-    int root_ = -1;
-};
-
-// Text tags handled by the textbox: {pause}, {pause 0.5}, {no_wait}, {speed 10}...{/speed},
-// {colour gold}...{/colour}, {appears line}, {bold}, {italic}, {underline} and {crossed_out} (each to its
-// {/...}), {furigana READING}...{/furigana} and {tip NAME}...{/tip}. `at` is the tag's position in the
-// expanded text, in codepoints.
-using TagHandler = std::function<void(std::string_view name, std::string_view arg, std::size_t at)>;
-[[nodiscard]] bool isTextTag(std::string_view inner);
-
-// Fills in the {expression} parts of a text; {{ and }} are literal braces. Text tags are passed
-// to `tag` (or dropped without one). An expression that doesn't make sense leaves its {...} as is.
-[[nodiscard]] std::string expand(std::string_view text, const Lookup& lookup, const TagHandler& tag = {});
-// Fills in {expressions} now, but leaves text tags (and {{ }}) for a later expand(); braces in the
-// values are doubled, so they stay text. (Messages and choices, shown later as rich text.)
-[[nodiscard]] std::string fillValues(std::string_view text, const Lookup& lookup);
-// Checks the {...} parts of a text; returns the first problem.
-[[nodiscard]] std::string checkText(std::string_view text);
-// The names a text's {...} parts read (not its tags'), each once.
-[[nodiscard]] std::vector<std::string> namesIn(std::string_view text);
-
-// ---------------------------------------------------------------------------
-// Scripts
-// ---------------------------------------------------------------------------
 // Everything a game's .vnscript files define: the story (as a list of commands), the characters,
 // and the presentation (settings, colours, fonts, styles, screens, controls).
 
 struct Translation;
-
-// ---------------------------------------------------------------------------
-// Story commands
-// ---------------------------------------------------------------------------
-
-// Optional changes to an image on stage (characters and images).
-struct StageProps {
-    std::optional<float> x, y;             // 0..1 across / down the canvas (the image lines up with that much of it)
-    std::optional<float> zoom, opacity, rotation;
-    std::optional<bool> flip;
-    std::optional<int> layer;              // higher layers draw on top
-    std::optional<SDL_Color> tint;         // multiplies its colours (black: a silhouette)
-};
-
-// How a change goes from where it was to where it's going: evenly, speeding up, slowing down, or
-// both; bouncing as it lands, springing past and back, or going a little past and back.
-enum class Ease : std::uint8_t { Linear, In, Out, InOut, Bounce, Spring, Overshoot };
-// t (0..1) with that speeding up and slowing down. Spring and Overshoot go past 1 on the way.
-[[nodiscard]] float eased(Ease e, float t);
-
-// Things the player collects, each listed once in the scripts ("gallery", "ending", "song",
-// "achievement" and "tip" lines) and remembered for good once reached: persistent.<kind>.<name>,
-// which the story sets ("set persistent.ending.good = yes"). Images and songs are also had by showing
-// or playing them, tips by a line that shows {tip NAME}.
-enum class RecordKind : std::uint8_t { Gallery, Ending, Song, Achievement, Tip };
-inline constexpr std::array<std::string_view, 5> kRecordKinds{"gallery", "ending", "song", "achievement", "tip"};
-
-namespace cmd {
-struct Say {
-    std::string character;  // a defined character (lower-case name), or empty
-    std::string speaker;    // a one-off speaker name, or empty for narration
-    std::string expression; // optional new expression for the character
-    std::string text;       // may contain {expressions} and text tags
-    std::string voiceId;    // "<scene>_<n>": the character's n-th line in the scene (for voice_files=)
-    std::uint64_t id = 0;   // the line as written, who says it included (the same in every language)
-    bool together = false;  // in a "together" block, before its last line: it shows with the next one, without waiting
-};
-// A line's animations are the scripts' (by name): "" for none. "with NAME" plays one now: as a new
-// background, character or image comes (over what was there), on one already there, or as one goes.
-struct Background {
-    std::string image; // image name or "#rrggbbaa"
-    std::optional<std::string> animation; // animation=NAME: what the background plays while it's shown
-    std::optional<std::string> with;      // with NAME: as it comes in, over the one before (which goes when it ends); on the one already there
-};
-struct Show {
-    std::string character, image; // one of them
-    std::string tag;               // name used by hide
-    std::string expression;
-    StageProps props;
-    std::optional<std::string> animation; // animation=NAME: what it plays while it's shown (animation=none: nothing)
-    std::optional<std::string> with;      // with NAME: as it comes, or on the one already there (none said: setting animation_on_show, as one comes)
-    bool wait = false;                    // and wait: the story waits for it to end (and for it to reach a new place)
-};
-struct Hide {
-    std::string tag;
-    std::optional<std::string> with; // with NAME: plays, then it's gone (none said: setting animation_on_hide)
-    bool wait = false;               // and wait: the story waits until it's gone
-};
-struct Choice {
-    std::string text;
-    std::size_t target = 0;
-    std::optional<Expr> condition;
-    bool shownLocked = false; // (needs ...): while the condition is false it shows, but can't be picked
-    std::string note;         // what it needs, shown with it then
-    std::uint64_t id = 0;     // the option as written (the same in every language): "picked before"
-};
-struct Menu {
-    std::vector<Choice> choices;
-    float seconds = 0.0f;  // for N seconds: then none is picked (0: no time limit)
-    int lines = 0;         // for N lines: the story goes on meanwhile, the options up for its next N lines
-    bool returns = true;   // (for N lines) after a picked option's lines, back to the line after the one showing; no: past the N lines
-    bool optional = false; // optional=yes: clicking on picks none (the line before it stays on screen)
-    bool repeats = false;  // repeat=yes: after a picked option's lines, it's up again
-    std::size_t after = 0; // where the story goes on when none is picked
-    // A chat's (in a chat scene, or someone's chat= scene) or a call's (someone's call= scene): its options show on the
-    // phone, in this person's chat (the one picked is sent there) or on the call with them.
-    std::string phone;
-    bool call = false;
-};
-struct Jump {
-    std::string scene;
-    std::size_t target = 0;
-    bool again = false;           // back to its repeating choice, after an option's lines (shown without the line before it)
-    std::optional<Expr> unless;   // only jump when this is false (if / else)
-};
-struct Return {}; // back to the line after what started this part (an option's lines, a phone scene)
-struct End {};    // a scene's end: back to what started it, if something did; else the story's over
-struct Set {
-    std::string variable;
-    char op = '=';                // '=', '+' (add), '-' (subtract), '!' (toggle)
-    std::optional<Expr> value;
-};
-struct Play {
-    enum class Track : std::uint8_t { Music, Sound, Voice };
-    Track track = Track::Sound;
-    std::string file;    // empty: stop
-    std::string channel; // sounds: a named channel that can loop and be stopped
-    bool loop = false;
-    float volume = 1.0f;
-    float fade = 0.0f;               // in (stopping: out)
-    std::optional<float> fadeOut;    // music: the song before's (else setting music_crossfade); a sound: the one before by its name
-                                     // (else at once), or for one without a name the others playing (else they play on)
-    std::optional<bool> textFollows; // voice: the next line types out with it (else setting text_follows_voices)
-};
-struct Wait { float seconds = -1.0f; }; // < 0: until a click
-struct Screen { std::string name; bool show = true; }; // "show screen" / "hide screen": up while playing
-// Rain, snow, petals, leaves or embers over the stage. kind empty: stop.
-struct Weather {
-    std::string kind;
-    float amount = 1.0f, speed = 1.0f, wind = 0.0f;
-    std::optional<SDL_Color> tint;
-    std::string image; // an image for each flake / drop instead of the drawn one
-    bool behind = false; // behind the characters (else in front of them)
-    float fade = 1.0f;
-};
-// The view of the stage, played as an image's animations are: one it keeps playing (animation=NAME),
-// and one it plays now (with NAME), from where the one before left it ("": none; with none: back to
-// normal); `wait`: the story waits for that one.
-struct Camera {
-    std::optional<std::string> animation, with;
-    bool wait = false;
-};
-// A movie (movies/NAME.mpg) over everything; the story goes on when it ends, or when the player
-// clicks past it.
-struct Movie {
-    std::string file;
-    bool loop = false;      // plays again and again, until clicked past
-    bool skippable = true;  // clicks, keys and skipping go past it
-    float volume = 1.0f;    // its sound, on top of the music volume
-};
-// Menu commands: open (from the story it waits for the screen to close), close, answer, quick
-// save...
-struct Ui {
-    std::string verb, arg;
-    std::optional<std::string> opening, closing; // open SCREEN with NAME and close with NAME: what it plays this time (none said: its own show_ and animation_on_close=)
-    std::string phone; // what the game asks of the phone: the chat to show
-};
-// "effect sepia noise": how the whole stage looks, until "effect none" (StageLook bits). With
-// "for N seconds" they're added for that long, on top of what's there.
-struct Effect {
-    unsigned looks = 0;
-    float amount = 1.0f; // how strong
-    float fade = 0.0f;   // coming in (or going) over this many seconds
-    float seconds = 0.0f;
-};
-// A line of a chat scene: a message on the phone in its chat, "Mika: words" someone's and
-// "me: words" the player's. Its other forms send an image, a sticker or a voice message, or change the
-// chat: someone deletes or edits their last message, reacts to the last one someone else sent, reads the
-// player's, or types for a while. End: the scene is over (a line saying so, after its last).
-struct Message {
-    enum class Kind : std::uint8_t { Text, Image, Sticker, Voice, Typing, Delete, Edit, React, Read, End };
-    Kind kind = Kind::Text;
-    std::string character;  // who sent it (the player's own: who it goes to): a defined character (lower-case name)...
-    std::string sender;     // ...or anyone else's name
-    std::string expression; // their face's, beside it
-    bool mine = false;      // the player's (whoever owns the phone)
-    std::string text;       // its words: a message's, an image's or voice message's caption, Edit's new ones, React's reaction
-    std::string file;       // Image and Sticker: an image; Voice: a sound
-    float seconds = 0.0f;   // Typing: for how long (0: two seconds)
-};
-// The phone has no lines of its own besides chats and calls: whether there is one, and its apps, go by
-// variables (setting has_phone, each app's when=), and so do its owner, wallpapers, passcode, clock, date,
-// signal and battery (phone_owner, phone_wallpaper, phone_lock_wallpaper, phone_passcode, phone_clock,
-// phone_date, phone_signal, phone_battery: as Settings starts them). It locks whenever it's put away.
-// "chat WHO": a chat scene. The phone comes up on their chat, its lines play there (the story waits for
-// each), and `end` (after them) waits for a click and puts the phone back.
-struct Chat {
-    std::string with; // whose: their name, as shown
-    bool end = false;
-};
-// "time 18:30", "time evening", "time saturday evening", "time morning day=3": the story's time goes on to the next
-// such moment (staying when it's that already; day=N: to that day; a weekday or a day without a time of day: at the
-// same time); "time passes 2 hours" (minutes, hours or days; alone: to the next part of the day). With setting time
-// real, the story waits for the player's own clock instead.
-struct Time {
-    int weekday = -1;    // 0 Monday to 6 Sunday (-1: none said)
-    int day = 0;         // day=N (0: none said)
-    int minutes = -1;    // a time of day, in minutes from midnight (-1: none said)...
-    std::string part;    // ...or a part of the day (setting time_parts), by its name
-    bool passes = false; // time passes...
-    int passing = 0;     // ...this many minutes (0: to the next part of the day)
-};
-// "phone call WHO": they call, and the phone rings until it's answered or declined (or `for N seconds`
-// pass). Its lines are the call; its `missed:` lines run instead when nobody answers. `end`: the call is
-// over (after its lines).
-struct Call {
-    std::string character, sender; // who: a defined character (lower-case name), or anyone else's name
-    float seconds = 0.0f;   // rings at most this long (0: until it's answered or declined)
-    std::size_t missed = 0; // its missed: lines (or past it)
-    std::size_t after = 0;  // past it
-    bool end = false;
-};
-} // namespace cmd
-
-using Command = std::variant<cmd::Say, cmd::Background, cmd::Show, cmd::Hide, cmd::Menu, cmd::Jump,
-                             cmd::Return, cmd::End, cmd::Set, cmd::Play, cmd::Wait, cmd::Screen, cmd::Ui,
-                             cmd::Weather, cmd::Camera, cmd::Movie,
-                             cmd::Message, cmd::Effect, cmd::Chat, cmd::Call, cmd::Time>;
-using Commands = std::vector<Command>;
 
 // When a character's mouth moves (their images need mouth frames: see Atlas).
 enum class MouthMoves : std::uint8_t {
@@ -408,10 +108,6 @@ struct CharacterDef {
     }
 };
 
-// ---------------------------------------------------------------------------
-// Presentation
-// ---------------------------------------------------------------------------
-
 enum class Align : std::uint8_t { Start, Centre, End };
 
 struct Style {
@@ -441,14 +137,14 @@ struct Style {
     std::string pointedSound, clickSound;
 };
 
-// "animation NAME [loop [N times]]", with what it changes on the lines under it: how a screen, a
+// "animation NAME [loop=yes|N]", with what it changes on the lines under it: how a screen, a
 // part of one (animation=, pointed_animation=, click_animation=) or a character or image on the stage
 // (show ... animation=, show/hide ... with) moves, fades, grows, turns, changes colour and wipes. Each line changes some
 // of those to its values: "over 1 second" from where the line before it ended, or at moments of its
 // own ("from 0.5 to 1 second", "at 2 seconds"); without either, at once where the line before ended.
 // "wait 1 second" leaves a gap. A change goes from where the ones before it left that value; one that
-// starts while another of the same value goes on takes over from there. Played again and again (loop),
-// a few times (loop 3 times) or once, it stays as its end left it.
+// starts while another of the same value goes on takes over from there. Played again and again (loop=yes),
+// a few times (loop=3) or once, it stays as its end left it.
 struct Animation {
     enum class Value : std::uint8_t { X, Y, Opacity, Zoom, Rotation, Colour, Fade, Wipe };
     struct Change {
@@ -493,31 +189,61 @@ struct Animation {
     [[nodiscard]] Look at(float seconds, SDL_Color own, const Offset& offset, SDL_FPoint screen) const { return at(seconds, own, offset, screen, Look{}); }
 };
 
+// The kinds of part, each doing what no other does (a list of things is a container with list=, a movie plays in an
+// image, a bar is a slider that shows a value, a name box and the "go on" mark are texts in the textbox).
 enum class ElementKind : std::uint8_t {
-    Image, Text, Button,                                                                        // general
-    Namebox, Dialogue, Indicator, Choices, History, Pages, Slots, Face, Control, Gallery, Page, // engine widgets
-    Input, Bar, Slider,                                                                         // variable widgets
-    Movie,                                                                                      // a movie playing (loops)
-    Endings, Songs, Achievements, Tips,                                                         // lists of what was reached
-    Flowchart,                                                                                  // the flowchart
-    Container, // parts in it (any part can hold parts; list=: once for each item of a list, the phone's...)
+    Image, Text, Button,   // general (an image: a picture, a colour or a movie)
+    Dialogue, Face,        // the line said (as it types) and the speaker's face
+    Control, Input, Slider, // a key to change, a box to type in, a value to drag (or one shown)
+    Flowchart,             // the flowchart
+    Container, // parts in it (any part can hold parts; list=: once for each item of a list: the saves, the history...)
 };
 // What a container can repeat its parts for (list=NAME), and what one of them is called in its parts' values
-// ({chat.name}): the phone's apps, its chats, the messages in the one open, the options of a choice on the phone,
-// its calls, the people in it, and what's new on its lock screen.
-inline constexpr std::array<std::pair<std::string_view, std::string_view>, 7> kLists{{
-    {"apps", "app"}, {"chats", "chat"}, {"messages", "message"}, {"options", "option"}, {"calls", "call"}, {"people", "person"}, {"notices", "notice"}}};
-// Each list's items' values, after its word ({chat.name}): ScreenView::listItems() gives these. Someone's (a
-// chat's, a message's, a call's or a person's) have their character, avatar, initial and colour too.
-inline constexpr std::array<std::pair<std::string_view, std::string_view>, 7> kItemValues{{
+// ({chat.name}): the options of the choice being made (on the phone, in the phone's lists; else the story's), the
+// lines read (the history) and the lines on the page now, the save pages and the saves on the one open, the gallery's
+// images, the endings, songs, achievements and tips; the phone's apps, its chats, the messages in the one open, its
+// calls, the people in it and what's new on its lock screen; and the player's captions (what sounds and songs that
+// just began are) and a movie's subtitle now.
+inline constexpr std::array<std::pair<std::string_view, std::string_view>, 18> kLists{{{"options", "option"},
+                                                                                      {"history", "line"},
+                                                                                      {"lines", "line"},
+                                                                                      {"pages", "page"},
+                                                                                      {"saves", "save"},
+                                                                                      {"gallery", "image"},
+                                                                                      {"endings", "ending"},
+                                                                                      {"songs", "song"},
+                                                                                      {"achievements", "achievement"},
+                                                                                      {"tips", "tip"},
+                                                                                      {"apps", "app"},
+                                                                                      {"chats", "chat"},
+                                                                                      {"messages", "message"},
+                                                                                      {"calls", "call"},
+                                                                                      {"people", "person"},
+                                                                                      {"notices", "notice"},
+                                                                                      {"captions", "caption"},
+                                                                                      {"subtitles", "subtitle"}}};
+// Each list's items' values, after its word ({chat.name}): ScreenView::listItems() gives these (a line's are the
+// history's or the page's: each has its own of them). Someone's (a chat's, a message's, a call's or a person's)
+// have their character, avatar, initial and colour too. A text part showing just {line.text} keeps its look.
+inline constexpr std::array<std::pair<std::string_view, std::string_view>, 17> kItemValues{{
+    {"option", "text locked note on picked kind number"},
+    {"line", "number name colour text choice voiced back typing"},
+    {"page", "name number open"},
+    {"save", "number used time text image"},
+    {"image", "number name title locked"},
+    {"ending", "number name title text locked"},
+    {"song", "number name title locked playing"},
+    {"achievement", "number name title text locked secret"},
+    {"tip", "number name title text locked open new"},
     {"app", "name title icon initial count open"},
     {"chat", "name text time unread typing open character avatar initial colour"},
     {"message", "number from mine text typing image sticker sound time day edited deleted seen reaction ended character avatar initial colour"},
-    {"option", "text locked note on kind number"},
     {"call", "who missed busy outgoing incoming time length character avatar initial colour"},
     {"person", "name about character avatar initial colour"},
-    {"notice", "who text chat call time"}}};
-// Whether a kind of part ("history", "container"...) takes a setting of its own ("columns", "glide"...):
+    {"notice", "who text chat call time"},
+    {"caption", "text music"},
+    {"subtitle", "text"}}};
+// Whether a kind of part ("container", "slider"...) takes a setting of its own ("columns", "glide"...):
 // the ones the editor's form for it shows, besides any part's place, size and look.
 [[nodiscard]] bool partTakes(std::string_view kind, std::string_view key);
 // The style a kind of part has when it names none, if the game has one by that name ("button"...): else "default".
@@ -526,14 +252,14 @@ inline constexpr std::array<std::pair<std::string_view, std::string_view>, 7> kI
 // What screens' conditions and texts (and the story's) know besides the variables: every value
 // Engine::builtin gives, in its order (the player's settings, by their names, too: Settings::has).
 inline constexpr std::string_view kBuiltinValues[]{
-    "in_game", "has_save", "has_quick_save", "can_save", "can_rollback", "skip", "auto", "speaking", "choosing", "prompt", "text_complete", "time_left",
-    "gallery_image", "gallery_title", "gallery_movie", "tip", "tip_title", "tip_text", "flowchart_points", "gallery_total", "gallery_unlocked",
+    "in_game", "has_save", "has_quick_save", "can_save", "can_rollback", "skip", "auto", "speaking", "choosing", "prompt", "text_complete", "text_paused", "time_left",
+    "tip", "tip_title", "tip_text", "flowchart_points", "gallery_total", "gallery_unlocked",
     "endings_total", "endings_reached", "songs_total", "songs_heard", "achievements_total", "achievements_earned", "tips_total", "tips_found",
     "messages_total", "chats_total", "open_chat_messages", "calls_total", "people_total", "open_chat", "phone_app", "has_phone", "phone_button", "menu_button", "messages_unread", "calls_missed", "phone_unread",
     "phone_locked", "in_call", "in_chat", "caller",
     "call_incoming", "call_outgoing", "call_busy", "call_choice", "call_time", "caller_avatar", "caller_colour", "caller_initial", "open_image", "open_image_text", "phone_needs_code",
-    "phone_code", "phone_wrong", "dragging", "has_face", "face_side", "fullscreen", "developer", "thumbnail", "save_mode", "title", "language", "languages",
-    "version", "engine_version", "sdl_version", "speaker", "question", "page", "window_size",
+    "phone_code", "phone_wrong", "keyboard_shift", "keyboard_text", "dragging", "has_face", "face_side", "fullscreen", "developer", "thumbnail", "save_mode", "title", "language", "languages",
+    "version", "engine_version", "sdl_version", "speaker", "speaker_colour", "question", "page", "window_size",
     "time_day", "time_hour", "time_minute", "time_part", "time_weekday", "time_month", "time_year", "time_clock", "time_date", "time_waiting", "time_until"};
 
 // A key (with modifiers), mouse button, wheel direction, controller button or touch gesture:
@@ -550,7 +276,7 @@ struct KeyChord {
     int wheel = 0; // +1 up, -1 down
     int pad = -1;  // SDL_GamepadButton, or a trigger
     Gesture gesture = Gesture::SwipeLeft;
-    [[nodiscard]] bool matches(const SDL_Event& e) const;
+    [[nodiscard]] bool matches(const SDL_Event& e, bool repeats = false) const; // (`repeats`: a key held, going again, too)
     [[nodiscard]] std::string name() const; // as written in scripts: "ctrl+s", "mouse_left"
     bool operator==(const KeyChord&) const = default;
 };
@@ -578,7 +304,7 @@ struct Element {
     std::map<std::string, Style, std::less<>> substyles;    // options ending in "_style"
     std::map<std::string, SDL_Color, std::less<>> colours;   // colour options (top, bottom, track...)
     std::map<std::string, std::string, std::less<>> props;  // other widget options
-    std::map<std::string, Expr, std::less<>> exprs;         // formula options (bar value=, full_at=...)
+    std::map<std::string, Expr, std::less<>> exprs;         // formula options (a slider's value=, minimum=...)
     std::shared_ptr<const Animation> animation;             // animation=
     std::shared_ptr<const Animation> pointedAnimation;        // pointed_animation=: while it's pointed at (and back to its start after)
     std::shared_ptr<const Animation> clickAnimation;        // click_animation=: a button's, played when it's clicked (then it does what it does)
@@ -591,10 +317,9 @@ struct Element {
     [[nodiscard]] const Style& substyle(std::string_view name) const;
     // A container's: scroll=yes (what's in it scrolls), fit=parts (as big as its parts, not its box: its
     // biggest part, or stacked, all of them) and edges= (what's past its edges: show, cut or fade; scrolling:
-    // cut, unless it says). Any part that
-    // scrolls: whether a drag glides on (glide=; none: `usually`, the game's setting), and which way dragging
-    // scrolls it (-1: a container or a grid, further down as it grows; +1: a history or a chat, further
-    // up from the latest; 0: it isn't dragged).
+    // cut, unless it says). Any part that scrolls: whether a drag glides on (glide=; none: `usually`, the
+    // game's setting), and which way dragging scrolls it (-1: a container that scrolls, or the flowchart: what's
+    // in it follows the pointer; 0: it isn't dragged).
     [[nodiscard]] bool scrolls() const;
     [[nodiscard]] bool fitsParts() const;
     [[nodiscard]] std::string edges() const;
@@ -628,11 +353,15 @@ struct Control {
     // Its actions only move, press or scroll on screens: it can share its keys with the story's controls (Enter can
     // press what the keys point at on a menu and go to the next line, as the mouse's left button clicks and goes on).
     [[nodiscard]] bool onScreens() const;
+    // Its actions only move or scroll: held, its key goes again (a controller's after a moment, ten times a second).
+    [[nodiscard]] bool repeats() const;
 };
 // What the developer tools do with their own keys ("tools WHAT", their built-in controls' actions: tools_copy and the
 // rest): nothing in the game. A control that does only one of these is the tools' (its place here, else none).
-inline constexpr std::array<std::string_view, 15> kToolsVerbs{"undo", "redo", "cut", "copy", "paste", "duplicate", "delete", "select all",
-                                                            "reload", "quit", "story", "screens", "library", "play", "stop here"};
+inline constexpr std::array<std::string_view, 25> kToolsVerbs{"undo",  "redo",    "cut",     "copy",    "paste", "duplicate", "delete", "select all",
+                                                            "reload", "quit",    "story",   "screens", "library", "play",   "stop here", "next",
+                                                            "previous", "press", "up",      "down",    "left",  "right",  "back",      "next page",
+                                                            "previous page"};
 [[nodiscard]] std::optional<std::size_t> toolsVerbOf(const Control& control);
 
 // What a screen's control parts call the mouse buttons, the wheel, controller buttons and touch gestures
@@ -646,6 +375,10 @@ inline constexpr std::array<std::pair<std::string_view, std::string_view>, 29> k
     {"swipe_left", "Swipe left"}, {"swipe_right", "Swipe right"}, {"swipe_up", "Swipe up"}, {"swipe_down", "Swipe down"},
     {"long_press", "Long press"}, {"two_finger_tap", "Two-finger tap"}, {"unknown_key", "?"}}};
 [[nodiscard]] std::string_view keyWord(std::string_view id); // (the id itself when it isn't listed)
+// What Read aloud calls what shows no words: a save's delete button, and the on-screen keyboard's keys that type a sign
+// (its others say their letters, and its Shift, Space, Delete and Done are its screen's own words). Words the player
+// says that aren't the game's own either, so a translation file lists them, with a screen that has a box or saves.
+inline constexpr std::array<std::string_view, 5> kReadAloudWords{"Delete", "Apostrophe", "Comma", "Full stop", "Hyphen"};
 
 // What tells players a message has come to their phone (setting new_messages): the textbox's Phone button counting
 // them, or the phone opening (the Phone button is there either way, to open it).
@@ -670,7 +403,7 @@ struct GameSettings {
     std::string title = "VNext";
     std::string version = "1.0";
     std::string language = "English"; // the scripts' own language, as players see it (Settings > Language)
-    std::string saveFolder = "VNext";
+    std::string saveFolder;           // setting save_folder: the folder its players' data goes in (none: its title's, saveFolderNameOf)
     std::string icon;
     std::string mousePointer;         // an image for the mouse pointer (else the system's)
     SDL_Point pointerTip{0, 0};    // the point of it that clicks
@@ -728,10 +461,6 @@ struct GameSettings {
     bool phoneFollowsTime = true;      // the phone's clock and date are the time's (phone_follows_time)
     bool backgroundsFollowTime = true; // a background's version for the part of the day shows, when there is one (park_evening)
 };
-
-// ---------------------------------------------------------------------------
-// Script
-// ---------------------------------------------------------------------------
 
 struct Instruction {
     Command command;
@@ -794,12 +523,12 @@ public:
 
     // The gallery's images, the endings, the music room's songs, the achievements and the tips,
     // in the order they're listed: "gallery IMAGE "Title"", "ending NAME "Title" hint=...", "song
-    // NAME "Title"", "achievement NAME "Title" "Description" [secret]", "tip NAME "Title" "Description"".
+    // NAME "Title"", "achievement NAME "Title" "Description" [secret=yes]", "tip NAME "Title" "Description"".
     struct Record {
         std::string name;    // as written (an image's or a song's file name)
         std::string title;
         std::string text;    // an ending's hint (shown while it's locked), an achievement's description, a tip's text
-        bool secret = false; // an achievement that shows as its list's secret= (???) until it's earned
+        bool secret = false; // an achievement whose title and words aren't shown until it's earned (???: {achievement.secret})
     };
     std::array<std::vector<Record>, kRecordKinds.size()> lists;
     [[nodiscard]] const std::vector<Record>& records(RecordKind kind) const { return lists[static_cast<std::size_t>(kind)]; }
@@ -811,10 +540,13 @@ public:
     }
     [[nodiscard]] static bool isRecordVariable(std::string_view name);
 
+    // "caption SOUND "Words"": what the player's Captions show as that sound or song begins (by its name, in lower case).
+    std::map<std::string, std::string, std::less<>> captions;
+
     // Translations. Where a text players read is (see forEachText):
     struct TextPlace {
         const Instruction* line = nullptr; // a story line, choice, question or message
-        std::string_view what;             // else "title", "character", "screen" or a record kind ("gallery"...)
+        std::string_view what;             // else "title", "character", "screen", "caption" or a record kind ("gallery"...)
         std::string_view name;             // ...and which one
     };
     // Every text players read: lines, choices, names, screen texts, messages, gallery titles...
@@ -839,47 +571,7 @@ private:
 // It's a mistake, not text: text that starts with a lower-case letter goes in quotes.
 [[nodiscard]] std::string unknownCommand(std::string_view line);
 
-// The player's built-in screens, as script (at the end of Script.cpp): every game starts with them.
+// The player's built-in screens, as script (BuiltInScreens.cpp): every game starts with them.
 [[nodiscard]] std::string_view defaultUi();
-
-// ---------------------------------------------------------------------------
-// Translations
-// ---------------------------------------------------------------------------
-
-// The game's texts in another language: game/translations/<id>.vnscript. Each text is written as
-// the scripts have it, with its translation indented under it:
-//
-//     language "Español" code=es
-//     font default "fonts/MyFont.ttf"
-//
-//     "Hello!"
-//         "¡Hola!"
-//
-// Players choose it in Settings (the "language" setting). Texts it doesn't have show as written.
-struct Translation {
-    std::string id;   // the file's name ("spanish"); also its own images/<id>/, sounds/<id>/ and movies/<id>/
-    std::string name; // as players see it ("Español")
-    std::string code; // the language's code ("es", "pt-BR"): players whose computer uses it start with it
-    std::unordered_map<std::string, std::string, StringHash, std::equal_to<>> texts; // as written -> translated
-    std::map<std::string, Script::FontFile, std::less<>> fonts; // used instead of the game's own
-
-    // The translation of `original`, else `original`.
-    [[nodiscard]] std::string text(const std::string& original) const;
-    // Reads a translation file; problems go in `errors` (as translations/<id>.vnscript).
-    static Translation parse(std::string id, std::string_view source, std::vector<ScriptError>& errors);
-};
-
-// --translate: a translations/<id>.vnscript file with every text `script` shows, ready to be
-// translated. With `existing` (that file as it is now), the texts it doesn't have yet are added at
-// its end, and the ones the game doesn't show any more (changed or taken out since) are taken out.
-struct TranslationFile {
-    std::string text;
-    std::size_t added = 0;             // texts added
-    std::vector<std::string> removed;  // texts `existing` had that the game doesn't show any more
-};
-TranslationFile translationFile(Script& script, std::string_view id, const std::optional<std::string>& existing);
-// A translation file as it is, less the texts `script` doesn't show any more: each one's line, the
-// translation under it and its note (a heading left with nothing under it too). `removed` gets them.
-std::string prunedTranslation(Script& script, std::string_view id, std::string_view file, std::vector<std::string>& removed);
 
 } // namespace vn

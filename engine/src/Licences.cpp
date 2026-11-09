@@ -6,7 +6,9 @@
 namespace vn {
 
 namespace {
+
 #include "licences_txt.inc" // (kLicencesTxt: its bytes)
+
 } // namespace
 
 std::string_view licences() {

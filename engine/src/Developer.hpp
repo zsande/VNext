@@ -1,15 +1,17 @@
 #pragma once
 
-// Developer mode: the editor's view of the game's scripts (StoryEditor, in StoryEditor.cpp), and what
-// the developer tools keep from frame to frame (DeveloperTools). Developer.cpp and a file for each tab
-// (Developer*.cpp) draw them.
+// Developer mode: what the developer tools keep from frame to frame (DeveloperTools) and the tools themselves
+// (Developer: Developer.cpp, a file for each page, and the files about their parts).
 
+#include "StoryEditor.hpp"
 #include "Game.hpp"
 #include "Screens.hpp"
-#include "Script.hpp"
-#include "System.hpp"
+#include "Movie.hpp"
 
+#include <algorithm>
 #include <array>
+#include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
@@ -29,11 +31,14 @@ namespace vn {
 
 class Engine;
 class DeveloperUi;
+class PreviewHead;
 
 // The editor's layout: the measurements its forms, lists, popups and the colour wheel share, for a
 // 720-pixel-high window (each is scaled by k, the window's height over 720, where it's used). One
 // place to change them, so they stay the same everywhere.
+
 namespace layout {
+
 inline constexpr float titleH = 40;          // a form's title row (its title, and a button at its right)
 inline constexpr float boxH = 32;            // a box typed into or picked from
 inline constexpr float rowGap = 8;           // between a form's rows
@@ -54,24 +59,27 @@ inline constexpr float codeH = 28;           // the colour's code box over the w
 inline constexpr float wheelD = 150;         // the wheel's diameter
 inline constexpr float barW = 16, barGap = 8; // the value and alpha bars beside it, and the gaps between
 inline constexpr float boxText = 15, labelText = 13, titleText = 18; // text sizes: in a box, its label, a form's title
-// The window: its parts and their lists.
+// The window: its page parts and their lists.
 inline constexpr float leastW = 1024, leastH = 640; // the smallest window the tools fit at their own size (in a smaller one, all of them shrinks)
-// The tools' own part (their buttons, in every tab), small as a menu bar's words: a button's height, its words' size
+// The tools' own part (their buttons, in every page), small as a menu bar's words: a button's height, its words' size
 // and the room either side of them, the room between buttons (and rows), and between groups.
 inline constexpr float toolButtonH = 22, toolText = 12, toolPad = 8, toolGap = 3, toolGroupGap = 12;
-// A tab's part as a sub-window: the room between its edge and what's in it, how near its edge the pointer catches it
+// A page's page part: the room between its edge and what's in it, how near its edge the pointer catches it
 // to resize it (with Layout on), how near the border two share (side by side) it moves both, how small it can be
 // made, and how near the side of another near it (or the window's edge) a side being moved goes to it.
-inline constexpr float panelPad = 6, panelGrab = 8, panelShare = 2, panelLeastW = 140, panelLeastH = 80, panelSnap = 16;
-// A tab's columns (Story, Screens, Library), side by side: its lists at the left, the chosen thing's form at the right,
+inline constexpr float pagePartPad = 6, pagePartGrab = 8, pagePartShare = 2, pagePartLeastW = 140, pagePartLeastH = 80, pagePartSnap = 16;
+// What's in a page part needs at least this room (with less, it scrolls): a list across, and its rows down (its buttons
+// under them too), and the rows of buttons that make something new (New line, New part) across.
+inline constexpr float pagePartListW = 160, pagePartListRows = 3, pagePartButtonsW = 320;
+// A page's columns (Story, Screens, Library), side by side: its lists at the left, the chosen thing's form at the right,
 // what's chosen between them; each this much of the room. The Screens' form gives its screen room, down to this much
 // of its width.
 inline constexpr float sidePart = 0.18f, formPart = 0.36f, screensFormPart = 0.6f;
-inline constexpr float sideLeast = 180 + 2 * (1 + panelPad), sideMost = 360, formLeast = 300, formMost = 720; // (and within these, to read well in any window; a list's 180 inside its part's edge)
-inline constexpr float formBarRoom = 16;     // a form's scrollbar: the room it's in at the form's right (its part's padding in it)
-inline constexpr float headingH = 22, headingText = 14; // a part's heading ("Scenes", "Library", "Preview"...): its row, over what's in it
+inline constexpr float sideLeast = 180 + 2 * (1 + pagePartPad), sideMost = 360, formLeast = 300, formMost = 720; // (and within these, to read well in any window; a list's 180 inside its page part's edge)
+inline constexpr float formBarRoom = 16;     // a form's scrollbar: the room it's in at the form's right (its page part's padding in it)
+inline constexpr float headingH = 18, headingText = 12; // a page part's title ("Scenes", "Library", "Preview"...): its row, over what's in it
 inline constexpr float gap = 6;              // between a list and its button, between buttons, and the like
-inline constexpr float listItemH = 30;       // a row of a part's list
+inline constexpr float listItemH = 30;       // a row of a page part's list
 inline constexpr float scrollbarW = 6, scrollbarLeast = 28, scrollbarRoom = 12; // a scrollbar: how thick, its thumb at the least, and the room it takes from a list's rows
 inline constexpr float listIndent = 18;      // a row inside another (an option in its choice)
 inline constexpr float listPad = 10, listText = 15; // a row's text: in from its left, and its size
@@ -82,7 +90,7 @@ inline constexpr float smallButtonH = 22;    // (Save as a text file, a preview'
 inline constexpr float bigButtonH = 34;      // (Make it the game's own)
 inline constexpr float wideButtonW = 120;    // the least for: Play, Replace..., Import..., Replace all (DeveloperUi::buttonWidth)
 inline constexpr float widerButtonW = 160;   // the least for: + Font, + Sub-image, Go to the line, Move to the Trash, Make it the game's own, Only untranslated
-inline constexpr float optionButtonW = 140;  // the least for: + Option, + Else
+inline constexpr float optionButtonW = 140;  // the least for a form's + New buttons (+ New option, + Else...)
 inline constexpr float listenW = 64;         // the voice row's Play
 inline constexpr float buttonText = 14, smallButtonText = 13;
 inline constexpr float buttonPad = 24;       // a button in a row of them: its label and this much
@@ -97,7 +105,7 @@ inline constexpr float lineText = 16;        // a plain line of text, and a butt
 // label over its box.
 inline constexpr float groupGap = 6, groupStep = 26, groupIndent = 14, groupText = 15;
 inline constexpr float labelAboveH = 20;
-// The Library's Settings, its translations' table, the Story tab's map, and About.
+// The Library's Settings, its translations' table, the Story page's map, and About.
 inline constexpr float settingLabelW = 220, settingLabelPart = 0.27f, settingFieldW = 340, settingFieldPart = 0.32f, settingProblemGap = 16;
 inline constexpr float mapPadX = 20, mapPadY = 20;   // the Map: where its grid starts
 inline constexpr float tableRowH = 40, languageW = 360;
@@ -113,412 +121,8 @@ inline constexpr float timelineLabelW = 110, timelineRulerH = 22, timelineRowH =
                        timelineTickW = 48, timelineSwatch = 12; // (and a colour's square on a bar)
 inline constexpr float popupShadow = 3, popupMargin = 8, popupGap = 2;
 inline constexpr float tipDelay = 0.5f, tipW = 420, tipPad = 6; // a tip (the whole of a text cut to fit): once the pointer rests on it this long (seconds), at most this wide, its text this far in
+
 } // namespace layout
-
-// The visual editor's view of a game: its script files as lines, the scenes in them, each
-// scene's rows (a line each; the lines inside a choice or an "if" are under it), the characters and
-// the game's settings (its setting lines). It changes lines and writes the files straight away. Lines
-// it has no form for stay as they are, to be edited as text.
-class StoryEditor {
-public:
-    // A Line is someone speaking, or narration (no one; in a chat, a message); a Background is a background
-    // line; a Character shows or hides someone (or an image); an Option is one of a choice's; Game is quick save,
-    // fullscreen, screenshot or quit. On the phone (one kind, Phone, to the person: its first box says which, see
-    // phoneWord): a Message (a chat's line that sends something, types...), a Chat scene, and a Call (and its
-    // Missed lines).
-    // Other is any line without a form (a mistake).
-    enum class Kind : std::uint8_t { Line, Character, Background, Choice, Option, If, Else, Set, Jump, Music, Sound, Voice, Stop, Wait, Time,
-                                     Effect, Weather, Camera, Movie, Screen, Together,
-                                     Message, Chat, Call, Missed, Game, Other };
-    // The names a field lists (Expressions: of the character in the field's context; Records: the
-    // endings, achievements, tips or gallery images, by the context's word). Shown: characters and
-    // images; ImagesOrColours: images and colours; Bases: the names images start with (aiko for
-    // aiko_happy) and the atlases; Channels: the names sounds play as; FontNames: the fonts font lines
-    // name; Keys: key, mouse and controller names; Settings: the players' settings sliders change;
-    // Conditions: the variables, and the words screens' conditions know; ImageFiles: images/NAME.png.
-    enum class Pick : std::uint8_t { None, Characters, Shown, Images, Sounds, Places, Scenes, VariableNames, Expressions, Screens,
-                                     Movies, Records, Fonts, Styles, Colours, ImagesOrColours, Bases, Channels, FontNames, Keys, Languages,
-                                     VoiceFolders, Settings, Controls, Conditions, ImageFiles, Animations, TimeWords, TimeSpans, Textboxes };
-    // Every box a form has is of a kind, defined once (kindOf): what it lists to pick from, the values it
-    // suggests, the buttons it has instead of a box and what they say, and how its value is written. A
-    // row says its box's kind and what its own empty box means, so boxes of a kind are the same in
-    // every form.
-    enum class Box : std::uint8_t {
-        None,  // (only while a row is being made: every row says its kind)
-        Words, // text that can be bold, coloured, paused...
-        Text,  // plain text: a title, a question, a note, what a tab says
-        Name,  // one word that names something: a style, a character, a part
-        Image, // an image, or a colour (every image's box takes either)
-        Shape,   // an image alone, for its shape: where it's darkest (a wipe's)
-        ImageFile, Colour, Sound, Movie, FontFile, Font, Style, Character, Shown, Expression, Scene, Screen, Textbox, Variable,
-        Setting, Animation, Key, Place, Channel, Record, VoiceFolder, Control, Base, Language,
-        Across, Down, Layer, Speed, Zoom, Opacity, Wipe, Volume, Percent, Rotation, Seconds,
-        Pixels, Count, Number, PerSecond, LineSpacing, TextSpeed, Pause, Wind, WidthHeight, Point, // (numbers: a size, how many, a rate...)
-        FontStyle, MadeUpVoice, VariableValue, Action, Playing, KeySlot, SaveMode,      // (lists of words)
-        YesNo, YesNoStyle, YesNoSettings, YesNoSame, Easing, Plays,
-        Condition, Fit, TextAppears, MouthMoves, ImageScaling, HoldToSkip, WindowFill, Mouths, NewMessages, ChatMessages,
-        TimeKind, Clock, TimeStart, DayParts, TimeWhen, TimePasses, // (the game's time: its kind, clock, start and parts; a time line's when and how long)
-        MessageKind, PhoneLine, // (the phone's lines: which one, what a message does)
-        Side, FaceCopies, FaceMouth, Align, AlignVertically, Operation, Joiner, ShowHide, Visibility, SetVerb, Sent, Position, Repeat, Scroll, Effects, WeatherKind,
-        Edges, ContainerFit, Stack, List,
-        ScreenAction, VariableAction, StoryAction, SoundAction, SaveAction, SettingAction, GalleryAction, PhoneAction, ToolsAction, // (an action's kind, by what it's about)
-        SettingChoice, GameLanguage, StoryWhileOpen, // (what a setting goes to: the Library's Settings' own options for it, as a list; a language)
-    };
-    struct BoxKind {
-        Box box = Box::None;
-        Pick pick = Pick::None;
-        ToolsSuggestions suggest;
-        ToolsChoices choices;
-        ToolsLabels labels;
-        bool rich = false;     // text with bold, colours, pauses... (buttons for them under the box)
-        bool percent = false;  // written as one (50%), however it's typed (0.5, 50)
-        bool wheel = false;    // a colour's box: the colour as a square, and a wheel with the code to type when it opens
-        bool images = false; // its list shows the images, as cells
-        bool listen = false;   // its list's entries, and the box, have a button to hear them
-        bool wide = false;     // its names can be long (a file's, an image's): never half a row
-    };
-    [[nodiscard]] static const BoxKind& kindOf(Box box);
-    struct Field {
-        std::string name;
-        std::string value;
-        std::string label;        // what the form calls it (else its name)
-        Pick pick = Pick::None;
-        Box box = Box::None;      // its kind (applyBox gives it the kind's pick, suggestions and buttons)
-        std::string choices; // the words it can be, as buttons (else it's typed); "_" for a space
-        std::string hint;    // shown while it's empty
-        std::string labels;  // what the buttons say (else the words themselves)
-        bool multi = false;       // several of the choices (or names) at once (the value: them, with spaces)
-        std::string context;      // for the names it lists
-        std::string suggest; // values it often has, listed with the names: "|" between them
-        bool hidden = false;      // words the form has no box for, kept as they are
-        bool rich = false;        // text that can be bold, coloured, paused... (buttons for that show under it)
-        std::string group;   // the heading it starts (the fields after it are under it too, until the next)
-        std::string usual;   // the choice it is when none is written (in one box with a list, said in grey: as any box's default)
-    };
-    struct Scene {
-        std::size_t file = 0, line = 0; // its scene line
-        std::size_t end = 0;            // after its last line
-        std::string name;
-    };
-    struct Row {
-        std::size_t line = 0; // in the scene's file
-        std::size_t end = 0;  // after its last line, and those of the rows inside it
-        int depth = 0;        // 0: right under the scene line
-        Kind kind = Kind::Other;
-        std::string text;     // without the indentation
-    };
-    struct Character {
-        std::size_t file = 0, line = 0;
-        std::string name;
-    };
-
-    void load(const std::string& root); // the game folder, with a slash
-    void clear() { *this = {}; }
-    [[nodiscard]] bool loaded() const { return !files_.empty(); }
-    [[nodiscard]] const std::vector<Scene>& scenes() const { return scenes_; }
-    [[nodiscard]] const std::vector<Row>& rows(const Scene& scene) const; // (kept as of this version: a reference, not to hold across a change)
-    // A scene a character's chat= or call= names ("chat", "call"; else ""): it plays when the player opens their chat or calls them.
-    [[nodiscard]] std::string_view phoneSceneOf(const Scene& scene) const;
-    [[nodiscard]] const std::vector<Character>& characters() const;
-    [[nodiscard]] std::vector<std::string> names(Pick pick, std::string_view context = {}) const;
-    [[nodiscard]] const std::vector<std::string>& variables() const; // the ones the scripts change, or an input or a slider sets
-    [[nodiscard]] const std::string& path(std::size_t file) const { return files_[file].path; } // "scripts/main.vnscript"
-
-    // Rows as forms: the fields of a row (they can change with its values: a hidden character has no
-    // place), and the line they make (from the fields by name).
-    [[nodiscard]] static std::string_view kindName(Kind kind);
-    // The phone's lines are one kind to the person (Phone), each a kind of its own here: the word a phone line's
-    // first box ("What") has for it (none: not one of them), the kind a word is (Other: none), and the lines
-    // one starts as (with a first line inside it where it holds lines: a chat's, a call's...).
-    [[nodiscard]] static std::string_view phoneWord(Kind kind);
-    [[nodiscard]] static Kind phoneKind(std::string_view word);
-    [[nodiscard]] static std::vector<std::string> phoneLines(Kind kind);
-    [[nodiscard]] std::vector<Field> fields(const Row& row) const;
-    [[nodiscard]] std::string lineOf(Kind kind, const std::vector<Field>& fields) const;
-    [[nodiscard]] std::string summary(const Row& row) const; // as the list shows it
-    [[nodiscard]] std::vector<Field> fields(const Character& c) const;
-
-    // Changes, each written to its file at once. Changes with the same `key` are one step for undo
-    // (typing into one field).
-    void setText(const Scene& scene, const Row& row, const std::string& text, const std::string& key);
-    // Its line, and the lines inside it (as written under it: indented once) in place of the ones there when
-    // those are blank, as a new row's are (else they stay). One step for undo.
-    void setRowLines(const Scene& scene, const Row& row, const std::string& text, const std::vector<std::string>& inside, const std::string& key);
-    // Adds lines after `row` (and the rows inside it), or at the end of what's inside it; without
-    // a row, at the end of the scene. Gives the first new line.
-    std::size_t add(const Scene& scene, const Row* row, bool inside, const std::vector<std::string>& lines);
-    void remove(const Scene& scene, const Row& row);
-    // Several rows (with what's inside them) at once, one step for undo: taken out; moved to before row
-    // `slot`, `depth` levels in, in their order; or copied (their lines as text, each without the
-    // indentation it has).
-    void removeRows(const Scene& scene, const std::vector<std::size_t>& lines);
-    std::vector<std::size_t> moveRowsTo(const Scene& scene, const std::vector<std::size_t>& lines, std::size_t slot, int depth); // (their new lines)
-    [[nodiscard]] std::string textOfRows(const Scene& scene, const std::vector<std::size_t>& lines) const;
-    // Whether a row can go before row `slot` (rows.size(): after the last) `depth` levels in: options
-    // only right under a choice, and nothing else there; never into itself.
-    [[nodiscard]] bool fits(const std::vector<Row>& rows, std::size_t item, std::size_t slot, int depth) const;
-    // Moves a row (with what's inside it) there, as far in as `depth`: its new line.
-    std::optional<std::size_t> moveRowTo(const Scene& scene, const Row& row, std::size_t slot, int depth);
-    // Moves a row (with what's inside it) to the end of another scene.
-    void moveRowToScene(const Scene& scene, const Row& row, const Scene& to);
-    std::size_t addScene(std::size_t file); // gives its index in scenes()
-    // A new name for a scene (the jumps to it follow); false if it can't be one.
-    bool renameScene(std::size_t scene, const std::string& name, const std::string& key);
-    void removeScene(std::size_t scene);
-    // Moves a scene before scene `to` (or after the last one), within its file: its new index, or
-    // none when it can't go there.
-    std::optional<std::size_t> moveScene(std::size_t scene, std::size_t to);
-    std::size_t addCharacter(); // gives its index in characters()
-    void setCharacter(const Character& c, const std::vector<Field>& fields, const std::string& key);
-    void removeCharacter(const Character& c);
-    std::optional<std::size_t> moveCharacter(std::size_t c, std::size_t to); // before character `to` (or after the last), in its file
-    // Finding: the lines with `what` in them (any case), in every script file.
-    struct Found {
-        std::size_t file = 0, line = 0;
-        std::string text;
-    };
-    [[nodiscard]] std::vector<Found> find(std::string_view what) const;
-    [[nodiscard]] std::optional<std::string> lineText(std::string_view path, std::size_t line) const; // a line (trimmed) of the script at `path`
-    [[nodiscard]] const std::vector<std::string>* fileLines(std::string_view path) const; // all of them, as they are (none: no such script)
-    [[nodiscard]] bool mentions(std::string_view word) const; // some script line has the word (whole, case aside)
-    // What a line is part of, as the found lines say: its scene, its screen ("screen title"), a
-    // character, a definition ("style button"), Settings, or else its file.
-    [[nodiscard]] std::string placeOf(std::size_t file, std::size_t line) const;
-    // A variable's lines (set, if, {name} in words, screens' when= and variable=...), and a new name for it in
-    // all of them (one step for undo): false when it can't be one.
-    [[nodiscard]] std::vector<Found> uses(std::string_view variable) const;
-    // Every line that uses it changes too: how many (its own variable line not counted); none when the name can't be.
-    std::optional<std::size_t> renameVariable(const std::string& from, const std::string& to);
-    // The layout's lines (screens' parts, styles, animations' steps) with `scale` done to them (one
-    // step for undo, with others of the same key).
-    void scaleLayout(const std::function<std::string(const std::string&)>& scale, const std::string& key);
-    // A new name for a file in images/, sounds/, movies/ or fonts/ (`from` and `to` with their
-    // extension), and the lines that use it changed to match (a character's images: its
-    // expressions). One step for undo, the file's name too. How many lines changed; none when it
-    // can't have that name.
-    std::optional<std::size_t> renameAsset(std::string_view folder, const std::string& from, const std::string& to);
-    // The scene ends by jumping to `to`: a jump or end it ends with already changes, else one is added.
-    // True when one was there.
-    bool jumpAtEnd(std::size_t scene, const std::string& to);
-    // Each character's name and the name its images start with (aiko_happy is "show aiko happy").
-    [[nodiscard]] std::vector<std::pair<std::string, std::string>> imageBases() const;
-    // Where the story goes from each scene: its jumps, by name.
-    struct Link {
-        std::size_t from = 0;
-        std::string to;
-        std::size_t line = 0; // (its line in the scene's file)
-    };
-    [[nodiscard]] const std::vector<Link>& links() const;
-    // A jump's (or call's) line taken out.
-    void removeLink(const Link& link);
-    // Where the Map shows the scenes put somewhere by hand (by name; game/.map.txt, which packs leave
-    // out, as "name x y"); the others are laid out by themselves. Renaming a scene keeps its place.
-    [[nodiscard]] std::optional<SDL_FPoint> mapPlace(std::string_view scene) const;
-    void setMapPlace(const std::string& scene, std::optional<SDL_FPoint> at);
-    bool undo();
-    bool redo();
-    [[nodiscard]] bool canUndo() const { return !undo_.empty(); }
-    [[nodiscard]] bool canRedo() const { return !redo_.empty(); }
-    // A script changed (or one came or went) since the editor read or wrote it: another program edited it.
-    [[nodiscard]] bool changedOutside() const;
-
-    // Copying and pasting: lines as text (without the indentation they share), and pasted back as a
-    // new scene (after scene `after`, under a name of its own), character (after character `after`)
-    // or screen. Each gives the new one's index.
-    [[nodiscard]] std::string textOf(std::size_t file, std::size_t from, std::size_t until) const;
-    std::size_t pasteScene(std::size_t after, std::vector<std::string> lines);
-    std::size_t pasteCharacter(std::size_t after, const std::string& line);
-
-    // The script files: scripts/NAME.vnscript, each but main.vnscript read by an include line in it.
-    [[nodiscard]] std::size_t fileCount() const { return files_.size(); }
-    [[nodiscard]] std::string fileName(std::size_t file) const; // "story" for scripts/story.vnscript
-    // One the Story tab lists: with scenes, or nothing yet (not one of just screens or definitions).
-    [[nodiscard]] bool storyFile(std::size_t file) const;
-    bool renameFile(std::size_t file, const std::string& name, const std::string& key); // (its include lines follow)
-    void removeFile(std::size_t file); // to the Trash, with what's in it (undo brings it back); its include lines go too
-    // Moves a scene to another file, before scene `to` there (or after its last): its new index.
-    std::optional<std::size_t> moveSceneTo(std::size_t scene, std::size_t file, std::size_t to);
-
-    // Screens: "screen NAME" lines and the parts indented under them, one a line.
-    struct Screen {
-        std::size_t file = 0, line = 0, end = 0; // its screen line, and after its last part
-        std::string name;
-    };
-    // A screen's line or a part's: its kind ("screen" for the screen's own), the text or word after
-    // it, its settings (name=value) as written, and the note at its end, if any.
-    struct Part {
-        std::size_t line = 0, end = 0; // its line, and after the parts in it (indented under it)
-        int depth = 0;                 // how many parts it's in
-        std::string kind, text;
-        bool quoted = false; // the text is in quotes (else a word: the screen's name, a key's...)
-        std::vector<std::pair<std::string, std::string>> options;
-        std::vector<std::string> words; // anything else, kept as written
-        std::string note;
-        [[nodiscard]] std::string option(std::string_view name) const;
-        void set(std::string_view name, const std::string& value); // (an empty one goes)
-    };
-    [[nodiscard]] const std::vector<Screen>& screens() const { return screens_; }
-    [[nodiscard]] Part part(const Screen& screen, std::size_t line) const;
-    [[nodiscard]] const std::vector<Part>& parts(const Screen& screen) const; // (not the screen's own line)
-    [[nodiscard]] static std::string lineOf(const Part& part);
-    void setPart(const Screen& screen, const Part& part, const std::string& key);
-    std::size_t addPart(const Screen& screen, const Part* into, const std::string& text, const std::vector<std::string>& needs = {}); // last in that part (or the screen): its line (`needs`: look lines it uses, put above the screen)
-    // After `after` (or at the end), the lines' own indentation kept under the first's: the first's line.
-    std::size_t addParts(const Screen& screen, const Part* after, const std::vector<std::string>& text);
-    [[nodiscard]] std::vector<std::string> partLines(const Screen& screen, const Part& part) const; // it and the parts in it, as lines
-    std::size_t pasteScreen(std::vector<std::string> lines); // a copy, under a name of its own: its index
-    void removePart(const Screen& screen, const Part& part); // (and the parts in it)
-    void removeParts(const Screen& screen, const std::vector<std::size_t>& lines); // (one step for undo)
-    // Before part `to` (or after the last), `depth` parts in, with the parts in it: its new line.
-    std::optional<std::size_t> movePart(const Screen& screen, const Part& part, std::size_t to, int depth);
-    // A new screen and the lines it needs (styles, colours, controls), at the end of
-    // scripts/screens.vnscript (made, and included from main.vnscript, if it isn't there). Gives its index.
-    std::size_t addScreen(const std::vector<std::string>& needs, const std::vector<std::string>& lines);
-    bool renameScreen(std::size_t screen, const std::string& name, const std::string& key); // (its uses follow)
-    void removeScreen(std::size_t screen); // (and the keys and buttons that only open it)
-    std::optional<std::size_t> moveScreen(std::size_t screen, std::size_t to); // before screen `to` (or after the last), in its file
-    [[nodiscard]] bool defines(std::string_view what, std::string_view name) const; // a "style NAME" line, "colour NAME"...
-    [[nodiscard]] std::vector<std::string> defined(std::string_view what) const;     // the names of those
-
-    // Things listed once by name, outside the scenes: "colour NAME ...", "style", "font", "place",
-    // "atlas" (with the lines indented under it), "gallery", "ending", "song", "achievement", "tip"
-    // and "control" lines. A new one goes after the last of its kind (or in main.vnscript, before its
-    // first scene); renaming one follows where it's used (styles, colours, fonts, places, atlases,
-    // keys, and the story's endings, achievements and tips).
-    struct Definition {
-        std::size_t file = 0, line = 0, end = 0; // its line, and after the lines under it
-        std::string name;
-    };
-    [[nodiscard]] const std::vector<Definition>& definitions(std::string_view kind) const;
-    [[nodiscard]] std::vector<std::string> linesOf(const Definition& d) const; // (without their indentation)
-    // A definition as a form, and the lines a form makes (an atlas: its line and the ones under it; an
-    // animation: its line, with how often it plays: the lines under it are the timeline's).
-    [[nodiscard]] std::vector<Field> fields(std::string_view kind, const Definition& d) const;
-    [[nodiscard]] std::vector<std::string> linesOf(std::string_view kind, const std::vector<Field>& fields) const;
-    // An animation's lines as the Library's timeline shows them: each change a bar on the row of what
-    // it changes (timelineRow), from when it begins for as long as it takes, with what it goes to as
-    // written (left=5% is "5% left" on the Across row) and its easing; and one time through. Not `ok`:
-    // a line it can't read (then it's only shown). stepsOf(): the lines again, in the order the bars
-    // begin, the ones beginning and ending together on one line ("over" when one begins as the line
-    // before ends, else "from ... to" or "at"; a "wait" at the end for any time after the last).
-    struct Bar {
-        std::string key, value; // what it changes and to what, as written: x=home, left=5%, opacity=40%
-        float start = 0.0f, seconds = 0.0f;
-        std::string ease; // (inout, linear...: a fade's is linear unless it says)
-        std::string shape; // a wipe's image (shape=): where it shows first; none: from the left
-    };
-    struct Timeline {
-        std::vector<Bar> bars;
-        float length = 0.0f;
-        bool ok = true;
-    };
-    static constexpr std::size_t kTimelineRowCount = 8; // across, up or down, opacity, zoom, rotation, colour, cover, wipe
-    [[nodiscard]] static std::size_t timelineRow(std::string_view key); // (kTimelineRowCount: none)
-    [[nodiscard]] static Timeline timelineOf(std::span<const std::string> steps);
-    [[nodiscard]] static std::vector<std::string> stepsOf(const Timeline& timeline);
-    std::size_t addDefinition(std::string_view kind, const std::vector<std::string>& lines); // gives its index
-    void setDefinition(const Definition& d, const std::vector<std::string>& lines, const std::string& key);
-    void removeDefinition(const Definition& d);
-    std::optional<std::size_t> moveDefinition(std::string_view kind, std::size_t index, std::size_t to); // in its file
-    bool renameDefinition(std::string_view kind, std::size_t index, const std::string& name, const std::string& key);
-    [[nodiscard]] std::string root() const { return root_; }
-
-    // The game's settings: the setting lines in main.vnscript. A setting's value as written (without
-    // quotes), and its line; none: it has no line, so it has its default.
-    [[nodiscard]] bool hasMain() const;
-    [[nodiscard]] std::optional<std::string> setting(std::string_view name) const;
-    [[nodiscard]] std::optional<std::size_t> settingLine(std::string_view name) const;
-    [[nodiscard]] bool isSetting(std::size_t line) const; // a setting line in main.vnscript
-    // A new value (in quotes if `quoted`); an empty one takes the line out.
-    void setSetting(std::string_view name, const std::string& value, bool quoted, const std::string& key);
-
-    [[nodiscard]] std::size_t version() const { return version_; } // goes up with every change
-    [[nodiscard]] const std::string& problem() const { return problem_; }        // a file that couldn't be written
-
-private:
-    struct File {
-        std::string path; // from the game folder
-        std::vector<std::string> lines;
-        SDL_Time modified = 0; // when the editor read or wrote it
-    };
-    using Snapshot = std::vector<std::pair<std::string, std::vector<std::string>>>; // every file's path and lines
-public:
-    // Files moved (from, to: full paths), renamed in the game folder, to the Trash or from it; `from`
-    // empty: brought in from elsewhere (imported). One step for undo, which moves them back (an
-    // imported one to the Trash).
-    using Moves = std::vector<std::pair<std::string, std::string>>;
-    void movedFiles(Moves moves);
-
-private:
-    struct Step {      // what undo brings back: the scripts, and the files moved since
-        Snapshot files;
-        Moves renamed;
-    };
-    static Moves undoMoves(const Moves& moves); // (each done backwards: what to do again for redo)
-    static Moves redoMoves(const Moves& moves);
-    [[nodiscard]] Snapshot snapshot() const;
-    void restore(const Snapshot& snapshot);
-    void include(std::string_view name); // an include line in main.vnscript, if it has none for it
-    void rescan();
-    void remember(const std::string& key);
-    void write(std::size_t file);
-    void eraseLines(std::size_t file, std::size_t from, std::size_t until); // (one step for undo, written and read again)
-    void writeAll();
-    [[nodiscard]] std::size_t blockEnd(std::size_t file, std::size_t label) const;
-    // Moves lines [from, until) of a file to before line `at` (with a blank line on each side when
-    // they're a scene or a screen): gives where they start now.
-    std::size_t moveLines(std::size_t file, std::size_t from, std::size_t until, std::size_t at, bool spaced);
-    [[nodiscard]] bool isCharacter(std::string_view name) const;
-    // Who a line names and how they look: "Aiko happy" or "Aiko (happy)" (a character's), or anyone's name.
-    [[nodiscard]] std::pair<std::string, std::string> speakerOf(std::string_view who) const;
-    // A chat's phone line as its form has it ("me" the player): whether it's the player's, who sent it and
-    // how they look, what it does and with what.
-    struct PhoneLine {
-        bool mine = false;
-        std::string who, expression, does = "says", text, file, seconds;
-    };
-    [[nodiscard]] PhoneLine phoneLineOf(std::string_view text) const;
-    [[nodiscard]] std::vector<Field> rowFields(const Row& row) const; // (fields(), but for the phone's first box)
-    [[nodiscard]] bool hasScene(std::string_view name) const; // (by name, in any case)
-    [[nodiscard]] bool hasScreen(std::string_view name) const;
-    void renameSpeaker(const std::string& from, const std::string& to);
-
-    std::string root_;
-    std::vector<File> files_;
-    std::vector<Scene> scenes_;
-    std::vector<Screen> screens_;
-    std::vector<Step> undo_, redo_; // the files before each change, and before each undo
-    std::string lastKey_;
-    std::size_t version_ = 0;
-    std::string problem_;
-    std::pair<std::string, std::size_t> removed_; // the setting whose line went last, and where it was
-    std::map<std::string, SDL_FPoint, std::less<>> mapPlaces_; // (lower-case names)
-    void saveMapPlaces() const;
-    mutable std::pair<std::size_t, std::vector<std::string>> variables_{SIZE_MAX, {}}; // (at a version)
-    // What's read from the lines often, kept from a version of them until they change.
-    mutable std::pair<std::size_t, std::vector<Character>> characters_{SIZE_MAX, {}};
-    mutable std::pair<std::size_t, std::vector<Link>> links_{SIZE_MAX, {}};
-    mutable std::pair<std::size_t, std::map<std::string, std::size_t, std::less<>>> settingLines_{SIZE_MAX, {}}; // each setting's line
-    mutable std::map<std::string, std::pair<std::size_t, std::vector<Definition>>, std::less<>> definitions_;    // by kind
-    mutable std::map<std::pair<std::size_t, std::size_t>, std::pair<std::size_t, std::vector<Row>>> rows_;       // by a scene's file and line
-    mutable std::map<std::pair<std::size_t, std::size_t>, std::pair<std::size_t, std::vector<Part>>> parts_;     // by a screen's
-    // Every line through `change` (its file, its number and its text; the text it gives back replaces
-    // it), each file with a change written once (`also`: one written whatever happens, a line of it
-    // changed already). Gives how many lines changed.
-    std::size_t changeLines(const std::function<std::optional<std::string>(std::size_t, std::size_t, const std::string&)>& change,
-                            std::optional<std::size_t> also = std::nullopt);
-    // A scene, screen, character or definition moved before another of its kind (`to` == their count:
-    // after the last) in its file; `endOf`: after one's last line; `again`: them all, once it's moved.
-    // Gives where it is then.
-    template <class T, class EndOf, class Again>
-    std::optional<std::size_t> moveRecord(const std::vector<T>& all, std::size_t index, std::size_t to, bool spaced, EndOf endOf, Again again);
-};
-
-// A field's kind applied: its pick, suggestions (the kind's, then its own), buttons and their labels (the
-// kind's words in the row's own order), and whether it's rich text.
-void applyBox(StoryEditor::Field& f);
-// An amount as a percent kind writes it: 50% from 0.5, 50 or 50%.
-[[nodiscard]] std::string percentText(std::string_view value);
 
 // A translation file's text (a line in quotes) and the line with its translation under it, if any.
 struct TextPair {
@@ -531,44 +135,63 @@ void setTranslation(std::vector<std::string>& lines, const TextPair& p, const st
 
 // The developer tools' own keys, as kToolsVerbs has them (their controls: tools_undo...); and the keyboard a press of
 // one of their buttons comes from (it's that key, whatever keys it has: SDL_KeyboardEvent::raw says which).
-enum class ToolKey : std::uint8_t { Undo, Redo, Cut, Copy, Paste, Duplicate, Delete, SelectAll, Reload, Quit, Story, Screens, Library, Play, StopHere, Count };
+enum class ToolKey : std::uint8_t {
+    Undo, Redo, Cut, Copy, Paste, Duplicate, Delete, SelectAll, Reload, Quit, Story, Screens, Library, Play, StopHere,
+    Next, Previous, Press, Up, Down, Left, Right, // (the keys' place: on and back, pressing, the arrows)
+    Back, NextPage, PreviousPage,               // (a list or a box let go of; the pages in turn)
+    Count
+};
 static_assert(static_cast<std::size_t>(ToolKey::Count) == kToolsVerbs.size());
 inline constexpr SDL_KeyboardID kToolButton = 0xFFFF'FFFFu;
+inline constexpr SDL_KeyboardID kScreenKeyboard = 0xFFFF'FFFEu; // (a key of the tools' on-screen keyboard: not a real keyboard's)
 
-// What the developer tools keep from frame to frame (Developer*.cpp). In developer mode the player starts in
+// What the developer tools keep from frame to frame (Developer.cpp and the files of their pages and parts). In developer mode the player starts in
 // them, and F10 opens them over the game (the story waits meanwhile); without a game they're all the
 // player shows.
 struct DeveloperTools {
-    enum class View : std::uint8_t { Story, Screens, Library, About };
+    enum class Page : std::uint8_t { Story, Screens, Library, About };
     bool open = false;
-    View view = View::Story;
+    Page page = Page::Story;
     // What the last button said (how it went wrong, or what it made where): logged and shown in a window of its
     // own as the frame goes on (tell), then gone.
     std::string status;
     // The tools' own part's button pressed (ToolButton::id): done as the next frame starts.
     std::optional<int> pressedTool;
-    // The tabs' parts, each a sub-window (Developer::drawPanels): with Layout on they're moved and resized. Where
-    // each one was put, by its tab and name ("story/form"): as shares of the room over the tools' own part (none: where
-    // its tab puts it); each tab's parts as they're drawn, the last over the rest (as they were last moved). The room
-    // they're in this frame, the tab shown (Reset puts its back), a part being moved or resized, and the pointer the
-    // tools show over a part (none: the game's), made as each is first shown.
+    // The pages' page parts (Developer::drawPageParts): with Layout on they're moved and resized. Where each one was put, by its
+    // page and name ("story/form"): as shares of the room over the tools' own part (none: where its page puts it); each
+    // page's page parts as they're drawn, the last over the rest (as they were last moved). The room they're in this frame,
+    // the page shown (Reset puts its back), a page part being moved or resized, and the pointer the tools show over a page part
+    // (none: the game's), made as each is first shown. How far each is scrolled (across, down: by its key), when what's in
+    // it needs more room than it has.
     bool editLayout = false, layoutRead = false;
-    std::map<std::string, SDL_FRect, std::less<>> panels;
-    std::map<std::string, std::vector<std::string>, std::less<>> panelOrder;
+    std::map<std::string, SDL_FRect, std::less<>> pageParts;
+    std::map<std::string, SDL_FPoint, std::less<>> pagePartScroll;
+    std::map<std::string, std::vector<std::string>, std::less<>> pagePartOrder;
     SDL_FRect room{};
-    std::string panelTab;
-    struct PanelDrag {
-        std::string id;    // ("tab/part")
+    std::string shownPage;
+    struct PagePartDrag {
+        std::string id;    // ("page/page part")
         int sides = 0;     // the sides that follow the pointer (all four: it moves)
         SDL_FPoint from{}; // where the pointer caught it
         SDL_FRect start{}; // and where it was then
-        std::string with;  // a border two share: the other part, its side there going with it (empty: none)
+        std::string with;  // a border two share: the other page part, its side there going with it (empty: none)
         SDL_FRect withStart{};
     };
-    std::optional<PanelDrag> panelDrag;
+    std::optional<PagePartDrag> pagePartDrag;
+    // Layout by the keys (Tab, the arrows; a controller's shoulders and d-pad): the page's page part and which of it they're on
+    // (its whole: moving it; its right side or its bottom: resizing it, three to a page part), and how far the arrows have taken
+    // it since they caught it (a drag, as the pointer's); its ring (where the keys are), once they've been used.
+    struct LayoutKeys {
+        std::string page;
+        std::size_t handle = 0;
+        SDL_FPoint by{};
+        bool dragging = false, ring = false;
+        SDL_FRect ringBox{};
+    };
+    LayoutKeys layoutKeys;
     std::optional<SDL_SystemCursor> pointer, wantPointer;
     std::array<CursorPtr, SDL_SYSTEM_CURSOR_COUNT> cursors{};
-    std::optional<std::pair<std::string, std::size_t>> stoppable; // the Story tab's chosen line Stop here is for (its file, line), as last drawn
+    std::optional<std::pair<std::string, std::size_t>> stoppable; // the Story page's chosen line Stop here is for (its file, line), as last drawn
     std::string loggedStatus;
     bool failed = false;
     int packIn = 0;         // frames until Pack packs (the game read again first)
@@ -576,14 +199,23 @@ struct DeveloperTools {
     std::string playScene;  // Play this scene: the scene to start then
     std::optional<std::size_t> playLine; // Play from this line: its line in the scene's file
     std::size_t aboutScroll = 0; // About's lines scrolled down
-    // What happened since the last frame; the drawing acts on it (buttons act when drawn).
-    float mouseX = -1.0f, mouseY = -1.0f, wheel = 0.0f;
+    // What happened since the last frame; the drawing acts on it (buttons act when drawn). Where the pointer is (away,
+    // -1: the keys are in charge, so nothing's lit under it, until it moves again), and whether it moved; the wheel's
+    // turns and where they're turned (under the pointer, or where the keys are: the right stick's).
+    float mouseX = -1.0f, mouseY = -1.0f, wheel = 0.0f, wheelAcross = 0.0f; // (the wheel: up is positive; across: right is, as Shift and the wheel down)
+    float wheelX = -1.0f, wheelY = -1.0f;
+    bool pointerMoved = false;
+    // A controller: its buttons are the tools' keys (their controls' pad_ keys; its left stick is the d-pad: Engine::padAxis);
+    // the d-pad and the shoulders go again and again while held (the one held, and when it goes next); its A pressed this
+    // frame (a box it hands the typing to brings up the on-screen keyboard).
+    std::optional<std::pair<ToolKey, float>> padHeld;
+    bool padPressed = false;
     bool clicked = false, doubleClick = false;
     float k = 1.0f;     // this frame's scale (DeveloperUi::k) and the window's size the tools are laid out in
     SDL_FPoint size{};
     std::string typed;
     std::vector<SDL_KeyboardEvent> keys;
-    // The Story tab: the visual editor.
+    // The Story page: the visual editor.
     StoryEditor editor;
     std::size_t played = 0, checked = SIZE_MAX; // the editor's version the game was read at; the problems were found at
     std::unique_ptr<Script> script;             // the scripts as the editor has them, read again after every change
@@ -618,7 +250,7 @@ struct DeveloperTools {
     std::vector<std::size_t> moreRows;          // more lines of the scene chosen (Shift+click), by their lines
     std::optional<std::size_t> collapseTo;      // a chosen one pressed: only it stays chosen, unless it's dragged
     std::optional<std::size_t> rowInSight;      // a line just added (by its line): the list scrolls to it
-    // The Library tab: what's listed (a kind of definition, "variables", "voices", or the files:
+    // The Library page: what's listed (a kind of definition, "variables", "voices", or the files:
     // "images", "sounds", "movies" or "fontfiles") and the one chosen (a file: also what's made from it, a sub-image or a font, by
     // its index in the editor's definitions, and the files whose list of those is open); files picked
     // to import (from the file chooser's thread, or dropped on the window), copied into the game when
@@ -627,11 +259,11 @@ struct DeveloperTools {
     std::optional<std::size_t> libraryItem, librarySub;
     std::vector<std::string> libraryOpen;
     std::string libraryFind; // a file to choose once it's listed (by the name scripts call it)
-    float kindScroll = 0.0f, libraryScroll = 0.0f, languagesScroll = 0.0f;
+    float kindScroll = 0.0f, libraryScroll = 0.0f;
     struct Imports {
         std::mutex mutex;
         std::vector<std::pair<std::string, std::string>> files; // each one's path, and where it goes (empty: by its kind, under its own name)
-        std::optional<SDL_FPoint> dropAt;                     // where the last drop landed (on the Screens tab's screen: the image goes there)
+        std::optional<SDL_FPoint> dropAt;                     // where the last drop landed (on the Screens page's screen: the image goes there)
         std::string as;                                       // where the one picked in the file chooser that's open goes, without its extension
         std::string pattern, label;                           // (that file chooser's filter)
         SDL_DialogFileFilter filter{};                        // ...pointing at them, while it's open
@@ -640,6 +272,7 @@ struct DeveloperTools {
     struct Translation { // the Library's translations' file, as lines
         std::string id;
         std::vector<std::string> lines;
+        bool gone = false; // (a step for undo: its file isn't there)
     } translation;
     std::vector<Translation> translateUndo, translateRedo; // its files before each change (and each undo)
     std::string translateKey;                              // (typing into one box: one step)
@@ -684,6 +317,10 @@ struct DeveloperTools {
         float hue = 0.0f, sat = 0.0f, val = 1.0f, alpha = 1.0f;
         int dragging = 0;
         bool editBottom = false; // a gradient (navy-black): the wheel changes its bottom colour, not its top
+        // The keys in it: the entry they're on, how they move it this frame (across, down) and whether Enter picks it.
+        std::optional<std::size_t> keyed;
+        SDL_Point keyMove{};
+        bool keyPick = false;
     } popup;
     TexturePtr wheelImage; // the colour wheel's image, `wheelImageSize` pixels across
     int wheelImageSize = 0;
@@ -691,7 +328,7 @@ struct DeveloperTools {
     std::string openList; // a box whose list opens once it's drawn (a new line's first box, focused by the editor)
     bool popupClick = false, overPopup = false;
     float popupWheel = 0.0f;
-    float mapX = 0.0f, mapY = 0.0f;   // the Story tab's map: how far it's looked around
+    float mapX = 0.0f, mapY = 0.0f;   // the Story page's map: how far it's looked around
     std::optional<std::size_t> mapFollows; // ...the scene it last brought into sight (it brings each one chosen)
     std::optional<SDL_FPoint> mapDrag; // (being dragged: where the mouse started, plus the look)
     struct MapPress {                 // a scene pressed on: dragged, it moves; its dot dragged to another, a jump is drawn
@@ -707,6 +344,43 @@ struct DeveloperTools {
     std::string focus, buffer;
     std::size_t caret = 0, anchor = 0, anchorFocus = 0; // (anchor belongs to the box typed into at focusCount anchorFocus)
     std::string selectingIn; // the box the mouse is choosing letters in (it's held down)
+    // The tools' on-screen keyboard, for typing into a box without a keyboard: a controller's A that hands a box the typing
+    // (on the box, or on + New...) brings it up, and so does a click that does, until a real keyboard's been used; a real
+    // key puts it away (Esc only that), and so do B and Done. Its keys as a US keyboard has them (Shift: the capitals and
+    // the signs over them), then Shift, Space, the caret back and on, Delete and Done.
+    struct ScreenKeys {
+        bool open = false, shift = false;
+        std::string box;      // the box it types into (focus)
+        int row = 1, col = 0; // the key the controller is on
+        SDL_FRect area{};     // where it was drawn: a click there is its
+        std::vector<std::pair<SDL_FRect, std::pair<int, int>>> keys; // each key as drawn: its place, row and column
+    } screenKeys;
+    // A question or a message, and files to choose, in a window of the tools' own while a controller is in use (it can't
+    // answer the system's windows, which the mouse and the keys have: Developer::ask, chooseFiles). The question: its
+    // buttons in a row, the keys (or the d-pad) between them, Enter (A) the one they're on, Esc (B) the one that keeps
+    // things as they are; then what it does with the answer.
+    struct Asking {
+        std::string title, body;
+        std::vector<std::string> buttons;
+        std::size_t at = 0, keep = 0;
+        std::function<void(std::size_t)> then;
+        std::vector<SDL_FRect> boxes; // (as drawn)
+    };
+    std::optional<Asking> asking;
+    // The files: a folder's folders (and the one it's in, ".."), then its files of the kinds wanted, up and down, Enter (A)
+    // opening a folder or importing a file (one for a place of its own, `as`: then it closes), Esc (B) or Done closing.
+    struct FilePicker {
+        std::string label, as, folder;
+        std::vector<std::string> extensions; // (".png"...)
+        std::vector<std::pair<std::string, bool>> entries; // (a name, and whether it's a folder)
+        std::size_t at = 0;
+        float scroll = 0.0f;
+        std::set<std::string, std::less<>> taken; // (imported from this folder so far)
+        std::vector<SDL_FRect> boxes;             // (as drawn: each entry's, then Done)
+        SDL_FRect list{};
+    };
+    std::optional<FilePicker> filePicker;
+    std::string pickerFolder; // (where it was last)
     std::string entered;     // the box Enter was pressed in, this frame
     std::size_t focusCount = 0; // (each time a box is clicked into: one step for undo)
     // The caret into a box: `text` in it (all of it chosen, with `all`), as a new step for undo.
@@ -718,17 +392,65 @@ struct DeveloperTools {
         ++focusCount;
         if (all) anchor = 0, anchorFocus = focusCount;
     }
+    // The keys' place in the tools (Tab and Shift+Tab move it, and the arrows, to the nearest that way): what can be
+    // pressed, typed into or chosen from (a key stop), in the order they're met (each page part's in turn, by where it is:
+    // down the columns, then across; the tools' own part last). The last whole frame's (`keyStops`) and this one's so far;
+    // the one the keys are on (by its key: its page part's name and its place there) and whether it's ringed (the keys are
+    // in charge, not the pointer); what Enter or Space pressed this frame, and which way up or down moves in a list (-1, 1).
+    // Each stop says which arrows it uses itself now (own): a list up and down (not at its ends), a box being typed in left
+    // and right (and down, for its list), the screen's preview all four (moving its chosen parts).
+    static constexpr std::uint8_t kOwnLeft = 1, kOwnRight = 2, kOwnUp = 4, kOwnDown = 8, kOwnAll = 15;
+    struct KeyStop {
+        enum class Kind : std::uint8_t { Press, Type, List };
+        Kind kind = Kind::Press;
+        std::string key;          // ("story/lines#2")
+        SDL_FPoint order{};       // its page part's place
+        SDL_FRect box{};
+        SDL_Rect clip{};          // where it shows
+        std::string words;        // what it is and says (a box's label and value): for a screen reader
+        std::string id, value;    // a box's (Type): its id and words
+        float* scroll = nullptr;  // what scrolls it into sight, in the room that shows it
+        SDL_FRect view{};
+        std::uint8_t own = 0;
+    };
+    std::vector<KeyStop> keyStops, keyStopsNow;
+    std::string keyGroup, keyHeading, keyLabel; // (this frame's: the page part being drawn, its title, and a form row's label)
+    SDL_FPoint keyOrder{};
+    std::size_t keyCount = 0;
+    bool keyStopsWhole = true, keyStopsOff = false; // (every page part was drawn; what's drawn now isn't a stop: an open list)
+    std::string keyAt, keyPress;
+    bool keyRing = false;
+    // The keys are in charge now: their ring shows, and nothing's lit under the pointer until it moves again.
+    void keysTakeOver() {
+        keyRing = true;
+        if (!held) mouseX = mouseY = -1.0f;
+    }
+    // The stop the keys are on: the box being typed in (it keeps them), else theirs (keyAt).
+    [[nodiscard]] const KeyStop* keysOn() const {
+        if (!focus.empty())
+            if (const auto box = std::ranges::find_if(keyStops, [&](const KeyStop& s) { return s.kind == KeyStop::Kind::Type && s.id == focus; }); box != keyStops.end()) return &*box;
+        const auto at = std::ranges::find(keyStops, keyAt, &KeyStop::key);
+        return at != keyStops.end() ? &*at : nullptr;
+    }
+    std::string toldKey, toldWords; // (what a screen reader was told last: the stop and its words; messages are the system's own windows)
+    std::optional<Page> toldPage;
+    int keyStep = 0;
+    struct Scroller {
+        float* scroll;
+        SDL_FRect view;
+    };
+    std::vector<Scroller> scrollers; // (what's being drawn scrolls by these: the innermost last)
     std::string focusOwner; // the field (or "raw") the buffer belongs to, and its form when it started
     StoryEditor::Kind focusKind = StoryEditor::Kind::Other;
     std::vector<StoryEditor::Field> focusFields;
     Sound silence;               // (never started: what the tools' own games are heard through)
     // Copies of what the player has seen and kept, for the games the tools play on their own (Play from
-    // this line's, the Screens tab's sample): nothing the player has changes.
+    // this line's, the Screens page's sample): nothing the player has changes.
     ReadLog playRead;
     Variables playPersistent;
     Flowchart playFlowchart;
-    TexturePtr canvas; // what the Screens tab and the Library's samples draw into
-    // The Screens tab: the screen open (its name: the game's own, or a built-in one), the part chosen
+    TexturePtr canvas; // what the Screens page and the Library's samples draw into
+    // The Screens page: the screen open (its name: the game's own, or a built-in one), the part chosen
     // (its line; none: the screen's own settings), and a part being moved or resized.
     std::string screenName;
     std::optional<std::size_t> part;
@@ -740,12 +462,13 @@ struct DeveloperTools {
     // the one before's, and since when (the tools' clock); drawTip() shows it once the pointer rests there.
     std::string tip, tipBefore;
     float tipSince = 0.0f;
+    std::optional<SDL_FPoint> tipAt; // (a tip for what the keys are on: where it goes, under that; none: by the pointer)
     std::map<std::string, float, std::less<>> formatSince; // (a text format bar button pointed at, and since when: what it does plays)
     struct Drag {
         std::size_t part = 0, element = 0; // its line, and its part of the screen as read
         bool resize = false;
         SDL_FRect from{};                  // its box then
-        float x = 0.0f, y = 0.0f;          // where the mouse was then (on the canvas)
+        float x = 0.0f, y = 0.0f;          // where the mouse was then (in the window)
         float px = 0.0f, py = 0.0f, pw = 0.0f, ph = 0.0f; // its x= y= width= height= then
         bool own = true;                                  // it moves on its own (not with a chosen part it's in)
         std::vector<std::pair<std::size_t, SDL_FRect>> moved; // everything it moves (the parts in them too), and where each was
@@ -757,7 +480,7 @@ struct DeveloperTools {
         std::vector<Other> others;
     };
     std::optional<Drag> drag;
-    SDL_FRect shownScreen{}; // where the Screens tab showed the screen last (the mouse over it: on the screen)
+    SDL_FRect shownScreen{}; // where the Screens page showed the screen last (the mouse over it: on the screen)
     std::size_t wordsVersion = SIZE_MAX, gameWords = 0; // the game's words, as of that version of the scripts
     // The open scene's lines as the list says them, and which never ran in a play (as of that version, scene and set of lines run).
     std::size_t listVersion = SIZE_MAX, listScene = SIZE_MAX, listReached = SIZE_MAX, neverRan = 0;
@@ -834,7 +557,9 @@ struct DeveloperTools {
     // The tools' own keys, as their controls have them this frame (Developer::readToolKeys), and whether a key pressed
     // is one of them (or a press of its button).
     std::array<std::vector<KeyChord>, static_cast<std::size_t>(ToolKey::Count)> toolKeys;
-    [[nodiscard]] bool isKey(const SDL_KeyboardEvent& key, ToolKey which) const;
+    // Whether `key` is one of the tools' own (as their controls have them); `repeating`: held down too (it comes again, as
+    // an arrow moving on does); `anyShift`: with Shift too (Shift and an arrow: a bigger step).
+    [[nodiscard]] bool isKey(const SDL_KeyboardEvent& key, ToolKey which, bool repeating = false, bool anyShift = false) const;
     std::uint64_t filesGeneration = 1;
     // The Voices list: the lines characters with voices say, as of the scripts read (`checked`), and
     // whether each one's file is there (in a translation's folder too: cachedExists).
@@ -922,9 +647,8 @@ struct DeveloperTools {
     std::uint64_t textFrame = 0; // the frames drawn
 };
 
-// A part that's a list under its heading, with rows of buttons under it (DeveloperUi::listPart): where its list and
-// each row go.
-struct ListPart {
+// Where a page part's list goes, and the rows of buttons under it (DeveloperUi::listRoom).
+struct ListRoom {
     SDL_FRect list{};
     std::vector<SDL_FRect> rows;
 };
@@ -979,34 +703,58 @@ public:
     void backToGame();     // or Play, when no game is going on
     void backToEditor();   // developer mode: the developer tools, until Play (at the start, and where the player would close)
     void developerEvent(const SDL_Event& e);
+    void stickWheel(float up, float across); // the right stick: the wheel turned, where the keys are (their ring), else under the pointer
     void updateDeveloper();
     void drawDeveloper();
-    [[nodiscard]] std::string_view tabName() const { return viewName(tools.view); } // the tab open (the window's title says it)
+    [[nodiscard]] std::string_view shownPageName() const { return pageName(tools.page); } // the page open (the window's title says it)
     void playFromLine(const std::string& scene, std::optional<std::size_t> line); // the game, as it is at that line (none: the scene's first)
 
 private:
-    // The tabs' parts, each a sub-window (DeveloperPanels.cpp). A part: its name in its tab, where the tab puts it, and
-    // what draws it in the room it's given (true: it changed something, so the parts after it wait for the next frame);
-    // a form's scrollbar goes beside it, in room kept at its right. drawPanels: the tab's parts where they are, bottom
-    // to top, each with its edge (true: one changed something); with Layout on they're moved and resized. The
-    // layout as kept (layout.txt, in the tools' own folder), a tab's put back, and the pointer the tools show (none:
-    // the game's).
-    struct Panel {
+    // What the tools' own part's buttons do (ToolButton::id; Developer::toolButtons has them in their order).
+    enum ToolCommand : int {
+        kNewGame = 1, kLookAgain, kReload, kPack, kFolder, kQuit,
+        kUndo, kRedo, kCut, kCopy, kPaste, kDuplicate, kDelete, kSelectAll,
+        kStoryPage, kScreensPage, kLibraryPage, kEditLayout, kResetLayout,
+        kPlay, kNextLine, kPlayScene, kStopHere,
+        kToolsTranslation, kAbout,
+        kToolsLanguage // (+ its place among the language buttons: 0 English, then the translations; last, so they come after every other)
+    };
+    static constexpr std::array kPages{std::pair{kStoryPage, DeveloperTools::Page::Story}, std::pair{kScreensPage, DeveloperTools::Page::Screens},
+                               std::pair{kLibraryPage, DeveloperTools::Page::Library}}; // (in this order: their keys are tools_story, tools_screens and tools_library)
+
+    // The pages' page parts (PageParts.cpp). A page part: its name in its page, its title, where the page puts
+    // it, and what draws what's under its title in the room it's given (true: it changed something, so the page parts
+    // after it wait for the next frame); a form's scrollbar goes beside it, in room kept at its right; and the room what's
+    // under its title needs (0: any; `tallAt`: how tall at a width, for what wraps): in less, it's drawn that big and
+    // scrolls under the title, down and across as needed. `head` draws buttons at the right of its title, as a preview's
+    // (true: it changed something); its title's row is then layout::previewHeadH high, a gap under them.
+    // drawPageParts: the page's page parts where they are, bottom to top, each with its edge (true: one changed something);
+    // with Layout on they're moved and resized. The layout as kept (layout.txt, in the tools' own folder), a page's put
+    // back, and the pointer the tools show (none: the game's).
+    struct PagePart {
         std::string_view id;
+        std::string heading;
         SDL_FRect at;
         std::function<bool(const SDL_FRect&)> draw;
         bool scrollsBeside = false;
+        SDL_FPoint least{};
+        std::function<float(float)> tallAt;
+        std::function<bool(PreviewHead&)> head;
     };
-    bool drawPanels(DeveloperUi& ui, std::string_view tab, std::span<Panel> panels);
-    // What a part's edge and the room inside it take from its room: across, and down. A part as tall as what's in it
-    // is that much taller.
-    [[nodiscard]] SDL_FPoint panelChrome(float k) const;
-    // The parts every tab has, made alike, each under its heading (its title, the words of its id): a list with
-    // `rows` rows of buttons under it (DeveloperUi::listPart; `draw` is given where they go), anything else (`draw` is
-    // given the room under the heading), and a form (the same, its scrollbar beside it in room kept at its right).
-    Panel listPanel(DeveloperUi& ui, std::string_view id, std::string heading, const SDL_FRect& at, std::size_t rows, std::function<bool(const ListPart&)> draw);
-    Panel titledPanel(DeveloperUi& ui, std::string_view id, std::string heading, const SDL_FRect& at, std::function<bool(const SDL_FRect&)> draw);
-    Panel formPanel(DeveloperUi& ui, std::string_view id, std::string heading, const SDL_FRect& at, std::function<bool(const SDL_FRect&)> draw);
+    bool drawPageParts(DeveloperUi& ui, std::string_view page, std::span<PagePart> pageParts);
+    // What a page part's edge and the room inside it take from its room: across, and down. A page part as tall as what's
+    // in it is that much taller.
+    [[nodiscard]] SDL_FPoint pagePartChrome(float k) const;
+    // The page parts most pages have, made alike: a list with `rows` rows of buttons under it (DeveloperUi::listRoom;
+    // `draw` is given where they go), and a form (its scrollbar beside it in room kept at its right; `filled`: there's
+    // something chosen to show in it). Each needs room for a few of its rows (a list's and its buttons, a form's labels
+    // and boxes; an empty form none): with less, it scrolls.
+    PagePart listPagePart(DeveloperUi& ui, std::string_view id, std::string heading, const SDL_FRect& at, std::size_t rows, std::function<bool(const ListRoom&)> draw);
+    PagePart formPagePart(DeveloperUi& ui, std::string_view id, std::string heading, const SDL_FRect& at, bool filled, std::function<bool(const SDL_FRect&)> draw);
+    // The keys' place (DeveloperTools::keyStops): Tab and Shift+Tab move it as the frame starts, Enter, Space and up and
+    // down act on it; and once the frame's drawn its stops are kept, and a ring goes round the one the keys are on.
+    void keyMoves();
+    void keyRing(DeveloperUi& ui);
     void readLayout();
     void saveLayout();
     void resetLayout();
@@ -1015,6 +763,25 @@ private:
     // they go in a width (and how tall they are), and the part drawn (at the window's foot).
     [[nodiscard]] std::vector<std::vector<ToolButton>> toolButtons();
     void runCommand(int command);
+    void pressTool(ToolKey which); // one of the tools' keys pressed, whatever keys it has (its button's, a controller's)
+    void padButton(const SDL_Event& e); // a controller's button down or up: the tools' keys it is
+    void padMoves(); // a controller held: its d-pad (and so its left stick) and shoulders again
+    // The on-screen keyboard (DeveloperTools::screenKeys): brought up for the box typed into, a controller's button on it (true:
+    // it took it), its key moved to and pressed, a click on it, and drawn over the rest.
+    void openScreenKeys(bool all = false); // (all: the box's words chosen, so what's typed takes their place)
+    // A question (or a message: one button) in the system's window, or the tools' own while a controller is in use; `keep`:
+    // the button that keeps things as they are (Esc's); then `then` with the button pressed. Without a window to show it in
+    // (SDL's offscreen video), as `keep` was pressed.
+    void ask(std::string title, std::string body, std::vector<std::string> buttons, std::size_t keep, SDL_MessageBoxFlags kind,
+             std::function<void(std::size_t)> then = {});
+    bool modalFrame(); // the frame's input to the tools' own question or file picker, when one's open (true: it took it)
+    void drawModal(DeveloperUi& ui);
+    void readPickerFolder();
+    bool screenKeysButton(SDL_GamepadButton button);
+    void screenKeysMove(int dx, int dy);
+    void screenKeysPress(int row, int col);
+    void screenKeysFrame();
+    void drawScreenKeys(DeveloperUi& ui);
     void readToolKeys(); // (DeveloperTools::toolKeys, as the scripts have them now)
     struct ToolsPlaced {
         std::vector<std::vector<SDL_FRect>> buttons; // (group by group)
@@ -1023,17 +790,17 @@ private:
     };
     [[nodiscard]] static ToolsPlaced placeToolButtons(DeveloperUi& ui, const std::vector<std::vector<ToolButton>>& groups, float x, float y, float w);
     void drawToolsPart(DeveloperUi& ui, const std::vector<std::vector<ToolButton>>& groups, const SDL_FRect& at);
-    [[nodiscard]] static std::string_view viewName(DeveloperTools::View view); // a tab's name, in the tools' language
+    [[nodiscard]] static std::string_view pageName(DeveloperTools::Page page); // a page's name, in the tools' language
     [[nodiscard]] std::string translationPath(const std::string& id) const; // a translation's file
     void saveTranslation();                             // the Library's translations' file, written
     [[nodiscard]] std::string translationSheet() const; // its spreadsheet's path (next to the game folder)
     std::string exportTranslationSheet();               // written, and read back: both say how it went
     std::string importTranslationSheet();
     void drawStory(DeveloperUi& ui, const SDL_FRect& area);
-    struct StoryFrame; // (that tab this frame: what its parts share)
-    bool drawScenesList(const StoryFrame& f, const ListPart& at);     // the scenes and + New scene (true: changed, the rest next frame)
-    bool drawCharactersList(const StoryFrame& f, const ListPart& at); // the characters, and + New character (true: changed)
-    bool drawLinesList(StoryFrame& f, const ListPart& at);              // the scene's lines: chosen, moved, copied (true: changed)
+    struct StoryFrame; // (that page this frame: what its page parts share)
+    bool drawScenesList(const StoryFrame& f, const ListRoom& at);     // the scenes and + New scene (true: changed, the rest next frame)
+    bool drawCharactersList(const StoryFrame& f, const ListRoom& at); // the characters, and + New character (true: changed)
+    bool drawLinesList(StoryFrame& f, const ListRoom& at);              // the scene's lines: chosen, moved, copied (true: changed)
     bool drawRowList(const StoryFrame& f, const SDL_FRect& box);          // ...the list: chosen, moved, deleted (true: changed)
     bool storyClipboard(const StoryFrame& f);                             // ...copy, cut, paste, duplicate (true: changed)
     bool drawNewLine(const StoryFrame& f, const SDL_FRect& box);          // New line: a button for each kind (true: one added)
@@ -1044,18 +811,19 @@ private:
     std::unique_ptr<Game> playedTo(const Script& s, const StoryEditor::Scene& scene, std::optional<std::size_t> line); // (Play from this line's)
     void drawSettingsForm(DeveloperUi& ui, const SDL_FRect& right); // the Library's Settings, as a form
     void drawScreens(DeveloperUi& ui, const SDL_FRect& area);
-    struct ScreensFrame; // (that tab this frame: what its columns share)
-    bool drawScreensList(const ScreensFrame& f, const ListPart& at); // the screens, and + New screen (true: changed, the rest next frame)
-    bool drawPartsList(const ScreensFrame& f, const ListPart& at);   // the parts of the one open (true: changed)
+    struct ScreensFrame; // (that page this frame: what its columns share)
+    bool drawScreensList(const ScreensFrame& f, const ListRoom& at); // the screens, and + New screen (true: changed, the rest next frame)
+    bool drawPartsList(const ScreensFrame& f, const ListRoom& at);   // the parts of the one open (true: changed)
     bool drawPreview(ScreensFrame& f); // the screen: parts chosen, moved and resized on it (true: changed)
-    bool drawNewPart(ScreensFrame& f);       // New part: where it goes, and a button for each kind (true: one added)
+    bool drawNewPart(ScreensFrame& f);       // New part: a button for each kind (true: one added)
+    void drawGoesIn(const ScreensFrame& f, PreviewHead& row); // ...and where it goes, at the right of its title
     void chooseOnScreen(ScreensFrame& f);    // ...parts chosen on it, and moving or resizing them started
     bool dragOnScreen(ScreensFrame& f);      // ...parts moved or resized, lined up; written once let go (true)
     bool screenKeys(ScreensFrame& f);        // ...copy, cut, paste, duplicate, and the arrows that nudge (true: changed)
     void paintScreen(const ScreensFrame& f); // ...the screen drawn, with its heading
     void drawScreensForm(const ScreensFrame& f);    // the form: the screens to start from, the chosen part's settings, or the screen's
     void drawNewScreenForm(const ScreensFrame& f); // ...+ New screen's: the screens to start from
-    // The sizes of the texts without one in screen lines written in pixels, for placesFromPixels (DeveloperScreens.cpp).
+    // The sizes of the texts without one in screen lines written in pixels, for placesFromPixels (ReadyMadeScreens.cpp).
     [[nodiscard]] std::map<std::size_t, SDL_FPoint> ownSizes(const std::vector<std::string>& lines, const std::vector<std::string>& needs, float width, float height, float scale);
     void drawBuiltInForm(const ScreensFrame& f);   // ...a built-in screen's
     void drawLineUpForm(const ScreensFrame& f);    // ...several parts': lined up, or spread out
@@ -1069,14 +837,18 @@ private:
     void drawMapScenes(const MapFrame& f);     // ...the scenes' boxes (one renamed)
     bool mapLetGo(const MapFrame& f);          // ...a scene let go: moved, or a jump drawn (true: written)
     void drawLibrary(DeveloperUi& ui, const SDL_FRect& area);
-    struct LibraryFrame; // (that tab this frame: what its parts share)
-    // Each kind's list or its form, the Library's two parts (true: the list changed something, the rest next frame).
-    enum class LibraryPart : std::uint8_t { List, Form };
-    bool drawLibraryFiles(const LibraryFrame& f, LibraryPart part);       // the files of the kind chosen: listed, renamed, imported
+    struct LibraryFrame; // (that page this frame: what its page parts share)
+    // Each kind's list or its form, the kind's two page parts (true: the list changed something, the rest next frame).
+    enum class KindPagePart : std::uint8_t { List, Form };
+    bool drawLibraryFiles(const LibraryFrame& f, KindPagePart pagePart);       // the files of the kind chosen: listed, renamed, imported
     void drawLibraryFile(const LibraryFrame& f, const std::string& name); // the one chosen: its name in scripts, the Trash, a look at it
-    bool drawLibraryDefinitions(const LibraryFrame& f, LibraryPart part); // the definitions of the kind chosen, and the one chosen's form
-    bool drawVariables(const LibraryFrame& f, LibraryPart part); // the Library's variables
-    bool drawVoices(const LibraryFrame& f, LibraryPart part);    // ...and voiced lines
+    bool drawLibraryDefinitions(const LibraryFrame& f, KindPagePart pagePart); // the definitions of the kind chosen, and the one chosen's form
+    bool drawVariables(const LibraryFrame& f, KindPagePart pagePart); // the Library's variables
+    // ...a list's copy, cut, paste and duplicate: `text` the chosen one's lines, `chosen` its definition (none: a built-in
+    // one, copied, not cut), `choose` given the pasted one's index among the kind's, or none once it's cut (true: done).
+    bool libraryClipboard(const std::string& list, std::string_view kind, const std::string& text, const StoryEditor::Definition* chosen,
+                          const std::function<void(std::optional<std::size_t>)>& choose);
+    bool drawVoices(const LibraryFrame& f, KindPagePart pagePart);    // ...and voiced lines
     void drawStyleSample(DeveloperUi& ui, const std::string& style, const SDL_FRect& box);
     void drawAtlas(DeveloperUi& ui, const StoryEditor::Definition& def, const SDL_FRect& box); // its frames, and its eyes and mouth to drag
     void drawSubImage(DeveloperUi& ui, const StoryEditor::Definition& def, const SDL_FRect& box); // the image it's cut from, to cut it out on
@@ -1090,14 +862,17 @@ private:
     float drawTimeline(DeveloperUi& ui, const StoryEditor::Definition& def, const StoryEditor::Timeline& timeline, float x, float y, float w);
     void drawDefinition(DeveloperUi& ui, const std::string& kind, const StoryEditor::Definition& def, const SDL_FRect& right); // as a form
     void drawBuiltInControl(DeveloperUi& ui, const std::string& name, const std::string& line, const SDL_FRect& right); // ...a built-in control's
-    void drawRecordTitle(DeveloperUi& ui, std::string_view kind, const std::string& name, float x, float w, float& y, float labelW = 0.0f); // in the gallery or music room (0: its own labels' column)
+    void drawRecordTitle(DeveloperUi& ui, std::string_view kind, const std::string& name, float x, float w, float& y, float labelW = 0.0f); // in the gallery or music room, or its caption (0: its own labels' column)
     std::vector<std::string> translationIds(); // the Library's translations: their files (undo and redo taken, texts the game doesn't show taken out)
-    bool drawLanguagesList(DeveloperUi& ui, const ListPart& at, const std::vector<std::string>& ids);     // ...the languages and their buttons (true: one did its work)
+    bool drawTranslationsList(DeveloperUi& ui, const ListRoom& at, const std::vector<std::string>& ids);  // ...the translations (a language each) and their buttons (true: one did its work)
     void drawTranslationForm(DeveloperUi& ui, const SDL_FRect& right, const std::vector<std::string>& ids); // ...the one open: its language and its texts
     std::string languageLabel(const std::string& id);           // ...a file's language, as listed
     void openTranslation(const std::string& id);                // ...a file opened
     void fillTranslation(const std::string& id);                // ...every text the game shows, into a file
     void renameTranslation(std::string from, const std::string& to); // ...a file named after its language
+    void nameAfterLanguage(const std::vector<std::string>& ids); // ...the one open's file named after its language
+    void setLanguage(const std::string& typed, const std::string& key); // ...the one open's language set, as typed
+    void removeTranslation(const std::string& id);              // ...a file to the Trash
     void rememberTranslation(const std::string& key);           // ...a step for undo
     void translationKeys();                                     // ...undo and redo
     void pruneTranslation();                                    // ...the texts the game doesn't show any more, taken out
@@ -1136,6 +911,7 @@ private:
     void makeSample(bool choice); // the story at its first line, or its first choice
     bool paintCanvas(const std::function<void()>& paint); // into the tools' canvas, as big as the game's
     void drawAbout(DeveloperUi& ui, const SDL_FRect& box); // About: the versions, then the licences
+    [[nodiscard]] float aboutLeastW(DeveloperUi& ui) const; // (as wide as its widest line: narrower, it scrolls across)
     void tell(const std::string& message, bool failed); // what the last tool did, in a window of its own (with OK)
     // A form's fields, one under another (the label at the left, `labelW` wide, or over its box when
     // that's 0), each with a list to pick from when it has names or values to list: the field changed
