@@ -422,31 +422,45 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
         out.push_back(setting("language").value_or("English")); // (as Settings has it)
         for (const std::string& file : filesIn("translations/", std::array{std::string_view{".vnscript"}})) out.push_back(lower(file));
         break;
-    case Pick::Expressions: { // the character's images (images/NAME_happy.png) and its atlas's expressions (not the images its eyes
-                              // blink and its mouth talks with: eyes ... image=NAME_eyes)
-        std::string image = lower(context);
-        std::ranges::replace(image, ' ', '_');
-        for (const Character& c : characters())
-            if (lower(c.name) == lower(context))
-                for (const std::string& word : rawWords(afterFirst(files_[c.file].lines[c.line])))
-                    if (lower(word).starts_with("image=")) image = lower(unquote(word.substr(6)));
-        std::vector<std::string> atlased, layers;
+    case Pick::Expressions: { // what `show NAME EXPRESSION` can show (the image NAME_EXPRESSION, as the game finds it): the
+                              // character's own images (images/aiko_happy.png) and sub-images, and its atlases' expressions: the
+                              // atlas named as its images are, as they are (aiko: happy), and others, after their own name
+                              // (aiko_close: close_happy). Never an atlas's own image, the images its eyes blink and its mouth
+                              // talks with, nor the face beside the textbox (aiko_face).
+        const std::string base = imageBaseOf(context), prefix = base + "_";
+        std::vector<std::string> notShown, atlased; // (atlases' names and images, and their eyes' and mouths'; their expressions)
+        std::map<std::string, std::vector<std::string>, std::less<>> expressionsOf; // (each atlas's, for same_names_as=)
         for (const File& f : files_)
-            for (std::size_t i = 0; i < f.lines.size(); ++i)
-                if (indentOf(f.lines[i]) == 0 && lower(firstWord(f.lines[i])) == "atlas" && lower(firstWord(afterFirst(f.lines[i]))) == image)
-                    for (std::size_t j = i + 1; j < f.lines.size() && (blank(f.lines[j]) || indentOf(f.lines[j]) > 0); ++j) {
-                        std::string part = f.lines[j]; // ("eyes: open, half, closed" too)
-                        std::ranges::replace(part, ',', ' ');
-                        std::ranges::replace(part, ':', ' ');
-                        const std::string what = lower(firstWord(part));
-                        for (const std::string& w : rawWords(afterFirst(part)))
-                            if (what == "expressions" && !w.contains('=')) atlased.push_back(w);
-                            else if ((what == "eyes" || what == "mouth") && lower(w).starts_with("image=")) layers.push_back(lower(unquote(w.substr(6))));
-                    }
+            for (std::size_t i = 0; i < f.lines.size(); ++i) {
+                if (indentOf(f.lines[i]) != 0 || lower(firstWord(f.lines[i])) != "atlas") continue;
+                const std::string rest(afterFirst(f.lines[i])), name = lower(firstWord(rest));
+                std::vector<std::string> expressions;
+                notShown.push_back(name);
+                for (const std::string& w : rawWords(afterFirst(rest)))
+                    if (lower(w).starts_with("image=")) notShown.push_back(lower(imageName(unquote(w.substr(6)))));
+                    else if (lower(w).starts_with("same_names_as="))
+                        if (const auto it = expressionsOf.find(lower(unquote(w.substr(14)))); it != expressionsOf.end()) expressions = it->second;
+                for (std::size_t j = i + 1; j < f.lines.size() && (blank(f.lines[j]) || indentOf(f.lines[j]) > 0); ++j) {
+                    std::string part = f.lines[j]; // ("eyes: open, half, closed" too)
+                    std::ranges::replace(part, ',', ' ');
+                    std::ranges::replace(part, ':', ' ');
+                    std::vector<std::string> listed;
+                    for (const std::string& w : rawWords(afterFirst(part)))
+                        if (lower(w).starts_with("image=")) notShown.push_back(lower(imageName(unquote(w.substr(6)))));
+                        else if (!w.contains('=')) listed.push_back(lower(w));
+                    if (lower(firstWord(part)) == "expressions" && !listed.empty()) expressions = std::move(listed);
+                }
+                if (name == base) std::ranges::copy(expressions, std::back_inserter(atlased));
+                else if (name.starts_with(prefix))
+                    for (const std::string& e : expressions) atlased.push_back(name.substr(prefix.size()) + "_" + e);
+                expressionsOf.insert_or_assign(name, std::move(expressions));
+            }
         for (const std::string& name : filesIn("images/", kImageTypes))
-            if (lower(name).starts_with(image + "_") && !lower(name).ends_with("_face") && !std::ranges::contains(layers, lower(name))) out.push_back(name.substr(image.size() + 1));
-        for (const std::string& e : atlased)
-            if (!std::ranges::contains(out, e)) out.push_back(e);
+            if (const std::string l = lower(name); l.starts_with(prefix) && !l.ends_with("_face") && !std::ranges::contains(notShown, l))
+                add(out, name.substr(prefix.size()));
+        for (const std::string& p : defined("sub-image"))
+            if (lower(p).starts_with(prefix)) add(out, p.substr(prefix.size()));
+        for (std::string& e : atlased) add(out, std::move(e));
         break;
     }
     }

@@ -211,12 +211,6 @@ constexpr std::pair<std::string_view, int> kMouths[]{{"yes", 0}, {"voice", 1}, {
 // A style's align= (left, centre, right) or, `vertical`, its align_vertically= (top, centre, bottom).
 std::optional<Align> toAlign(std::string_view s, bool vertical);
 
-// An image name as scripts use it: "images/mina.png" -> mina
-std::string imageName(std::string_view file);
-
-// Default sprite file name for a character: "Mr. Tanaka" -> mr_tanaka
-std::string characterImageName(std::string_view name);
-
 // ---------------------------------------------------------------------------
 // Parser
 // ---------------------------------------------------------------------------

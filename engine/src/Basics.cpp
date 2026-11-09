@@ -181,6 +181,22 @@ std::string saveFolderNameOf(std::string_view saveFolder, std::string_view title
     return name.empty() ? std::string("VNext") : name;
 }
 
+std::string imageName(std::string_view file) {
+    std::string out(file);
+    if (out.starts_with("images/")) out.erase(0, 7);
+    if (const auto dot = out.rfind('.'); dot != std::string::npos && out.find('/', dot) == std::string::npos) out.erase(dot);
+    return out;
+}
+
+std::string characterImageName(std::string_view name) {
+    std::string out;
+    for (char c : lower(name)) {
+        if (letterOrDigitByte(c) || c == '-' || c == '_') out += c;
+        else if (c == ' ' && !out.empty() && out.back() != '_') out += '_';
+    }
+    return out;
+}
+
 std::string percentEscaped(std::string_view text, std::string_view safe) {
     std::string out;
     for (const char c : text) {

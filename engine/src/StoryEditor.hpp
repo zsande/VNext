@@ -205,6 +205,9 @@ public:
     bool jumpAtEnd(std::size_t scene, const std::string& to);
     // Each character's name and the name its images start with (aiko_happy is "show aiko happy").
     [[nodiscard]] std::vector<std::pair<std::string, std::string>> imageBases() const;
+    // The name a character's images start with: its image=, else its name as the game makes one of it (Mr. Tanaka:
+    // mr_tanaka); for a name that's no character's, the same as for one without image=.
+    [[nodiscard]] std::string imageBaseOf(std::string_view character) const;
     // Where the story goes from each scene: its jumps, by name.
     struct Link {
         std::size_t from = 0;

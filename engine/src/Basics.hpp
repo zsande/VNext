@@ -270,6 +270,10 @@ std::string fileNameOf(std::string_view text);
 // The folder a game's players' data goes in (in VNext's own): its save_folder setting, else its title, as a folder can be called
 // (fileNameOf), else VNext.
 std::string saveFolderNameOf(std::string_view saveFolder, std::string_view title);
+// An image name as scripts use it: "images/mina.png" -> mina.
+std::string imageName(std::string_view file);
+// The name a character's images start with, unless its image= says another: "Mr. Tanaka" -> mr_tanaka (mr_tanaka_happy).
+std::string characterImageName(std::string_view name);
 std::string upper(std::string_view s);
 std::string upperFirst(std::string_view s);        // its first letter a capital
 bool startsWithCapital(std::string_view s);        // its first letter is one

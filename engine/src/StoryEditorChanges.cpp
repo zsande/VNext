@@ -662,13 +662,18 @@ std::optional<std::size_t> StoryEditor::renameAsset(std::string_view folder, con
 std::vector<std::pair<std::string, std::string>> StoryEditor::imageBases() const {
     std::vector<std::pair<std::string, std::string>> out;
     for (const Character& c : characters()) {
-        std::string base = lower(c.name);
-        std::ranges::replace(base, ' ', '_');
+        std::string base = characterImageName(c.name); // (as the game names them)
         for (const std::string& word : rawWords(afterFirst(files_[c.file].lines[c.line])))
-            if (lower(word).starts_with("image=")) base = lower(unquote(word.substr(6)));
+            if (lower(word).starts_with("image=")) base = lower(imageName(unquote(word.substr(6))));
         out.emplace_back(lower(c.name), base);
     }
     return out;
+}
+
+std::string StoryEditor::imageBaseOf(std::string_view character) const {
+    for (const auto& [name, base] : imageBases())
+        if (name == lower(character)) return base;
+    return characterImageName(character);
 }
 
 bool StoryEditor::jumpAtEnd(std::size_t scene, const std::string& to) {

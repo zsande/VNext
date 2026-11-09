@@ -116,22 +116,6 @@ std::optional<Align> toAlign(std::string_view s, bool vertical) {
     return std::nullopt;
 }
 
-std::string imageName(std::string_view file) {
-    std::string out(file);
-    if (out.starts_with("images/")) out.erase(0, 7);
-    if (const auto dot = out.rfind('.'); dot != std::string::npos && out.find('/', dot) == std::string::npos) out.erase(dot);
-    return out;
-}
-
-std::string characterImageName(std::string_view name) {
-    std::string out;
-    for (char c : lower(name)) {
-        if (letterOrDigitByte(c) || c == '-' || c == '_') out += c;
-        else if (c == ' ' && !out.empty() && out.back() != '_') out += '_';
-    }
-    return out;
-}
-
 // `entry` is main.vnscript: the game starts there, like a C++ program in main(). It has the game's
 // setting lines and its "scene start", and includes the other files.
 void Parser::run(const std::string& entry, std::string_view builtin) {

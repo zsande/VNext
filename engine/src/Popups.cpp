@@ -190,13 +190,14 @@ void Developer::drawPopup(DeveloperUi& ui) {
     }
     const float itemsTop = listTop + (byVariable ? itemH : 0.0f);
     if (entries.empty() && !colours) ui.textAround("Empty"_tr, box.x + 10 * k, itemsTop + itemH / 2, layout::popupText, theme::dim);
+    const std::string imagesOf = f.pick == Pick::Expressions ? d.editor.imageBaseOf(f.context) : std::string{}; // (an expression's picture: the character's image)
     for (std::size_t i = 0; i < entries.size(); ++i) {
         const PopupEntry& e = entries[i];
         if (images) { // a small image, its name under it
             const SDL_FRect c{box.x + pad + static_cast<float>(i % perRow) * (cellW + pad), itemsTop + static_cast<float>(i / perRow) * (cellH + pad), cellW, cellH};
             if (c.y + c.h < box.y || c.y > box.y + box.h) continue;
             if (ui.button(c, "", chosen(e) || p.keyed == i, true, layout::smallButtonText)) pop.clicked = e.value;
-            std::string image = f.pick == Pick::Expressions ? lower(f.context) + "_" + lower(e.value) : lower(e.value);
+            std::string image = f.pick == Pick::Expressions ? imagesOf + "_" + lower(e.value) : lower(e.value);
             if (f.pick == Pick::ImageFiles) { // ("images/icon.png": the image, by its name)
                 if (const auto slash = image.rfind('/'); slash != npos) image.erase(0, slash + 1);
                 if (const auto dot = image.rfind('.'); dot != npos) image.erase(dot);
