@@ -61,7 +61,7 @@ jobs:
 
       - name: Build
         working-directory: engine
-        run: cmake --build --preset release --parallel
+        run: cmake --build --preset release --parallel 4 # (the runners' 4 cores: with no number, Make starts every file at once and runs out of memory)
 
       - name: Package
         shell: bash
