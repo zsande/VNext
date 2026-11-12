@@ -5,6 +5,7 @@
 // next to the player), so nothing's downloaded.
 #include "Developer.hpp"
 #include "Engine.hpp"
+#include "Platform.hpp"
 #include "ScriptEdits.hpp"
 
 #include <SDL3/SDL_process.h>
@@ -287,17 +288,17 @@ std::string Developer::playersFolder() const {
     return here + "players/";
 }
 
-// The player the tools run in, as the game would have it for this system: the app (on a Mac), VNext.exe, or the AppImage; none
-// for one that isn't (a player built and run as it is).
+// The player the tools run in, as the game would have it for this system: the app (on a Mac), the .exe (whatever it's
+// called), or the AppImage; none for one that isn't (on a Mac or Linux, a player built and run as it is).
 std::string Developer::ownPlayer() const {
+#if defined(SDL_PLATFORM_MACOS)
     const char* at = SDL_GetBasePath();
     const std::string here = at ? at : "";
-#if defined(SDL_PLATFORM_MACOS)
     constexpr std::string_view bundleTail = "Contents/Resources/";
     if (here.ends_with(std::string(".app/") + std::string(bundleTail))) return here.substr(0, here.size() - bundleTail.size() - 1); // (".../VNext.app")
     return {};
 #elif defined(SDL_PLATFORM_WINDOWS)
-    return fileExists(here + "VNext.exe") ? here + "VNext.exe" : std::string{};
+    return programFile();
 #else
     const char* image = SDL_getenv("APPIMAGE");
     return image ? std::string(image) : std::string{};

@@ -60,5 +60,10 @@ private:
     Info info_;
 };
 inline constexpr std::array<std::string_view, 3> kSystemMovieTypes{".mp4", ".mov", ".m4v"};
+#if defined(_WIN32)
+// The running program's own file, whatever it's called (VNext.exe, or renamed): the player Export puts in a game's
+// Windows zip (Windows.cpp).
+[[nodiscard]] std::string programFile();
+#endif
 
 } // namespace vn

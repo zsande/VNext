@@ -534,4 +534,15 @@ std::unique_ptr<SystemMovie> SystemMovie::open(const std::string& path, const st
     return movie;
 }
 
+std::string programFile() {
+    std::wstring path(MAX_PATH, L'\0');
+    while (path.size() <= 65536) { // (a longer path: a bigger room for it, till it fits)
+        const DWORD n = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+        if (n == 0) return {};
+        if (n < path.size()) return fromWide(path.c_str()); // (ended by its 0: all of it)
+        path.resize(path.size() * 2);
+    }
+    return {};
+}
+
 } // namespace vn
