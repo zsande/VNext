@@ -378,9 +378,9 @@ std::string Developer::exportGame(const ExportPlan& plan) {
             ZipWriter z(zip);
             if (entries && game) {
                 z.folder(name + "/");
-                for (const ZipEntry& e : *entries)
+                for (const ZipEntry& e : *entries) // (a player in one file renamed; an app's folder, VNext.app/, kept as it is)
                     if (e.name != kPackName)
-                        z.copy(from.get(), e, name + "/" + (e.name == system.player ? name + std::string(system.as) : e.name));
+                        z.copy(from.get(), e, name + "/" + (e.name == system.player && !e.name.ends_with('/') ? name + std::string(system.as) : e.name));
                 z.add(name + "/" + std::string(kPackName), *game, 0644);
             }
             done = entries && game && z.finish();
