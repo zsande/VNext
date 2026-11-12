@@ -19,10 +19,10 @@ std::string scaled(const std::string& line, float sy) {
         const std::string key = eq == std::string::npos ? std::string() : word.substr(0, eq);
         const std::string value = eq == std::string::npos ? std::string() : unquote(word.substr(eq + 1));
         const bool pixels = lower(value).ends_with("px"); // (a size or gap in pixels: 140px)
-        const auto number = eq == std::string::npos ? std::nullopt : parseNumber(pixels ? std::string_view(value).substr(0, value.size() - 2) : std::string_view(value));
         std::string w = word;
-        if (number && pixels) w = std::format("{}={}px", key, std::lround(*number * sy));
-        else if (number && down.contains(key)) w = std::format("{}={}", key, std::lround(*number * sy));
+        if (pixels || down.contains(key))
+            if (const auto number = parseNumber(pixels ? std::string_view(value).substr(0, value.size() - 2) : std::string_view(value)))
+                w = std::format("{}={}{}", key, std::lround(*number * sy), pixels ? "px" : "");
         out += (out.empty() || out.back() == ' ' ? "" : " ") + w;
     }
     return out;
