@@ -11,7 +11,7 @@ set(CMAKE_BUILD_TYPE Release CACHE STRING "The one build there is" FORCE)
 set(CMAKE_CONFIGURATION_TYPES Release CACHE STRING "The one build there is" FORCE)
 
 project(VNext
-    VERSION 0.9.1
+    VERSION 1.0.0
     DESCRIPTION "A small 2D visual novel engine built on SDL3"
     LANGUAGES C CXX)
 if(APPLE)
