@@ -25,7 +25,7 @@ void StoryEditor::restore(const Snapshot& snapshot) {
     for (const auto& [path, lines] : snapshot) {
         const auto it = std::ranges::find(files_, path, &File::path);
         if (it == files_.end() || it->lines != lines) changed.push_back(next.size());
-        next.push_back({.path = path, .lines = lines, .modified = it != files_.end() ? it->modified : 0});
+        next.push_back({.path = path, .lines = lines, .modified = it != files_.end() ? it->modified : 0, .stamp = it != files_.end() ? it->stamp : 0}); // (a changed one's: new as it's written)
     }
     files_ = std::move(next);
     for (const std::size_t f : changed) write(f);
@@ -53,6 +53,7 @@ void StoryEditor::write(std::size_t file) {
     const std::string path = root_ + files_[file].path;
     if (!SDL_SaveFile(path.c_str(), text.data(), text.size())) problem_ = "Can't save '{}': {}."_tr(files_[file].path, SDL_GetError());
     if (SDL_PathInfo info; SDL_GetPathInfo(path.c_str(), &info)) files_[file].modified = info.modify_time;
+    files_[file].stamp = ++stamps_;
     ++version_;
 }
 
@@ -713,8 +714,10 @@ void StoryEditor::removeLink(const Link& link) {
     if (row != all.end()) remove(s, *row);
 }
 
+std::string StoryEditor::newCharacterName() const { return uniqueName("Someone", [&](const std::string& n) { return isCharacter(n); }, " "); }
+
 std::size_t StoryEditor::addCharacter() {
-    const std::string name = uniqueName("Someone", [&](const std::string& n) { return isCharacter(n); }, " ");
+    const std::string name = newCharacterName();
     remember({});
     auto& lines = files_[0].lines;
     const std::string line = std::format("character {}", name.contains(' ') ? "\"" + name + "\"" : name);
@@ -766,8 +769,8 @@ std::optional<std::size_t> StoryEditor::moveCharacter(std::size_t c, std::size_t
     return moveRecord(characters(), c, to, false, [](const Character& who) { return who.line + 1; }, [&] { return characters(); });
 }
 
-// The lines `from` says (and in a chat, what they send, type...), shows and hides of them, and their chats
-// and calls now say `to`.
+// The lines `from` says (and in a chat, what they send, type...), shows and hides of them, their chats and calls, and
+// wherever they're a visual (a screen's, a style's, an avatar...) now say `to`.
 void StoryEditor::renameSpeaker(const std::string& from, const std::string& to) {
     const std::string low = lower(from), word = to.contains(' ') ? "\"" + to + "\"" : to; // (as one word: show "Mr Tanaka")
     auto theirs = [&](const std::string& start) { return start == low || start.starts_with(low + " ") || start.starts_with(low + "("); }; // (Mika, Mika happy, Mika (happy))
@@ -793,6 +796,18 @@ void StoryEditor::renameSpeaker(const std::string& from, const std::string& to) 
                 std::string_view who = trim(rest), after;
                 if (const auto at = lower(who).rfind(" for "); verb == "phone" && at != npos) after = who.substr(at), who = trim(who.substr(0, at));
                 if (lower(unquote(who)) == low) line = indent + (verb == "chat" ? "chat " : "phone call ") + word + std::string(after) + (colon ? ":" : "");
+            }
+            if (from.contains('.') || from.contains(' ') || to.contains('.') || to.contains(' ')) continue;
+            if (lower(firstWord(text)) != "character") {
+                line = assetRenamed(line, "images/", from, to, {}); // (as a visual: image mika)
+                continue;
+            }
+            // (on a character's line, its avatar=; not its image= or face=, where its pictures' names start: files')
+            const auto spans = wordSpans(line);
+            for (const auto& [at, size] : spans | std::views::reverse) {
+                const std::string w = line.substr(at, size), key = lower(w.substr(0, w.find('=')));
+                if (!w.contains('=') || key == "image" || key == "face") continue;
+                if (const std::string now = assetRenamed(w, "images/", from, to, {}); now != w) line.replace(at, size, now);
             }
         }
 }

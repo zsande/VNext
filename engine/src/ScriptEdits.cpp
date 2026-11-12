@@ -17,9 +17,12 @@ std::string scaled(const std::string& line, float sy) {
     for (const std::string& word : rawWords(line)) {
         const auto eq = word.find('=');
         const std::string key = eq == std::string::npos ? std::string() : word.substr(0, eq);
-        const auto number = eq == std::string::npos ? std::nullopt : parseNumber(word.substr(eq + 1));
+        const std::string value = eq == std::string::npos ? std::string() : unquote(word.substr(eq + 1));
+        const bool pixels = lower(value).ends_with("px"); // (a size or gap in pixels: 140px)
+        const auto number = eq == std::string::npos ? std::nullopt : parseNumber(pixels ? std::string_view(value).substr(0, value.size() - 2) : std::string_view(value));
         std::string w = word;
-        if (number && down.contains(key)) w = std::format("{}={}", key, std::lround(*number * sy));
+        if (number && pixels) w = std::format("{}={}px", key, std::lround(*number * sy));
+        else if (number && down.contains(key)) w = std::format("{}={}", key, std::lround(*number * sy));
         out += (out.empty() || out.back() == ' ' ? "" : " ") + w;
     }
     return out;
@@ -81,8 +84,12 @@ bool phoneDoes(std::string_view t) {
 // show, hide, open or camera command (open's "and close with" too), as a story line or as an action (in quotes
 // after action=, drop=, action_on_open= or action_on_close=, or after another one there with ";"); and as the setting
 // animation_on_show or animation_on_hide. (animation= and the other options: with the rest of the options.)
-std::string animationRenamed(std::string line, std::string_view from, std::string_view to) {
-    const std::string name = lower(from);
+namespace {
+
+// `line` with the words of each command in it that `which` picks (by the command's words, in lower case) called `to`: the
+// line's own command, and each action's (in quotes after action=, drop=, action_on_open= or action_on_close=, or after
+// another one there with ";").
+std::string commandsRenamed(std::string line, std::string_view to, const std::function<std::vector<std::size_t>(const std::vector<std::string>&)>& which) {
     std::vector<std::size_t> starts{std::min(line.size(), line.find_first_not_of(' '))}; // (where each command begins)
     bool quoted = false, actions = false;
     for (std::size_t i = 0; i < line.size(); ++i) {
@@ -103,25 +110,67 @@ std::string animationRenamed(std::string line, std::string_view from, std::strin
     }
     for (auto s = starts.rbegin(); s != starts.rend(); ++s) { // (the last first: renaming one leaves the places before it as they were)
         const std::size_t end = std::min(line.size(), line.find_first_of(";\"", *s));
-        std::vector<std::pair<std::size_t, std::size_t>> words; // (where each of its words is, and how long)
+        std::vector<std::pair<std::size_t, std::size_t>> at; // (where each of its words is, and how long)
         for (std::size_t i = *s; i < end;) {
             while (i < end && line[i] == ' ') ++i;
             std::size_t j = i;
             while (j < end && line[j] != ' ') ++j;
-            if (j > i) words.emplace_back(i, j - i);
+            if (j > i) at.emplace_back(i, j - i);
             i = j;
         }
-        auto word = [&](std::size_t k) { return lower(line.substr(words[k].first, words[k].second)); };
-        std::vector<std::size_t> named; // (the words that are it)
-        if (const std::string verb = words.empty() ? std::string{} : word(0); verb == "background" || verb == "show" || verb == "hide" || verb == "open" || verb == "camera") {
-            for (std::size_t k = 1; k + 1 < words.size(); ++k)
-                if (word(k) == "with" && word(k + 1) == name) named.push_back(k + 1);
-        } else if (verb == "setting" && words.size() >= 3 && (word(1) == "animation_on_show" || word(1) == "animation_on_hide") && word(2) == name) {
-            named.push_back(2);
-        }
-        for (auto k = named.rbegin(); k != named.rend(); ++k) line.replace(words[*k].first, words[*k].second, to);
+        std::vector<std::string> words;
+        for (const auto& [from, size] : at) words.push_back(lower(line.substr(from, size)));
+        const auto named = which(words);
+        for (auto k = named.rbegin(); k != named.rend(); ++k) line.replace(at[*k].first, at[*k].second, to);
     }
     return line;
+}
+
+} // namespace
+
+std::string animationRenamed(std::string line, std::string_view from, std::string_view to) {
+    const std::string name = lower(from);
+    return commandsRenamed(std::move(line), to, [&](const std::vector<std::string>& w) {
+        std::vector<std::size_t> named; // (the words that are it)
+        if (const std::string verb = w.empty() ? std::string{} : w[0]; verb == "show" || verb == "hide" || verb == "open" || verb == "camera") {
+            for (std::size_t k = 1; k + 1 < w.size(); ++k)
+                if (w[k] == "with" && w[k + 1] == name) named.push_back(k + 1);
+        } else if (verb == "setting" && w.size() >= 3 && (w[1] == "animation_on_show" || w[1] == "animation_on_hide") && w[2] == name) {
+            named.push_back(2);
+        }
+        return named;
+    });
+}
+
+std::string visualRenamed(std::string line, std::string_view from, std::string_view to, bool type) {
+    const std::string name = lower(from);
+    if (!lower(line).contains(name)) return line;
+    return commandsRenamed(std::move(line), to, [&](const std::vector<std::string>& w) {
+        std::vector<std::size_t> named;
+        if (w.size() < 2 || (w[0] != "show" && w[0] != "hide")) return named;
+        if (!type && unquote(w[1]) == name) named.push_back(1);
+        for (std::size_t k = 2; type && w[0] == "show" && k + 1 < w.size(); ++k)
+            if (w[k] == "as" && w[k + 1] == name) named.push_back(k + 1);
+        return named;
+    });
+}
+
+std::string soundRenamed(std::string line, std::string_view from, std::string_view to, bool type) {
+    const std::string name = lower(from);
+    if (!lower(line).contains(name)) return line;
+    return commandsRenamed(std::move(line), to, [&](const std::vector<std::string>& w) {
+        std::vector<std::size_t> named;
+        if (w.size() < 2) return named;
+        if (w[0] == "play") {
+            const std::size_t what = w[1] == "song" ? 2 : 1; // (play song NAME: the music room's)
+            if (!type && what < w.size() && unquote(w[what]) == name) named.push_back(what);
+            for (std::size_t k = what + 1; type && k + 1 < w.size(); ++k)
+                if (w[k] == "as" && w[k + 1] == name) named.push_back(k + 1);
+        } else if (w[0] == "stop" && unquote(w[1]) == name) { // (a sound by its name, or all of a type)
+            named.push_back(1);
+        }
+        return named;
+    });
 }
 
 namespace {
@@ -143,8 +192,8 @@ std::string wordRenamed(const std::string& line, std::string_view from, std::str
 
 } // namespace
 
-// `line` with the scene `from` called `to` wherever it's gone to (jump NAME, start NAME), and where a
-// character names it as their chat or call scene (chat=NAME, call=NAME).
+// `line` with the scene `from` called `to` wherever it's gone to (jump NAME, start NAME), where a character names it
+// as their chat or call scene (chat=NAME, call=NAME), and where an ending is reached (scene=NAME).
 std::string renamed(const std::string& line, std::string_view from, std::string_view to) {
     auto endsWithWord = [](std::string_view s, std::string_view word) {
         return s.ends_with(word) && (s.size() == word.size() || !isWordChar(s[s.size() - word.size() - 1]));
@@ -153,6 +202,10 @@ std::string renamed(const std::string& line, std::string_view from, std::string_
         if (trim(before).starts_with("character ")) {
             const std::string_view setting = before.ends_with('"') ? before.substr(0, before.size() - 1) : before;
             return endsWithWord(setting, "chat=") || endsWithWord(setting, "call=");
+        }
+        if (trim(before).starts_with("ending ")) {
+            const std::string_view setting = before.ends_with('"') ? before.substr(0, before.size() - 1) : before;
+            return endsWithWord(setting, "scene=");
         }
         std::size_t b = before.size();
         while (b > 0 && before[b - 1] == ' ') --b;
@@ -329,7 +382,7 @@ std::string codeSettings(const std::string& line, const std::function<std::strin
 // (the developer files share these: ScriptEdits.hpp)
 // `line` with the file `from` (in `folder`: images/, sounds/, movies/ or fonts/) called `to`, where
 // it's used: by its name without the extension (background park, music rain, image=..., avatar=..., image "logo",
-// a chat's "Mika sends park", a phone setting's), as a path ("fonts/Lora.ttf"), or for a character's image
+// a chat's "Mika sends park", a phone setting's, a line's voice=), as a path ("fonts/Lora.ttf"), or for a character's image
 // (aiko_happy) as its expression. `bases`: each character's name and the name its images start with.
 std::string assetRenamed(const std::string& line, std::string_view folder, const std::string& from, const std::string& to,
                          const std::vector<std::pair<std::string, std::string>>& bases) {
@@ -357,7 +410,7 @@ std::string assetRenamed(const std::string& line, std::string_view folder, const
         if (const auto eq = w.find('='); eq != npos) {
             const std::string key = w.substr(0, eq), value = unquote(std::string_view(w).substr(eq + 1));
             const bool image = key == "image" || key.ends_with("_image") || key == "face" || key == "shape" || key == "avatar" || key == "icon";
-            const bool sound = key.ends_with("sound") || key == "ringtone";
+            const bool sound = key.ends_with("sound") || key == "ringtone" || key == "plays" || (key == "voice" && i + 1 == spans.size()); // (a line's own voice: its last word; what a named sound plays)
             if (value == name && ((images && image) || (sounds && sound))) {
                 const bool q = isQuoted(std::string_view(w).substr(eq + 1));
                 changes.emplace_back(i, std::string(std::string_view(line).substr(spans[i].first, eq + 1)) + (q ? "\"" + now + "\"" : now));
@@ -370,14 +423,13 @@ std::string assetRenamed(const std::string& line, std::string_view folder, const
         const bool colon = sent && plain.ends_with(':');
         const std::string bare = colon ? plain.substr(0, plain.size() - 1) : plain;
         bool use = false;
-        if (images) use = (i == 1 && plain == name && (verb == "background" || verb == "show" || verb == "hide" || verb == "gallery" || verb == "sub-image" || verb == "image")) ||
+        if (images) use = (i == 1 && plain == name && (verb == "show" || verb == "hide" || verb == "gallery" || verb == "sub-image" || verb == "image")) ||
                           (i == 2 && plain == name && verb == "setting" && (word(1) == "mouse_pointer" || word(1) == "phone_wallpaper" || word(1) == "phone_lock_wallpaper")) ||
                           (sent && bare == name);
-        if (sounds) use = (i == 1 && plain == name && (verb == "music" || verb == "sound" || verb == "voice" || verb == "song" || verb == "caption")) ||
-                          (i == 2 && plain == name && verb == "stop" && word(1) == "sound") ||
+        if (sounds) use = (i == 1 && plain == name && (verb == "song" || verb == "caption")) || // (play and stop: soundRenamed's, below)
                           (i == 2 && plain == name && verb == "setting" && word(1).starts_with("phone_") && (word(1).ends_with("_sound") || word(1) == "phone_ringtone")) ||
                           (sent && bare == name);
-        if (movies) use = i == 1 && plain == name && (verb == "movie" || verb == "gallery" || verb == "image");
+        if (movies) use = i == 1 && plain == name && (verb == "show" || verb == "hide" || verb == "gallery" || verb == "image");
         if (use) {
             changes.emplace_back(i, (isQuoted(w) ? "\"" + now + "\"" : now) + (colon ? ":" : ""));
         } else if (images && verb == "show" && i == 2 && !w.contains('=')) { // show aiko happy
@@ -388,6 +440,8 @@ std::string assetRenamed(const std::string& line, std::string_view folder, const
     }
     std::string out = line;
     for (const auto& [i, with] : changes | std::views::reverse) out.replace(spans[i].first, spans[i].second, with);
+    if (sounds) out = soundRenamed(out, name, now, false); // (played and stopped, by a story line or an action)
+    if (images || movies) out = visualRenamed(out, name, now, false); // (shown and hidden, by an action too)
     // Someone speaking with an expression: Aiko happy: ... or Aiko (happy): ...
     if (std::string_view said; images && changes.empty() && spoken(trim(out), &said)) {
         const std::string prefix(said);
@@ -439,7 +493,8 @@ std::string lineWithVariable(const std::string& line, std::string_view from, std
 // a container without a size as big as what's in it, unless it fits its parts), written in places and shares
 // instead: x and y from -1 to 1 in the box a part is in, w and h (and item_width, item_height, spacing,
 // spacing_across, spacing_down, width_at_most) shares of it. They show in the same
-// places on a `width` x `height` screen.
+// places on a `width` x `height` screen. A size written in pixels already (300px) stays so: a box of its own size,
+// whose parts' shares keep its shape on a screen of any shape (the phone's).
 std::vector<std::string> dev::placesFromPixels(const std::vector<std::string>& lines, float width, float height, const std::map<std::size_t, SDL_FPoint>& sizes) {
     struct Px {
         std::size_t line = 0;
@@ -449,7 +504,10 @@ std::vector<std::string> dev::placesFromPixels(const std::vector<std::string>& l
         SDL_FRect at{};   // on the screen
         SDL_FRect in{};   // ...and where the parts in it are (a list's: its first item's box)
         bool fits = false; // fit=parts: as big as its parts (no size written)
+        std::string stack;  // stack=down or across: its parts one after another (the room between them: gap)
+        float gap = 0.0f;
         std::optional<float> placeX, placeY; // x=left|centre|right, y=top|centre|bottom: places as they are
+        bool keepW = false, keepH = false;    // a size in pixels already: as it is
     };
     auto wordOf = [](const std::vector<std::string>& words, std::string_view key) -> std::string {
         for (const std::string& w : words)
@@ -479,7 +537,15 @@ std::vector<std::string> dev::placesFromPixels(const std::vector<std::string>& l
         const auto words = rawWords(trim(line));
         Px p{.line = i, .indent = indent, .parent = in.empty() ? -1 : in.back(), .kind = lower(words.front()), .x = number(words, "x"),
              .y = number(words, "y"), .w = number(words, "width"), .h = number(words, "height")};
+        auto pixels = [&](std::string_view key) -> std::optional<float> { // (300px: kept as written)
+            const std::string v = wordOf(words, key);
+            return v.ends_with("px") ? parseNumber(std::string_view(v).substr(0, v.size() - 2)) : std::nullopt;
+        };
+        if (!p.w && (p.w = pixels("width"))) p.keepW = true;
+        if (!p.h && (p.h = pixels("height"))) p.keepH = true;
         p.fits = wordOf(words, "fit") == "parts";
+        p.stack = wordOf(words, "stack");
+        p.gap = number(words, p.stack == "across" ? "spacing_across" : "spacing_down").value_or(number(words, "spacing").value_or(0.0f));
         static constexpr std::pair<std::string_view, float> kAcross[]{{"left", -1.0f}, {"centre", 0.0f}, {"right", 1.0f}}, kDown[]{{"top", 1.0f}, {"centre", 0.0f}, {"bottom", -1.0f}};
         for (const auto& [name, place] : kAcross)
             if (wordOf(words, "x") == name) p.placeX = place;
@@ -503,9 +569,24 @@ std::vector<std::string> dev::placesFromPixels(const std::vector<std::string>& l
         Px& c = parts[i];
         if (c.kind != "container" || (c.w && c.h)) continue;
         float right = c.at.x, bottom = c.at.y;
-        for (std::size_t j = i + 1; j < parts.size() && parts[j].indent > c.indent; ++j) {
-            right = std::max(right, parts[j].at.x + parts[j].at.w);
-            bottom = std::max(bottom, parts[j].at.y + parts[j].at.h);
+        if (c.stack == "down" || c.stack == "across") { // (its parts one after another: as long as they all are, with the room between them)
+            const bool down = c.stack == "down";
+            float along = 0.0f, across = 0.0f;
+            int n = 0;
+            for (std::size_t j = i + 1; j < parts.size() && parts[j].indent > c.indent; ++j)
+                if (parts[j].parent == static_cast<int>(i)) {
+                    along += down ? parts[j].at.h : parts[j].at.w;
+                    across = std::max(across, down ? parts[j].at.w : parts[j].at.h);
+                    ++n;
+                }
+            along += c.gap * static_cast<float>(std::max(0, n - 1));
+            right = c.at.x + (down ? across : along);
+            bottom = c.at.y + (down ? along : across);
+        } else {
+            for (std::size_t j = i + 1; j < parts.size() && parts[j].indent > c.indent; ++j) {
+                right = std::max(right, parts[j].at.x + parts[j].at.w);
+                bottom = std::max(bottom, parts[j].at.y + parts[j].at.h);
+            }
         }
         if (!c.w) c.at.w = c.in.w = std::max(1.0f, right - c.at.x);
         if (!c.h) c.at.h = c.in.h = std::max(1.0f, bottom - c.at.y);
@@ -524,7 +605,10 @@ std::vector<std::string> dev::placesFromPixels(const std::vector<std::string>& l
             if (it != words.end()) *it = word;
             else words.push_back(word);
         };
-        const bool container = p.kind == "container" && !p.fits; // (one without a size fills its box now: its size is written; one that fits its parts, none)
+        // (one without a size fills its box now: its size is written; one that fits its parts, none; nor one in a box whose
+        // parts go one after another, which takes the room they leave)
+        const bool stacked = p.parent >= 0 && !parts[static_cast<std::size_t>(p.parent)].stack.empty() && parts[static_cast<std::size_t>(p.parent)].stack != "no";
+        const bool container = p.kind == "container" && !p.fits && !(stacked && !p.w && !p.h);
         if (p.placeX) put("x", unitText(*p.placeX));
         else if (p.x || p.at.x != box.x) put("x", unitText(placeFor(p.at.x - box.x, p.at.w, box.w)));
         if (p.placeY) put("y", unitText(*p.placeY));
@@ -537,8 +621,8 @@ std::vector<std::string> dev::placesFromPixels(const std::vector<std::string>& l
             const SDL_FRect b = at >= 0 ? parts[static_cast<std::size_t>(at)].in : screen;
             return std::max(1.0f, across ? b.w : b.h);
         };
-        if (p.w || container) put("width", unitText(p.at.w / shareBox(true)));
-        if (p.h || container) put("height", unitText(p.at.h / shareBox(false)));
+        if ((p.w || container) && !p.keepW) put("width", unitText(p.at.w / shareBox(true)));
+        if ((p.h || container) && !p.keepH) put("height", unitText(p.at.h / shareBox(false)));
         if (const auto most = number(words, "width_at_most")) { // (a share of the box it's in; one that fits its parts: of the one that's in)
             int at = p.parent;
             while (at >= 0 && parts[static_cast<std::size_t>(at)].fits && !parts[static_cast<std::size_t>(at)].w) at = parts[static_cast<std::size_t>(at)].parent;

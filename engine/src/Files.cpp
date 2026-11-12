@@ -1,4 +1,4 @@
-// The game's files, in its folder or in its pack (game.vnext, made by Pack: its files in one, squeezed and scrambled),
+// The game's files, in its folder or in its pack (game.vnext, made by Export the game and --pack: its files in one, squeezed and scrambled),
 // the player's own files, and the Trash.
 #include "Files.hpp"
 

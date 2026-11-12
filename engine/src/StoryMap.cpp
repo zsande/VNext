@@ -216,13 +216,15 @@ bool Developer::removeMapArrow(const MapFrame& f) {
     if (!chosenArrow) return false;
     const SDL_FPoint mid = chosenArrow->curve[chosenArrow->curve.size() / 2];
     bool remove = ui.button({mid.x - layout::smallButtonH / 2 * k, mid.y - layout::smallButtonH / 2 * k, layout::smallButtonH * k, layout::smallButtonH * k}, "x", false, true, layout::smallButtonText);
-    if (d.focus.empty())
+    if (d.focus.empty()) {
+        d.acts.remove = true;
         for (auto key = d.keys.begin(); key != d.keys.end(); ++key)
             if (d.isKey(*key, ToolKey::Delete)) {
                 d.keys.erase(key);
                 remove = true;
                 break;
             }
+    }
     if (!remove) return false;
     const StoryEditor::Link& link = f.links[chosenArrow->link];
     const std::string from = f.scenes[link.from].name;
@@ -267,7 +269,9 @@ bool Developer::mapClicks(MapFrame& f) {
                 d.mapPress.reset();
                 d.scene = *hovered;
                 d.row.reset();
+                d.visualType.reset();
                 d.character.reset();
+                d.namedVisual.reset();
                 d.linesScroll = 0.0f;
                 return true;
             }
@@ -276,7 +280,9 @@ bool Developer::mapClicks(MapFrame& f) {
             if (d.scene != *hovered) { // (another scene: its lines, in Lines, from the next frame)
                 d.scene = *hovered;
                 d.row.reset();
+                d.visualType.reset();
                 d.character.reset();
+                d.namedVisual.reset();
                 d.linesScroll = 0.0f;
                 return true;
             }

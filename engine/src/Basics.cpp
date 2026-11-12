@@ -120,6 +120,13 @@ std::string eachLetter(std::string_view s, char32_t (*f)(char32_t), bool firstOn
 // however they're capitalised: Őrs is ŐRS and őrs.
 std::string lower(std::string_view s) { return eachLetter(s, lowerOf); }
 std::string upper(std::string_view s) { return eachLetter(s, upperOf); }
+
+std::string shiftedKey(std::string_view key) {
+    static constexpr std::string_view kKeys = "`1234567890-=[]\\;',./", kShifted = "~!@#$%^&*()_+{}|:\"<>?";
+    if (key.size() == 1)
+        if (const auto at = kKeys.find(key[0]); at != std::string_view::npos) return std::string(1, kShifted[at]);
+    return upper(key);
+}
 std::string upperFirst(std::string_view s) { return eachLetter(s, upperOf, true); }
 
 bool startsWithCapital(std::string_view s) {
@@ -195,6 +202,13 @@ std::string characterImageName(std::string_view name) {
         else if (c == ' ' && !out.empty() && out.back() != '_') out += '_';
     }
     return out;
+}
+
+std::string loveVariable(std::string_view character) {
+    std::string base = characterImageName(character);
+    std::ranges::replace(base, '-', '_'); // (a variable's name: letters, numbers and _)
+    if (base.empty() || !letterByte(base[0])) base.insert(0, "_");
+    return base + ".love";
 }
 
 std::string percentEscaped(std::string_view text, std::string_view safe) {

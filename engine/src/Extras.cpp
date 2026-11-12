@@ -7,6 +7,12 @@
 namespace vn {
 
 void Game::have(RecordKind kind, std::string_view name) {
+    // (a picture shown, a song played: the gallery's picture or the music room's song named as it, and one named as a visual
+    // showing it, or a sound playing it)
+    if (kind == RecordKind::Gallery || kind == RecordKind::Song)
+        for (const Script::Record& r : script_.records(kind))
+            if (lower(r.name) != lower(name) && lower(kind == RecordKind::Gallery ? script_.visualOf(r.name) : script_.soundOf(r.name).file) == lower(name))
+                if (const std::string var = Script::recordVariable(kind, r.name); !truthy(variable(var))) setVariable(var, 1);
     if (!script_.record(kind, name)) return;
     if (const std::string var = Script::recordVariable(kind, name); !truthy(variable(var))) setVariable(var, 1); // (a tip read stays read: 2)
 }
@@ -45,9 +51,10 @@ void Engine::playSong(std::size_t index) {
     if (sampling_) return;
     if (!has(RecordKind::Song, index)) return; // not heard yet
     if (!musicBeforeSongs_) musicBeforeSongs_ = sound_.music();
-    const std::string path = assets_->sound(script_.records(RecordKind::Song)[index].name);
+    const Script::SoundPlay song = script_.soundOf(script_.records(RecordKind::Song)[index].name, "music"); // (a named sound: what it plays, as loud)
+    const std::string path = assets_->sound(song.file);
     if (sound_.music() == path) sound_.stopMusic(0.5f); // the one playing: a click stops it
-    else sound_.playMusic(path, true, 0.5f);
+    else sound_.playMusic(path, true, 0.5f, song.volume);
 }
 
 bool Engine::songsOpen() const {

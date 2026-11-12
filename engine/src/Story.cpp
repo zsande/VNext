@@ -10,7 +10,23 @@
 namespace vn {
 
 Game::Game(Context ctx, const Script& script)
-    : ctx_(std::move(ctx)), script_(script), lookup_([this](std::string_view name) { return variable(name); }), stage_(ctx_.canvas) {}
+    : ctx_(std::move(ctx)), script_(script), lookup_([this](std::string_view name) { return variable(name); }), stage_(ctx_.canvas) {
+    // A movie's name (not an image's) where an image goes: it plays as the image, as in a screen's image part; its first
+    // image at once (the developer tools' previews show that).
+    stage_.setMovieMaker([this](const std::string& name, bool loop, float volume) -> std::unique_ptr<Movie> {
+        if (name.starts_with('#') || ctx_.assets.hasImage(name)) return nullptr;
+        const auto file = ctx_.assets.findMovie(name);
+        if (!file) return nullptr;
+        auto movie = std::make_unique<Movie>(ctx_.renderer, ctx_.sound, *file, loop, std::clamp(volume, 0.0f, 1.0f));
+        if (!*movie) return nullptr;
+        movie->showFirst();
+        return movie;
+    });
+}
+
+// Skipping goes past a movie that plays once, unless the player says no (Skip movies), and so do the developer tools'
+// Play from here and previews.
+bool Game::passesMovies(bool fast) const { return (fast && ctx_.settings.skipMovies) || watch_ != SIZE_MAX; }
 
 void Game::start(std::size_t pc) {
     stage_.reset();
@@ -36,12 +52,12 @@ void Game::start(std::size_t pc) {
     change_.reset();
     messageCount_ = arrivals_ = chatWait_ = 0;
     loops_.clear();
+    typePlaying_.clear();
     expressions_.clear();
     error_.clear();
     music_.clear();
     flowchartNode_.clear();
     flowchartOption_ = -1;
-    pendingVoice_.reset();
     past_.clear();
     ctx_.sound.stopAll(0.5f);
     if (gameSettings().time == TimeKind::Real && !vars_.contains("time_started")) vars_.insert_or_assign("time_started", realNow().date); // (its day 1)
@@ -170,17 +186,23 @@ void Game::execute(const Command& command, std::size_t here) {
             [&](const cmd::Background& c) { // a new background (what was on stage goes with the one before), or the one there played on
                 have(RecordKind::Gallery, c.image);
                 const std::string shown = backgroundFor(c.image); // (park_evening in the evening, when there's one)
-                if (shown != stage_.background()) stage_.clearObjects();
-                stage_.setBackground(shown, animation(c.with.value_or("")), instant);
+                const bool fresh = shown != stage_.background();
+                if (fresh) stage_.clearObjects();
+                stage_.setBackground(shown, animation(c.with.value_or("")), instant, c.loop, c.volume, c.part);
+                if (fresh) subtitles_ = stage_.backgroundMovie() ? subtitlesOf(ctx_.assets, shown) : std::vector<Subtitle>{};
                 if (c.animation) stage_.animateBackground(animation(*c.animation), true, fast);
-                if (stage_.backgroundComing()) wait_ = Wait::Background; // (the story goes on once it's in)
+                if (passesMovies(fast)) stage_.skipMovies();
+                if (stage_.backgroundComing() || stage_.backgroundPlaying()) wait_ = Wait::Background; // (the story goes on once it's in, a movie playing once at its end)
             },
             [&](const cmd::Show& c) { // (one that comes plays the game's animation_on_show, unless the line says)
-                if (!c.image.empty()) have(RecordKind::Gallery, c.image);
+                if (!c.image.empty() && !c.image.starts_with('#')) have(RecordKind::Gallery, c.image); // (a colour's box: no picture)
                 const CharacterDef* def = c.character.empty() ? nullptr : script_.character(c.character);
-                const std::string played = c.with ? *c.with : stage_.has(c.tag) ? std::string{} : gameSettings().animationOnShow;
-                stage_.show(c.tag, def, c.image, c.expression, c.props, animation(played), fast ? 0.0f : gameSettings().moveTime, instant);
+                const bool comes = !stage_.has(c.tag); // (as it comes: its character's or visual's own animations, else the game's)
+                const std::string played = c.with ? *c.with : !comes ? std::string{} : c.comesWith ? *c.comesWith : gameSettings().animationOnShow;
+                stage_.show(c, def, animation(played), fast ? 0.0f : gameSettings().moveTime, instant);
+                if (passesMovies(fast)) stage_.skipMovies();
                 if (c.animation) stage_.animate(c.tag, animation(*c.animation), true, fast);
+                else if (comes && c.comesAnimation) stage_.animate(c.tag, animation(*c.comesAnimation), true, fast);
                 if (def && def->faceCopies.expression) // their face looks as their image does (a new one starts as it is)
                     expressions_.insert_or_assign(def->key, stage_.expression(c.tag));
                 if (c.wait && !fast && stage_.moving()) wait_ = Wait::Move;
@@ -261,7 +283,6 @@ void Game::execute(const Command& command, std::size_t here) {
                 waitForScreen({.name = c.arg, .opening = c.opening, .closing = c.closing}, here);
             },
             [&](const cmd::Time& c) { passTime(c, here); },
-            [&](const cmd::Movie& c) { playMovie(c, here, fast); },
             [&](const cmd::Message& c) { sendMessage(c, here); }, // on the phone (a chat scene's: the story waits for it)
             [&](const cmd::Weather& c) { stage_.setWeather(c, instant ? 0.0f : c.fade); },
             [&](const cmd::Camera& c) {
@@ -294,9 +315,6 @@ void Game::perform(const Command& command) {
 
 void Game::nextLine() {
     switch (wait_) {
-    case Wait::Movie:
-        if (movieSkippable_) endMovie(); // clicked past
-        return;
     case Wait::Menu:
         if (menu()->optional) letPass(); // clicked on
         return;
@@ -328,6 +346,8 @@ void Game::nextLine() {
     case Wait::Background:
     case Wait::Move:
         stage_.finish();
+        if (ctx_.settings.skipMovies || watch_ != SIZE_MAX) stage_.skipMovies(); // (a movie playing once: past it, unless the player says no)
+        if (stage_.backgroundPlaying() || (wait_ == Wait::Move && stage_.moving())) return; // (one they say no to: on to its end)
         break;
     case Wait::Timer:
         if (!chat_.empty()) return; // (a chat scene's wait holds: it's the chat's own timing)
@@ -405,22 +425,18 @@ bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& th
             }
             break;
         case Wait::Screen:
-        case Wait::Movie:
             if (!watched_ && target < script_.code.size() && resumePc_ > target) { // gone past it: on from it
-                if (wait_ == Wait::Movie) movie_.reset();
                 request_ = {};
                 pc_ = target;
                 wait_ = Wait::None;
                 run();
                 break;
             }
-            if (there(resumePc_)) { // (what the player sees at that line: a movie's first image)
+            if (there(resumePc_)) {
                 stage_.finish();
-                if (movie_) movie_->showFirst();
                 return true;
             }
-            if (wait_ == Wait::Screen) screenClosed(std::nullopt);
-            else endMovie();
+            screenClosed(std::nullopt);
             break;
         case Wait::None:
             run();
@@ -471,7 +487,7 @@ bool Game::playTo(std::size_t target, const std::function<bool(std::size_t)>& th
 
 void Game::setCovered(bool covered) {
     ctx_.sound.pauseVoice(covered);
-    if (movie_) movie_->setPaused(covered);
+    stage_.pauseMovies(covered);
 }
 
 void Game::waitForScreen(ScreenRequest request, std::size_t here) {
@@ -512,7 +528,8 @@ void Game::update(float dt) {
         updateLine(dt, fast);
         break;
     case Wait::Background:
-        if (!stage_.backgroundComing()) {
+        if (passesMovies(fast)) stage_.skipMovies();
+        if (!stage_.backgroundComing() && !stage_.backgroundPlaying()) {
             wait_ = Wait::None;
             run();
         }
@@ -541,10 +558,6 @@ void Game::update(float dt) {
         break;
     case Wait::Pause: // until a click, or auto-forward's delay
         if (fast || (auto_ && (autoTimer_ += dt) >= static_cast<float>(ctx_.settings.autoDelay) / 1000.0f)) nextLine();
-        break;
-    case Wait::Movie:
-        if (movie_) movie_->update(dt);
-        if ((movie_ ? movie_->ended() : (timer_ -= dt) <= 0.0f) || (fast && movieSkippable_)) endMovie();
         break;
     case Wait::Menu:
         if (menu()->seconds > 0.0f && ctx_.settings.timeLimits && (menuTime_ -= dt) <= 0.0f) letPass(); // time's up (Time limits off: it waits)
@@ -579,6 +592,7 @@ std::vector<Game::Upcoming> Game::upcomingImages(int commands) const {
     unsigned looks = stage_.effect().looks & kColourLooks; // the colour effects on stage from there on
     std::vector<std::string> stage;                       // what's on it
     std::vector<std::string> people;                      // the characters on it (a line can change their look)
+    std::vector<std::string> boxes;                       // the colours' boxes on it (shown again by their names alone: no picture)
     auto imageOf = [&](const std::string& key, const std::string& expression) {
         const CharacterDef* def = script_.character(key);
         return def ? def->imageOf(expression) : std::string{};
@@ -591,6 +605,10 @@ std::vector<Game::Upcoming> Game::upcomingImages(int commands) const {
     };
     if (!stage_.background().starts_with('#')) stage.push_back(stage_.background());
     for (const Stage::ObjectState& o : stage_.objects()) {
+        if (o.image.starts_with('#')) { // (a colour's box: no picture)
+            boxes.push_back(o.tag);
+            continue;
+        }
         stage.push_back(o.character.empty() ? o.image : imageOf(o.character, o.expression));
         if (!o.character.empty()) people.push_back(o.character);
     }
@@ -600,9 +618,12 @@ std::vector<Game::Upcoming> Game::upcomingImages(int commands) const {
                        [&](const cmd::Background& c) {
                            stage.clear();
                            people.clear();
+                           boxes.clear();
                            if (!c.image.starts_with('#')) show(c.image);
                        },
                        [&](const cmd::Show& c) {
+                           if (c.image.starts_with('#')) return boxes.push_back(c.tag); // (a colour's box)
+                           if (!c.box && lower(c.image) == c.tag && std::ranges::contains(boxes, c.tag)) return; // (one shown again by its name alone)
                            show(c.character.empty() ? c.image : imageOf(c.character, c.expression));
                            if (!c.character.empty()) people.push_back(c.character);
                        },
@@ -625,22 +646,6 @@ std::vector<Game::Upcoming> Game::upcomingImages(int commands) const {
 }
 
 void Game::draw(const Font& labelFont) {
-    if (wait_ == Wait::Movie) { // a movie covers everything, as big as fits
-        SDL_Renderer* r = ctx_.renderer;
-        SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
-        SDL_RenderFillRect(r, nullptr);
-        if (SDL_Texture* frame = movie_ ? movie_->texture() : nullptr) {
-            const float scale = std::min(ctx_.canvas.w / movie_->width(), ctx_.canvas.h / movie_->height());
-            const float w = movie_->width() * scale, h = movie_->height() * scale;
-            const SDL_FRect dst{(ctx_.canvas.w - w) * 0.5f, (ctx_.canvas.h - h) * 0.5f, w, h};
-            SDL_RenderTexture(r, frame, nullptr, &dst);
-        } else if (!movieStandIn_.empty()) { // (developer mode) the movie that's missing
-            movieLabel_.set(labelFont, std::format("movies/{}.mpg", movieStandIn_)); // (the kind that plays everywhere, as a missing image says .png)
-            const SDL_FPoint size = movieLabel_.size();
-            movieLabel_.draw(r, (ctx_.canvas.w - size.x) * 0.5f, (ctx_.canvas.h - size.y) * 0.5f, theme::dim);
-        }
-        return;
-    }
     stage_.draw(ctx_.renderer, ctx_.assets, labelFont, gameSettings().developer, gameSettings().characterHeight,
                 [this](const Stage::ObjectState& s) { return frame(s.character.empty() ? s.tag : s.character); });
 }

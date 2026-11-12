@@ -131,14 +131,15 @@ const Style::State* ScreenView::stateOf(const Style& s, Look look) {
 }
 
 // The image a style shows in a look: the look's own, else (pointed at while chosen) its chosen one,
-// else the style's; one named by a variable (image={door}) filled in.
+// else the style's; one named by a variable (image={door}) filled in; a visual named by a visual line or a character,
+// what it shows.
 std::string ScreenView::lookImage(const Style& s, Look look, bool chosen) {
     const Style::State* st = stateOf(s, look);
     std::string image = st && !st->image.empty()                              ? st->image
                         : look == Look::Hover && chosen && !s.chosen.image.empty() ? s.chosen.image
                                                                                      : s.image;
     if (image.contains('{')) image = interpolate(image);
-    return image;
+    return image.empty() ? image : engine_.script().visualOf(image);
 }
 
 // High contrast (the player's setting), whatever the styles say: white text on black boxes with white edges, yellow
@@ -211,6 +212,7 @@ void ScreenView::draw(SDL_Renderer* r, float alpha) {
         arrivals_ = came;
     }
     layout();
+    laidOutOpen_ = true; // (its words as they are now: Read aloud's, as it opens)
     targets_.clear();
     const std::size_t n = def_->elements.size();
     drawn_.assign(n, false);
@@ -276,13 +278,14 @@ void ScreenView::draw(SDL_Renderer* r, float alpha) {
             shifts[i] = by;
             ElementState& st = state_[i];
             if (st.clicked && el.clickAnimation && now() - *st.clicked >= el.clickAnimation->total()) st.clicked.reset();
-            if (el.animation && !st.since) st.since = now();
+            if ((el.animation || el.showAnimation) && !st.since) st.since = now();
             pointedOnward(i);
             std::optional<RenderClip> clip; // (in a container that cuts off its edges: only what's inside its box shows)
             if (const auto cut = cutBy(i, &shifts)) clip.emplace(r, *cut);
             if (st.messageAt && el.messageAnimation && now() - *st.messageAt >= el.messageAnimation->total()) st.messageAt.reset();
             if (st.itemAt && (!el.itemAnimation || now() - *st.itemAt >= el.itemAnimation->total())) st.itemAt.reset();
-            if (el.animation || (el.pointedAnimation && st.pointedPlayed > 0.0f) || (st.clicked && el.clickAnimation) || st.messageAt || st.itemAt) { // (clicked: its click animation too, until it's over)
+            if (el.animation || el.showAnimation || hasOwnLook(el) || (el.pointedAnimation && st.pointedPlayed > 0.0f) || (st.clicked && el.clickAnimation) || st.messageAt ||
+                st.itemAt) { // (clicked: its click animation too, until it's over; a visual's own look)
                 Shift wipe = by;
                 const Animation::Look look = drawAnimated(r, i, alpha * by.opacity, wipe, boxOf(i));
                 shifts[i] = {by.x + look.x, by.y + look.y, by.opacity * std::clamp(look.opacity, 0.0f, 1.0f), 0.0f, {}, wipe.wipe, wipe.wipeBox, wipe.wipeShape};
@@ -292,7 +295,7 @@ void ScreenView::draw(SDL_Renderer* r, float alpha) {
             clip.reset();
             rectOf(i) = rect;
             drawn_[i] = true;
-            if (el.kind == ElementKind::Button && el.chosen) { // (chosen because of its chosen=: what its action sets holds, once it's so)
+            if (el.pressedAsButton() && el.chosen) { // (chosen because of its chosen=: what its action sets holds, once it's so)
                 const bool chosen = el.chosen->test(lookup_);
                 if (chosen && !st.chosen)
                     for (const Command& c : el.actions) {
@@ -364,8 +367,9 @@ Animation::Look ScreenView::drawAnimated(SDL_Renderer* r, std::size_t index, flo
         return across ? box.x + placeEdge(place, rect.w, box.w) - (rect.x - shift.x) : box.y + placeEdge(-place, rect.h, box.h) - (rect.y - shift.y);
     };
     const SDL_FPoint screen{engine_.canvas().w, engine_.canvas().h};
-    Animation::Look look;
+    Animation::Look look = ownLook(el); // (a visual's own zoom, opacity, rotation and tint: what its animations start from)
     auto add = [&](const Animation& a, float seconds) { look = look.with(a.at(seconds, look.colour.value_or(own), offset, screen)); };
+    if (el.showAnimation && st.since) add(*el.showAnimation, played(*el.showAnimation, now() - *st.since)); // (as it comes)
     if (el.animation && st.since) add(*el.animation, played(*el.animation, now() - *st.since));
     if (el.pointedAnimation && st.pointedPlayed > 0.0f) add(*el.pointedAnimation, st.pointedPlayed);
     if (st.clicked && el.clickAnimation) add(*el.clickAnimation, now() - *st.clicked);
@@ -401,6 +405,22 @@ Animation::Look ScreenView::drawAnimated(SDL_Renderer* r, std::size_t index, flo
     return look;
 }
 
+// A visual's own look (zoom=, opacity=, rotation=, tint=: as a show line's), as an animation's look is.
+Animation::Look ScreenView::ownLook(const Element& el) {
+    Animation::Look out;
+    if (el.kind != ElementKind::Image) return out;
+    out.zoom = el.number("zoom", 1.0f);
+    out.opacity = el.number("opacity", 1.0f);
+    out.rotation = el.number("rotation", 0.0f);
+    if (const auto t = el.colours.find("tint"); t != el.colours.end()) out.colour = t->second;
+    return out;
+}
+
+bool ScreenView::hasOwnLook(const Element& el) {
+    const Animation::Look look = ownLook(el);
+    return look.zoom != 1.0f || look.opacity != 1.0f || look.rotation != 0.0f || look.colour.has_value();
+}
+
 void ScreenView::drawElement(SDL_Renderer* r, std::size_t index, float alpha) {
     const Element& el = def_->elements[index];
     const Style& s = styleOf(index);
@@ -411,25 +431,33 @@ void ScreenView::drawElement(SDL_Renderer* r, std::size_t index, float alpha) {
 
     switch (el.kind) {
     case ElementKind::Container: { // (its box, when its style has one: the parts in it are drawn after it; a list's: what it shows is seen)
-        box(r, rectOf(index), s, selected(el) ? Look::Selected : Look::Idle, a, false, true);
+        if (!el.actions.empty()) { // (one with something to do when clicked: a card, pointed at and pressed as a button is)
+            const auto [look, on, chosen] = buttonLook(index, rectOf(index));
+            box(r, rectOf(index), s, look, a, chosen, true);
+            if (on) targets_.push_back({{index}, rectOf(index), true});
+        } else {
+            box(r, rectOf(index), s, selected(el) ? Look::Selected : Look::Idle, a, false, true);
+        }
         if (!el.option("list").empty() && !tools_) seen(el);
         // A list's item with nothing in it to press (an ending, an achievement): the keys go to it (it's read, and its list
         // scrolls to it; scrolled away, they still can), the pointer doesn't.
         auto presses = [&] {
             for (std::size_t j = index + 1; j < def_->elements.size() && within(j, index); ++j)
-                if (const ElementKind k = def_->elements[j].kind; k == ElementKind::Button || k == ElementKind::Slider || k == ElementKind::Input || k == ElementKind::Control ||
+                if (const ElementKind k = def_->elements[j].kind; !def_->elements[j].actions.empty() || k == ElementKind::Button || k == ElementKind::Slider || k == ElementKind::Input || k == ElementKind::Control ||
                                                                  k == ElementKind::Flowchart)
                     return true;
             return false;
         };
-        if (isItemBox(index) && el.parent >= 0 && !presses())
+        if (el.actions.empty() && isItemBox(index) && el.parent >= 0 && !presses())
             targets_.push_back({{index}, rectOf(index), true, !inside(rectOf(index), rectOf(static_cast<std::size_t>(el.parent))), false});
         break;
     }
 
     case ElementKind::Image: { // the name may come from a value: image "{open_image}"; atlases blink; chosen: its chosen image; a movie plays
+        if (!el.actions.empty() && enabled(el)) targets_.push_back({{index}, rectOf(index), true}); // (one with something to do when clicked: an icon, pressed as a button is)
         const std::string& shows = !s.chosen.image.empty() && selected(el) ? s.chosen.image : el.text;
-        const std::string name = shows.find('{') == std::string::npos ? shows : interpolate(shows);
+        // (a visual named by a visual line, or a character with its expression: what it shows)
+        const std::string name = engine_.script().visualOf(shows.find('{') == std::string::npos ? shows : interpolate(shows), el.option("expression"));
         const auto fill = name.empty() ? std::nullopt : parseColour(name, &engine_.palette()); // (a colour, not an image)
         if (const auto grad = name.empty() ? std::nullopt : parseGradient(name, &engine_.palette())) { // (navy-black: fading down to another)
             draw::gradient(r, rectOf(index), withAlpha(grad->first, a), withAlpha(grad->second, a));
@@ -538,9 +566,9 @@ void ScreenView::drawElement(SDL_Renderer* r, std::size_t index, float alpha) {
         if (const std::string letter = keyLetter(el); el.text.empty() && !letter.empty()) // (an on-screen keyboard's key: the letter it types)
             text(r, st.text, letter, rectOf(index), looks, textColour(looks, look, chosen), ta * left);
         else if (!el.text.empty()) {
-            RichText label = wordsOf(index, el.text);
             SDL_FRect in = rectOf(index);
             if (st.ownWords) in.w = 0.0f; // (as big as its words: they're drawn as they are, not wrapped to their own width)
+            RichText label = textOf(index, in.w > 0.0f ? std::max(1.0f, in.w - 2 * looks.padding) : 0.0f);
             text(r, st.text, label.text, in, looks, textColour(looks, look, chosen), ta * left, TextBlock::kAll, std::move(label.spans));
         }
         if (on) targets_.push_back({{index}, hit, true});

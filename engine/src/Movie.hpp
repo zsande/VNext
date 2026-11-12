@@ -29,6 +29,7 @@ public:
     explicit operator bool() const { return plm_ != nullptr || system_ != nullptr; }
     void update(float dt);       // plays `dt` seconds more
     void showFirst();            // plays on to its first image (a still of it, for the developer tools)
+    void showLast();             // its last image (an MPEG-1 movie's; a system one stays where it is)
     void setLoop(bool loop);     // round again at its end, or not
     [[nodiscard]] bool looping() const { return loop_; }
     void setPaused(bool paused); // its sound waits too

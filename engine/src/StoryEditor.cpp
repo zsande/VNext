@@ -5,6 +5,7 @@
 #include <cmath>
 #include <iterator>
 #include <ranges>
+#include <set>
 #include <tuple>
 
 namespace vn {
@@ -20,16 +21,16 @@ StoryEditor::Kind classify(std::string_view t, StoryEditor::Kind parent) {
     const std::string second = lower(firstWord(afterFirst(t)));
     if (command == "phone" && second == "call") return Kind::Call;
     if (command.empty() && phoneDoes(t)) return Kind::Message; // (a phone line that sends something, types...)
-    if (command == "background") return Kind::Background;
     if ((command == "show" || command == "hide") && second == "screen") return Kind::Screen;
     if (command == "hide" && second == "ui") return Kind::Other;
-    if (command == "show" || command == "hide") return Kind::Character;
+    if (command == "show" || command == "hide") return Kind::Visual; // (a character, an image or a movie: a visual)
+    if (command == "stop") return second == "weather" ? Kind::Weather : second == "effect" ? Kind::Effect : Kind::Sound; // (what it stops: the weather, the effects, a sound)
+    if (command == "play") return Kind::Sound;
     static constexpr std::pair<std::string_view, Kind> kCommandKinds[]{ // (the plain ones: a word, its kind)
         {"choice", Kind::Choice},     {"if", Kind::If},             {"else", Kind::Else},         {"set", Kind::Set},
         {"jump", Kind::Jump},
-        {"music", Kind::Music},       {"sound", Kind::Sound},       {"voice", Kind::Voice},       {"stop", Kind::Stop},
         {"wait", Kind::Wait},         {"time", Kind::Time},         {"effect", Kind::Effect},     {"weather", Kind::Weather},
-        {"camera", Kind::Camera},     {"movie", Kind::Movie},       {"open", Kind::Screen},       {"together", Kind::Together},
+        {"camera", Kind::Camera},     {"open", Kind::Screen},       {"together", Kind::Together},
         {"chat", Kind::Chat},
     };
     if (const auto it = std::ranges::find(kCommandKinds, std::string_view(command), &std::pair<std::string_view, Kind>::first); it != std::end(kCommandKinds))
@@ -42,9 +43,10 @@ StoryEditor::Kind classify(std::string_view t, StoryEditor::Kind parent) {
 } // namespace
 
 void StoryEditor::load(const std::string& root) {
-    const std::size_t version = version_; // (it only goes up: what's made from the scripts is made again)
+    const std::size_t version = version_, stamps = stamps_; // (they only go up: what's made from the scripts is made again)
     clear();
     version_ = version + 1;
+    stamps_ = stamps;
     root_ = root;
     auto names = listFiles(root + "scripts/", ".vnscript");
     std::ranges::stable_partition(names, [](const std::string& n) { return lower(n) == "main.vnscript"; });
@@ -56,6 +58,7 @@ void StoryEditor::load(const std::string& root) {
             if (f.lines.size() > 1 && f.lines.back().empty()) f.lines.pop_back(); // (the file's last line break)
         }
         if (SDL_PathInfo info; SDL_GetPathInfo((root + f.path).c_str(), &info)) f.modified = info.modify_time;
+        f.stamp = ++stamps_;
         files_.push_back(std::move(f));
     }
     if (const auto map = readTextFile(root + ".map.txt"))
@@ -99,6 +102,9 @@ void StoryEditor::rescan() {
                 screens_.push_back({.file = f, .line = i, .end = blockEnd(f, i), .name = std::string(firstWord(afterFirst(line)))});
             }
         }
+    std::set<std::pair<std::size_t, std::size_t>> starts; // (the rows kept for lines that start no scene now go)
+    for (const Scene& scene : scenes_) starts.emplace(scene.file, scene.line);
+    std::erase_if(rows_, [&](const auto& kept) { return !starts.contains(kept.first); });
 }
 
 std::size_t StoryEditor::blockEnd(std::size_t file, std::size_t label) const {
@@ -110,23 +116,26 @@ std::size_t StoryEditor::blockEnd(std::size_t file, std::size_t label) const {
 }
 
 std::string_view StoryEditor::phoneSceneOf(const Scene& scene) const {
-    for (const File& f : files_)
-        for (const std::string& line : f.lines)
-            if (indentOf(line) == 0 && lower(firstWord(line)) == "character")
-                for (const std::string& word : rawWords(line))
-                    if (const std::string w = lower(word); (w.starts_with("chat=") || w.starts_with("call=")) && lower(unquote(w.substr(5))) == lower(scene.name))
-                        return w.starts_with("chat=") ? "chat" : "call";
-    return {};
+    if (phoneScenes_.first != version_) { // (the characters' lines read once a version: the first to name a scene has it)
+        std::map<std::string, std::string_view, std::less<>> found;
+        for (const Character& c : characters())
+            for (const std::string& word : rawWords(files_[c.file].lines[c.line]))
+                if (const std::string w = lower(word); w.starts_with("chat=") || w.starts_with("call="))
+                    found.try_emplace(lower(unquote(w.substr(5))), w.starts_with("chat=") ? "chat" : "call");
+        phoneScenes_ = {version_, std::move(found)};
+    }
+    const auto it = phoneScenes_.second.find(lower(scene.name));
+    return it != phoneScenes_.second.end() ? it->second : std::string_view{};
 }
 
 const std::vector<StoryEditor::Row>& StoryEditor::rows(const Scene& scene) const {
     auto& kept = rows_[{scene.file, scene.line}];
-    if (kept.first == version_) return kept.second;
+    const Kind top = phoneSceneOf(scene) == "chat" ? Kind::Chat : Kind::Other; // (a character's chat= scene: its lines are a chat's)
+    if (kept.stamp == files_[scene.file].stamp && kept.top == top) return kept.rows; // (its file as it was: another one changed)
     std::vector<Row> out;
     const auto& lines = files_[scene.file].lines;
     const std::size_t end = blockEnd(scene.file, scene.line);
     std::vector<std::pair<int, std::size_t>> open; // the rows the next ones may be inside: indentation, row
-    const Kind top = phoneSceneOf(scene) == "chat" ? Kind::Chat : Kind::Other; // (a character's chat= scene: its lines are a chat's)
     for (std::size_t i = scene.line + 1; i < end; ++i) {
         if (blank(lines[i]) || trim(lines[i]).starts_with('#')) continue; // (a comment: for whoever reads the script, not a row)
         const int indent = indentOf(lines[i]);
@@ -142,8 +151,55 @@ const std::vector<StoryEditor::Row>& StoryEditor::rows(const Scene& scene) const
                 out[k].end = out[j].line;
                 break;
             }
-    kept = {version_, std::move(out)};
-    return kept.second;
+    kept = {.stamp = files_[scene.file].stamp, .top = top, .rows = std::move(out)};
+    return kept.rows;
+}
+
+std::vector<std::pair<std::string, std::string>> StoryEditor::loveInterests() const {
+    std::vector<std::pair<std::string, std::string>> out;
+    for (const Character& c : characters())
+        if (std::ranges::any_of(rawWords(afterFirst(files_[c.file].lines[c.line])), [](const std::string& w) { return lower(w).starts_with("love="); }))
+            out.emplace_back(c.name, lower(loveVariable(c.name)));
+    return out;
+}
+
+namespace {
+
+// What a set line adds to `variable` (set mika.love to mika.love + 2: 2, - 1: -1), if that's all it does.
+std::optional<int> addsTo(std::string_view text, std::string_view variable) {
+    const auto w = rawWords(text);
+    if (w.size() != 6 || lower(w[0]) != "set" || lower(w[1]) != variable || lower(w[2]) != "to" || lower(w[3]) != variable || (w[4] != "+" && w[4] != "-")) return std::nullopt;
+    const auto n = parseNumber(w[5]);
+    if (!n) return std::nullopt;
+    return static_cast<int>(std::lround(*n)) * (w[4] == "-" ? -1 : 1);
+}
+
+} // namespace
+
+int StoryEditor::loveIn(const Scene& scene, const Row& option, std::string_view variable) const {
+    for (const Row& r : rows(scene))
+        if (r.line > option.line && r.line < option.end && r.depth == option.depth + 1)
+            if (const auto n = addsTo(r.text, variable)) return *n;
+    return 0;
+}
+
+void StoryEditor::setLove(const Scene& scene, const Row& option, const std::string& variable, int amount, const std::string& key) {
+    auto& file = files_[scene.file].lines;
+    std::optional<std::size_t> at; // (its set line, and the first line in it)
+    std::optional<std::size_t> first;
+    for (const Row& r : rows(scene))
+        if (r.line > option.line && r.line < option.end && r.depth == option.depth + 1) {
+            if (!first) first = r.line;
+            if (!at && addsTo(r.text, variable)) at = r.line;
+        }
+    const std::string text = amount == 0 ? std::string{} : std::format("set {0} to {0} {1} {2}", variable, amount < 0 ? '-' : '+', std::abs(amount));
+    if (at ? trim(file[*at]) == text : text.empty()) return;
+    remember(key);
+    if (!at) file.insert(file.begin() + static_cast<std::ptrdiff_t>(option.line + 1), (first ? leading(file[*first]) : leading(file[option.line]) + std::string(kIndent, ' ')) + text);
+    else if (text.empty()) file.erase(file.begin() + static_cast<std::ptrdiff_t>(*at));
+    else file[*at] = leading(file[*at]) + text;
+    write(scene.file);
+    rescan();
 }
 
 const std::vector<StoryEditor::Character>& StoryEditor::characters() const {
@@ -258,21 +314,43 @@ StoryEditor::PhoneLine StoryEditor::phoneLineOf(std::string_view text) const {
 bool StoryEditor::hasScene(std::string_view name) const { return hasNamed(scenes_, name); }
 bool StoryEditor::hasScreen(std::string_view name) const { return hasNamed(screens_, name); }
 
+const StoryEditor::KeptNames& StoryEditor::namesIn(std::size_t file) const {
+    if (fileNames_.size() != files_.size()) fileNames_.resize(files_.size());
+    KeptNames& kept = fileNames_[file];
+    if (kept.stamp == files_[file].stamp) return kept;
+    kept = {.stamp = files_[file].stamp, .variables = {}, .definitions = {}};
+    const auto& lines = files_[file].lines;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const std::string& line = lines[i];
+        const std::string verb = lower(firstWord(line));
+        const std::string_view rest = afterFirst(line);
+        std::string name;
+        if (verb == "set" || (verb == "variable" && indentOf(line) == 0)) name = lower(firstWord(rest));
+        if (!name.empty() && std::ranges::all_of(name, [](char c) { return isWordChar(c) || c == '.'; }) && !std::ranges::contains(kept.variables, name))
+            kept.variables.push_back(std::move(name));
+        if (line.contains("ariable=")) // (inputs' and sliders' variable=: only their lines split into words)
+            for (const std::string& word : rawWords(line))
+                if (lower(word).starts_with("variable=") && validName(unquote(word.substr(9))) && !std::ranges::contains(kept.variables, lower(unquote(word.substr(9)))))
+                    kept.variables.push_back(lower(unquote(word.substr(9))));
+        if (indentOf(line) != 0 || verb.empty()) continue;
+        const auto w = rawWords(splitNote(rest).first);
+        if (w.empty()) continue;
+        if (verb == "character" && std::ranges::any_of(w, [](const std::string& word) { return lower(word).starts_with("love="); })) // (a love interest's love)
+            if (std::string love = lower(loveVariable(unquote(w[0]))); !std::ranges::contains(kept.variables, love)) kept.variables.push_back(std::move(love));
+        std::string defined = unquote(w[0]);
+        if (verb == "font" && (w.size() == 1 || defined.contains('/') || defined.contains('.'))) defined = "default"; // (font FILE)
+        const std::string kind = verb == "type" && soundTypeLine(line) ? std::string("sound type") : verb; // (a type a sound is of: a list of its own)
+        kept.definitions[kind].push_back({.file = file, .line = i, .end = blockEnd(file, i), .name = std::move(defined)});
+    }
+    return kept;
+}
+
 const std::vector<std::string>& StoryEditor::variables() const {
     if (variables_.first == version_) return variables_.second;
     std::vector<std::string> out;
-    for (const File& f : files_)
-        for (const std::string& line : f.lines) {
-            const std::string verb = lower(firstWord(line));
-            const std::string_view rest = afterFirst(line);
-            std::string name;
-            if (verb == "set" || (verb == "variable" && indentOf(line) == 0)) name = lower(firstWord(rest));
-            if (!name.empty() && std::ranges::all_of(name, [](char c) { return isWordChar(c) || c == '.'; }) && !std::ranges::contains(out, name))
-                out.push_back(std::move(name));
-            for (const std::string& word : rawWords(line)) // (inputs' and sliders' variable=)
-                if (lower(word).starts_with("variable=") && validName(unquote(word.substr(9))) && !std::ranges::contains(out, lower(unquote(word.substr(9)))))
-                    out.push_back(lower(unquote(word.substr(9))));
-        }
+    for (std::size_t f = 0; f < files_.size(); ++f)
+        for (const std::string& name : namesIn(f).variables)
+            if (!std::ranges::contains(out, name)) out.push_back(name);
     std::ranges::sort(out);
     variables_ = {version_, std::move(out)};
     return variables_.second;
@@ -295,6 +373,7 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
                                                     "purple", "violet", "magenta", "pink", "hotpink", "brown", "beige", "transparent"};
     auto shown = [&] { // (the images to show: not one only atlases use, as their eyes' and mouths' or a sheet named otherwise)
         std::vector<std::string> images = filesIn("images/", kImageTypes);
+        for (const std::string& name : filesIn("images/gallery/", kImageTypes)) images.push_back("gallery/" + name); // (the gallery's, by their names there)
         std::erase_if(images, [&](const std::string& image) {
             return std::ranges::any_of(atlases(), [&](const AtlasLines& a) { return std::ranges::contains(a.layers, lower(image)) || (a.image == lower(image) && a.name != a.image); });
         });
@@ -309,15 +388,26 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
         for (const Character& c : characters()) out.push_back(c.name);
         if (pick == Pick::Shown) std::ranges::copy(shown(), std::back_inserter(out));
         if (pick == Pick::Shown) std::ranges::copy(defined("sub-image"), std::back_inserter(out));
+        if (pick == Pick::Shown) std::ranges::copy(filesIn("movies/", kMovieTypes), std::back_inserter(out)); // (a movie plays as an image)
+        break;
+    case Pick::VisualTypes: // (every game's, then the game's own)
+        for (const std::string_view type : kVisualTypes) out.emplace_back(type);
+        for (std::string& type : defined("type")) add(out, std::move(type));
+        break;
+    case Pick::Movies:
+        out = filesIn("movies/", kMovieTypes);
         break;
     case Pick::Images: // (the images alone: the first for a new part)
         out = shown();
         for (std::string& p : defined("sub-image")) add(out, std::move(p));
         break;
-    case Pick::ImagesOrColours: // (an image's box: context "files" leaves out the sub-images, for one cut from a file)
+    case Pick::ImagesOrColours: // (an image's box, where a movie plays too; context "files" leaves out the sub-images and movies, for one cut from
+                                // a file; "still" the movies, for one drawn as a still: a style's, an atlas's, a face, a weather speck, the pointer)
         out = shown();
         if (context != "files")
             for (std::string& p : defined("sub-image")) add(out, std::move(p));
+        if (context != "files" && context != "still")
+            for (std::string& m : filesIn("movies/", kMovieTypes)) add(out, std::move(m));
         for (std::string& c : defined("colour")) add(out, std::move(c));
         for (const std::string_view c : {"black", "white"}) add(out, std::string(c));
         break;
@@ -326,8 +416,13 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
         for (std::string& a : defined("atlas")) add(out, std::move(a));
         std::ranges::sort(out);
         break;
-    case Pick::Sounds:
+    case Pick::Sounds: // (a sound's box: the files, then the sounds named by sound lines; context "files" the files alone, for what a named
+                       // sound plays; "type:KIND", the named sounds of that type alone)
         out = filesIn("sounds/", kSoundTypes);
+        for (const std::string& name : filesIn("sounds/music/", kSoundTypes)) out.push_back("music/" + name); // (the music room's, by their names there)
+        if (context != "files")
+            for (const Definition& d : definitions("sound"))
+                if (!context.starts_with("type:") || namedSoundType(d.name) == context.substr(5)) add(out, d.name);
         break;
     case Pick::VoiceFolders: // sounds/voices/NAME/
         for (const auto ext : kSoundTypes)
@@ -335,21 +430,13 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
                 if (const auto slash = name.find('/'); slash != npos) add(out, name.substr(0, slash));
         std::ranges::sort(out);
         break;
-    case Pick::Channels: // sound ... called=NAME, and looping sounds (by their file)
-        for (const File& f : files_)
-            for (const std::string& line : f.lines) {
-                const auto w = rawWords(line);
-                if (w.size() < 3 || lower(w[0]) != "sound") continue;
-                for (std::size_t i = 2; i < w.size(); ++i) {
-                    const std::string word = lower(w[i]);
-                    if (word.starts_with("called=") && word.size() > 7) add(out, lower(unquote(std::string_view(w[i]).substr(7))));
-                    if (word == "loop=yes") add(out, lower(unquote(w[1])));
-                }
-            }
-        std::ranges::sort(out);
+    case Pick::Channels: // (what stop stops: a sound type, all of it; a named sound, or a file, by its name)
+        for (std::string& t : names(Pick::SoundTypes)) add(out, std::move(t));
+        for (const std::string& s : names(Pick::Sounds)) add(out, s);
         break;
-    case Pick::Movies:
-        out = filesIn("movies/", kMovieTypes);
+    case Pick::SoundTypes: // (every game's, then the game's own)
+        for (const std::string_view type : kBuiltInSoundTypes) out.emplace_back(type);
+        for (std::string& type : defined("sound type")) add(out, std::move(type));
         break;
     case Pick::ImageFiles:
         for (const auto ext : kImageTypes)
@@ -410,7 +497,7 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
         if (!dayBox)
             for (const std::string_view part : wordsOf(unquote(parts), ','))
                 if (const auto w = wordsOf(trim(part)); !w.empty()) out.push_back(lower(w.front()));
-        // (real time has the computer's calendar; else Starts at needs a date, 2025-07-14, or a weekday)
+        // (real time has the computer's calendar; else Start day needs a date, 2025-07-14, or a weekday)
         const std::string start = lower(setting("time_start").value_or(""));
         const bool weekdays = lower(setting("time").value_or("none")) == "real" ||
                               std::ranges::any_of(wordsOf(start), [](std::string_view w) {
@@ -418,12 +505,11 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
                                          (w.size() == 10 && w[4] == '-' && w[7] == '-');
                               });
         if (weekdays && !timeBox)
-            for (const std::string_view day : kWeekdays) out.push_back(lower(day));
+            for (const std::string_view day : kWeekdays) out.emplace_back(day); // (as time_weekday has them: Friday)
         break;
     }
-    case Pick::TimeSpans: // (a time line's how long: by the clock, or with days and parts of the day, in days)
-        if (lower(setting("time").value_or("none")) == "days") out = {"1 day", "2 days"};
-        else out = {"30 minutes", "1 hour", "2 hours", "1 day"};
+    case Pick::Weekdays: // (a day: these, or a date typed)
+        for (const std::string_view day : kWeekdays) out.emplace_back(day);
         break;
     case Pick::VariableNames: // (then what the records keep, to set: persistent.ending.NAME, for each the game lists)
     case Pick::Conditions: // (and to check, with the engine's own values; what screens can check too)
@@ -481,16 +567,202 @@ std::vector<std::string> StoryEditor::names(Pick pick, std::string_view context)
         break;
     }
     }
+    if ((pick == Pick::ImagesOrColours || pick == Pick::Shown) && !context.starts_with("type:") && context != "files" && context != "shows") { // (any other visual's box, a hide line's: the visuals named by visual lines and the characters too, as the story shows them; a still's, none showing a movie; not what a visual shows)
+        for (const Definition& d : definitions("visual")) {
+            const std::string shows = visualOption(d.name, "shows", false);
+            if (context == "still" && (namedVisualType(d.name) == "movie" || visualKindOf(shows.empty() ? d.name : shows) == "movie")) continue;
+            add(out, d.name);
+        }
+        for (const Character& c : characters()) add(out, c.name);
+    }
+    if (context.starts_with("type:")) { // (a box of a visual type's: the visuals named as of it too, and only what it takes; its colours' with its characters)
+        const std::string type(context.substr(5)), takes = typeAccepts(type);
+        if (pick == Pick::ImagesOrColours && std::ranges::contains(wordsOf(takes), std::string_view("character")))
+            for (const Character& c : characters()) add(out, c.name);
+        for (const Definition& d : definitions("visual"))
+            if (namedVisualType(d.name) == type) add(out, d.name);
+        if ((pick == Pick::Shown || pick == Pick::ImagesOrColours) && !takes.empty())
+            std::erase_if(out, [&](const std::string& n) {
+                const std::string is = visualKindOf(n);
+                return !is.empty() && is != type && !std::ranges::contains(wordsOf(takes), std::string_view(is));
+            });
+    }
     return out;
+}
+
+bool StoryEditor::asBackground(std::string_view line) {
+    const auto w = rawWords(line);
+    if (w.empty() || lower(w[0]) != "show") return false;
+    for (std::size_t i = 1; i + 1 < w.size(); ++i)
+        if (lower(w[i]) == "as" && lower(w[i + 1]) == "background") return true;
+    return false;
+}
+
+std::string StoryEditor::namedVisualType(std::string_view name) const {
+    for (const Definition& d : definitions("visual"))
+        if (sameName(d.name, name)) {
+            for (const std::string& word : rawWords(linesOf(d).empty() ? std::string{} : linesOf(d).front()))
+                if (lower(word).starts_with("type=")) return lower(unquote(std::string_view(word).substr(5)));
+            return "image";
+        }
+    return {};
+}
+
+std::string StoryEditor::typeAccepts(std::string_view type) const {
+    const std::string key = lower(type);
+    if (const auto every = std::ranges::find(kVisualTypes, key); every != kVisualTypes.end()) // (every game's: as every game has it)
+        return std::string(kVisualTypeAccepts[static_cast<std::size_t>(every - kVisualTypes.begin())]);
+    if (!typeLine(key)) return {};
+    std::string out = lower(typeOption(key, "accepts"));
+    std::ranges::replace(out, ',', ' ');
+    return out.empty() ? "character image movie colour" : out; // (none written: all of them)
+}
+
+bool StoryEditor::colourBox(std::string_view shows, std::string_view type) const {
+    const std::string kind = lower(type);
+    if (kind == "background" || !std::ranges::contains(wordsOf(typeAccepts(kind)), std::string_view("colour"))) return false;
+    Palette palette; // (the game's colours by name; what each is doesn't matter here)
+    for (const std::string& c : defined("colour")) palette.emplace(lower(c), SDL_Color{});
+    return parseColour(shows, &palette).has_value(); // (a gradient too: its top)
+}
+
+std::optional<StoryEditor::Definition> StoryEditor::typeLine(std::string_view type) const {
+    std::optional<Definition> out;
+    for (const Definition& d : definitions("type")) // (the last one, as the game has it)
+        if (sameName(d.name, type)) out = d;
+    return out;
+}
+
+bool StoryEditor::soundTypeLine(std::string_view line) {
+    return std::ranges::any_of(rawWords(line), [](const std::string& w) {
+        const std::string k = lower(w.substr(0, w.find('=')));
+        return w.contains('=') && (k == "follows" || k == "one_at_a_time" || k == "loop" || k == "volume");
+    });
+}
+
+bool StoryEditor::typeNameTaken(std::string_view name) const {
+    const std::string key = lower(name);
+    return std::ranges::contains(kVisualTypes, key) || std::ranges::contains(kBuiltInSoundTypes, key) || hasNamed(definitions("type"), key) ||
+           hasNamed(definitions("sound type"), key);
+}
+
+bool StoryEditor::isSoundType(std::string_view type) const {
+    if (std::ranges::contains(kBuiltInSoundTypes, lower(type))) return true;
+    return hasNamed(definitions("sound type"), type);
+}
+
+std::string StoryEditor::namedSoundType(std::string_view name) const {
+    for (const Definition& d : definitions("sound"))
+        if (sameName(d.name, name)) {
+            for (const std::string& word : rawWords(linesOf(d).empty() ? std::string{} : linesOf(d).front()))
+                if (lower(word).starts_with("type=")) return lower(unquote(std::string_view(word).substr(5)));
+            return "sound";
+        }
+    return {};
+}
+
+std::string StoryEditor::soundTypeOption(std::string_view type, std::string_view key) const {
+    const std::string t = lower(type);
+    std::optional<Definition> own;
+    for (const Definition& d : definitions("sound type")) // (the last one, as the game has it)
+        if (sameName(d.name, t)) own = d;
+    std::string follows = t == "music" || t == "voice" ? t : "sound"; // (every game's, as they are)
+    if (own) {
+        const std::string prefix = std::string(key) + "=";
+        std::string said;
+        for (const std::string& word : rawWords(linesOf(*own).front())) {
+            if (lower(word).starts_with(prefix)) said = unquote(std::string_view(word).substr(prefix.size()));
+            if (lower(word).starts_with("follows=")) follows = lower(unquote(std::string_view(word).substr(8)));
+        }
+        if (!said.empty()) return key == "follows" ? lower(said) : said;
+    } else if (!std::ranges::contains(kBuiltInSoundTypes, t)) {
+        return {};
+    }
+    // (unsaid: as the one it follows has it)
+    if (key == "follows") return follows;
+    if (key == "one_at_a_time") return follows == "sound" ? "no" : "yes";
+    if (key == "loop") return follows == "music" ? "yes" : "no";
+    if (key == "volume") return "100%";
+    return {};
+}
+
+std::string StoryEditor::soundOption(std::string_view name, std::string_view key) const {
+    for (const Definition& d : definitions("sound"))
+        if (sameName(d.name, name)) {
+            const std::string prefix = std::string(key) + "=";
+            for (const std::string& word : rawWords(linesOf(d).empty() ? std::string{} : linesOf(d).front()))
+                if (lower(word).starts_with(prefix)) return unquote(std::string_view(word).substr(prefix.size()));
+            return {};
+        }
+    return {};
+}
+
+std::string StoryEditor::soundKindOf(std::string_view name) const {
+    const std::string key = lower(trim(name));
+    if (key.empty()) return {};
+    if (std::string type = namedSoundType(key); !type.empty()) return type;
+    if (key.starts_with("music/")) return "music"; // (a song)
+    const auto files = names(Pick::Sounds);
+    return std::ranges::any_of(files, [&](const std::string& f) { return lower(f) == key; }) ? std::string("sound") : std::string{};
+}
+
+std::string StoryEditor::typeOption(std::string_view type, std::string_view key) const {
+    const auto def = typeLine(type);
+    if (!def) return {};
+    const auto lines = linesOf(*def);
+    const std::string prefix = std::string(key) + "=";
+    for (const std::string& word : rawWords(lines.empty() ? std::string{} : lines.front()))
+        if (lower(word).starts_with(prefix)) return unquote(std::string_view(word).substr(prefix.size()));
+    return {};
+}
+
+std::string StoryEditor::visualOption(std::string_view who, std::string_view key, bool character) const {
+    std::string line; // (its character line, or its visual line)
+    if (character) {
+        for (const Character& c : characters())
+            if (sameName(c.name, who)) line = files_[c.file].lines[c.line];
+    } else {
+        for (const Definition& d : definitions("visual"))
+            if (sameName(d.name, who)) line = linesOf(d).empty() ? std::string{} : linesOf(d).front();
+    }
+    const std::string prefix = std::string(key) + "=";
+    for (const std::string& word : rawWords(line))
+        if (lower(word).starts_with(prefix)) return unquote(std::string_view(word).substr(prefix.size()));
+    return {};
+}
+
+std::string StoryEditor::comes(std::string_view who, std::string_view key, bool character) const {
+    if (std::string own = visualOption(who, key, character); !own.empty()) return own;
+    return key != "y" ? "centre" : character ? "-1" : "0";
+}
+
+std::string StoryEditor::visualKindOf(std::string_view name) const {
+    const std::string key = lower(trim(name));
+    if (key.empty()) return {};
+    if (isCharacter(key)) return "character";
+    if (std::string type = namedVisualType(key); !type.empty()) return type; // (a visual named by a visual line: its type)
+    if (visualNames_.version != version_ || visualNames_.files != filesGeneration) {
+        visualNames_ = {.version = version_, .files = filesGeneration, .images = names(Pick::Images), .movies = names(Pick::Movies)};
+        for (const Definition& a : definitions("atlas")) visualNames_.images.push_back(a.name); // (one named otherwise than its sheet)
+    }
+    auto listed = [&](const std::vector<std::string>& names) { return std::ranges::any_of(names, [&](const std::string& n) { return lower(n) == key; }); };
+    if (listed(visualNames_.images)) return "image";
+    if (listed(visualNames_.movies)) return "movie";
+    return {};
+}
+
+int StoryEditor::typeLayer(std::string_view type) const {
+    if (std::ranges::contains(kVisualTypes, lower(type))) return visualTypeLayer(lower(type)); // (every game's: 0 to 3)
+    if (const auto n = parseNumber(typeOption(type, "layer"))) return static_cast<int>(std::lround(*n));
+    return 0;
 }
 
 std::string_view StoryEditor::kindName(Kind kind) {
     // (in Kind's order, one each; each said with tr() where it's shown)
     static const std::array<std::string_view, static_cast<std::size_t>(Kind::Other) + 1> names{
-        "Line"_text,    "Character"_text, "Background"_text, "Choice"_text, "Option"_text,   "If"_text,    "Else"_text, "Set"_text,
-        "Jump"_text,    "Music"_text,     "Sound"_text,      "Voice"_text,  "Stop"_text,     "Wait"_text,  "Time"_text, "Effect"_text,
-        "Weather"_text, "Camera"_text,    "Movie"_text,      "Screen"_text, "Together"_text, "Phone"_text, "Phone"_text, "Phone"_text,
-        "Missed"_text,  "Command"_text};
+        "Line"_text,    "Visual"_text,     "Choice"_text, "Option"_text,   "If"_text,    "Else"_text, "Set"_text,
+        "Jump"_text,    "Sound"_text,      "Wait"_text,     "Time"_text,  "Effect"_text, "Weather"_text,
+        "Camera"_text,  "Screen"_text,    "Together"_text,   "Phone"_text,  "Phone"_text,    "Phone"_text, "Missed"_text, "Command"_text};
     return names[static_cast<std::size_t>(kind)];
 }
 

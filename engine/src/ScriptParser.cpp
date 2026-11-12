@@ -130,8 +130,11 @@ void Parser::run(const std::string& entry, std::string_view builtin) {
     phase_ = Phase::Definitions; // characters, colours, styles... wherever they are
     block(lines);
     definitions();
+    for (auto& [key, def] : s_.characters) // (a face named as a visual named by a visual line or a character: what it shows, its expressions after it)
+        if (!def.face.empty()) def.face = s_.visualOf(def.face);
     phase_ = Phase::Story;
     block(lines);
+    sceneEnds(endsLine_); // (the last scene: it ends past its last line, as the story does)
     if (!s_.scenes.contains("start"))
         s_.errors.push_back({entry, 0, "The story needs a beginning: a 'scene start' line in main.vnscript, with its first lines under it."_tr()});
     screens();
@@ -148,6 +151,7 @@ void Parser::run(const std::string& entry, std::string_view builtin) {
 
 // -- Errors and output ---------------------------------------------------
 void Parser::error(const Line& line, std::string message) {
+    if (quiet_ > 0) return;
     s_.errors.push_back({line.file < s_.files.size() ? s_.files[line.file] : std::string{}, line.number, std::move(message)});
 }
 
@@ -179,6 +183,11 @@ std::optional<Expr> Parser::formula(const Line& line, std::string_view src, std:
 
 // A text's {values} and tags: {tip NAME} one that's listed, {colour NAME} a colour or a value holding one,
 // {speed N} whole letters a second, {pause N} seconds, {appears HOW} letter, word or line.
+bool Parser::nothingToRead(std::string_view text) {
+    const Lookup some = [](std::string_view) { return Value{0}; };
+    return trim(expand(text, some)).empty();
+}
+
 void Parser::checkTextOf(const Line& line, std::string_view text) {
     if (auto problem = checkText(text); !problem.empty()) return error(line, problem);
     readValues(line, text);
@@ -203,7 +212,10 @@ void Parser::checkTextOf(const Line& line, std::string_view text) {
     });
 }
 
-void Parser::read(const Line& line, std::string name) { reads_.push_back({.file = line.file, .number = line.number, .name = std::move(name), .items = items_}); }
+void Parser::read(const Line& line, std::string name) {
+    if (quiet_ > 0) return;
+    reads_.push_back({.file = line.file, .number = line.number, .name = std::move(name), .items = items_});
+}
 
 void Parser::readValues(const Line& line, std::string_view text) {
     for (std::string& name : namesIn(text)) read(line, std::move(name));
@@ -336,7 +348,7 @@ void Parser::bindings() {
 
 // -- Scenes -----------------------------------------------------------------------
 void Parser::resolve() {
-    for (const auto& [file, number, scene] : phoneSceneNames_)
+    for (const auto& [file, number, scene] : sceneNames_)
         if (!s_.scenes.contains(scene)) error(Line{.file = file, .number = number}, "There's no scene called '{}'."_tr(scene));
     for (auto& ins : s_.code) {
         const Line where{.file = ins.file, .number = ins.line};

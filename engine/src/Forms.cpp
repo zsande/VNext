@@ -15,7 +15,10 @@ void Developer::listenButton(DeveloperUi& ui, const SDL_FRect& at, const std::st
         if (playing) {
             engine.sound().stopListening();
         } else {
-            engine.sound().listen(path);
+            if (path.starts_with(kMadeUpVoiceHeard)) // (a made-up voice: a few words in its pitch, at the game's speed)
+                engine.sound().listenMadeUpVoice(path, madeUpVoicePitch(std::string_view(path).substr(kMadeUpVoiceHeard.size())).value_or(190.0f),
+                                                 engine.gameSettings().madeUpVoiceSpeed);
+            else engine.sound().listen(path);
             tools.listenShown = true;
         }
     }
@@ -75,8 +78,26 @@ std::optional<Developer::FormEdit> Developer::drawForm(DeveloperUi& ui, const st
     std::optional<FormEdit> out;
     std::string_view group; // (the heading the fields are under: every one's rows show)
     bool first = true;
+    // Each row's stops under its own name (its field's; a second of that name, numbered): a row that comes or goes above
+    // it (a Visual line's Expression, as its Place leaves the background) leaves the keys on it.
+    struct RowKeys {
+        DeveloperTools& d;
+        std::string group;
+        std::size_t count;
+        RowKeys(DeveloperTools& tools, const std::string& name)
+            : d(tools), group(std::exchange(tools.keyGroup, tools.keyGroup + "/" + name)), count(std::exchange(tools.keyCount, 0)) {}
+        RowKeys(const RowKeys&) = delete;
+        RowKeys& operator=(const RowKeys&) = delete;
+        ~RowKeys() {
+            d.keyGroup = std::move(group);
+            d.keyCount = count;
+        }
+    };
+    std::unordered_map<std::string, int> named;
     for (const StoryEditor::Field& f : fields) {
         if (f.hidden) continue;
+        const int again = named[f.name]++;
+        const RowKeys rowKeys(d, again == 0 ? f.name : std::format("{}#{}", f.name, again));
         if (!f.group.empty() && f.group != group) {
             group = f.group;
             y += first ? 0.0f : layout::groupGap * k;
@@ -104,21 +125,27 @@ std::optional<Developer::FormEdit> Developer::drawForm(DeveloperUi& ui, const st
             continue;
         }
         // A box: typed into or picked from (a sound's, when its file is there, with a button to hear it at
-        // its end), and while it's typed into, the buttons for what its words can be under it.
+        // its end: its default's too, said in grey, when that's a sound), and while it's typed into, the buttons
+        // for what its words can be under it.
         SDL_FRect inner = box;
         std::string sound;
         if (StoryEditor::kindOf(f.box).listen)
-            if (const std::string name = lower(trim(f.value)); !name.empty())
-                if (const auto found = d.cachedFoundSound(engine.assets(), name)) {
+            if (const std::string name = lower(trim(f.value.empty() ? f.hint : f.value)); !name.empty()) {
+                if (f.box == StoryEditor::Box::MadeUpVoice) { // (a made-up voice: a few words in its pitch)
+                    if (madeUpVoicePitch(name)) sound = std::string(kMadeUpVoiceHeard) + name;
+                } else if (const auto found = d.cachedFoundSound(engine.assets(), d.soundFileOf(name))) { // (a named sound's: its file's)
                     sound = *found;
-                    inner.w -= boxH + 4 * k;
                 }
+                if (!sound.empty()) inner.w -= boxH + 4 * k;
+            }
+        const std::string boxKey = d.stopKey(d.keyCount); // (its box's stop: the first it makes)
         if (const auto value = ui.pickField(fid, inner, f, layout::boxText)) out = FormEdit{.name = f.name, .value = *value, .typed = true};
         d.keyLabel.clear();
         if (!sound.empty()) listenButton(ui, {box.x + box.w - boxH, box.y, boxH, boxH}, sound, true);
-        if (f.rich && d.focus == fid) {
+        const bool barKept = d.formatBar.box == fid && d.keyRing && std::ranges::contains(d.formatBar.keys, d.keyAt); // (the keys on its buttons)
+        if (f.rich && (d.focus == fid || barKept)) {
             y += boxH + 4 * k;
-            if (const auto text = drawFormatBar(ui, fid, box.x, box.w, y)) out = FormEdit{.name = f.name, .value = *text, .typed = true};
+            if (const auto text = drawFormatBar(ui, fid, boxKey, box.x, box.w, y, f.typesOut)) out = FormEdit{.name = f.name, .value = *text, .typed = true};
             y -= boxH;
         }
         y += boxH + gap;
@@ -176,15 +203,30 @@ std::size_t formatPlayed(std::string_view label, std::size_t n, float t) {
 // Buttons that make the words chosen in the box typed into (or what's typed next) bold, italic,
 // underlined, crossed out, coloured or typed at another speed, with furigana or a tip over them; or
 // that put in a pause, a variable, how the line appears, or no wait at its end, in three rows as wide
-// as the box, each saying it as what it does (formatLook, formatPlayed). Gives the new text.
-std::optional<std::string> Developer::drawFormatBar(DeveloperUi& ui, const std::string& id, float x, float w, float& y) {
+// as the box, each saying it as what it does (formatLook, formatPlayed). Gives the new text. The keys
+// reach them from the box (its stop: `boxKey`) as any stops, and one they press types in the box again,
+// the keys on it, as a click does (DeveloperTools::formatBar).
+std::optional<std::string> Developer::drawFormatBar(DeveloperUi& ui, const std::string& id, const std::string& boxKey, float x, float w, float& y, bool typesOut) {
     DeveloperTools& d = tools;
+    // (its stops under a name of their own, so the ones after it keep theirs as it comes and goes: the keys Tab takes on
+    // from it to the next box stay there as it goes)
+    const std::string group = std::exchange(d.keyGroup, d.keyGroup + "/" + id);
+    const std::size_t count = std::exchange(d.keyCount, 0);
+    std::string keysBack;
+    auto typeAgain = [&] { // (a button pressed: in the box again, and the keys too next frame when they pressed it)
+        d.focus = id;
+        if (d.keyRing) keysBack = boxKey;
+    };
     const float k = ui.k, h = layout::barButtonH * k, gap = layout::barButtonGap * k;
-    static const std::array<std::string_view, 12> kLabels{"Bold"_text,     "Italic"_text, "Underline"_text, "Crossed out"_text, "Colour"_text,   "Speed"_text,
-                                                          "Furigana"_text, "Tip"_text,    "Pause"_text,     "Variable"_text,    "Appears"_text, "No wait"_text};
+    static const std::array<std::string_view, 12> kAll{"Bold"_text,     "Italic"_text, "Underline"_text, "Crossed out"_text, "Colour"_text,   "Speed"_text,
+                                                       "Furigana"_text, "Tip"_text,    "Pause"_text,     "Variable"_text,    "Appears"_text, "No wait"_text};
+    static constexpr std::array<std::string_view, 4> kTyping{"Speed", "Pause", "Appears", "No wait"}; // (a story line's, as it types out)
+    std::vector<std::string_view> buttons; // (words that come up whole, an option's, a message's, a caption's: their look alone)
+    for (const std::string_view label : kAll)
+        if (typesOut || !std::ranges::contains(kTyping, label)) buttons.push_back(label);
     std::vector<SDL_FRect> places; // (the looks; colour, speed, a reading and a tip; what goes in a line)
     const float cell = (w - 3 * gap) / 4;
-    for (std::size_t i = 0; i < kLabels.size(); ++i)
+    for (std::size_t i = 0; i < buttons.size(); ++i)
         places.push_back({std::round(static_cast<float>(i % 4) * (cell + gap)), static_cast<float>(i / 4) * (h + gap), std::round(cell), h});
     auto chosen = [&] { return std::pair{std::min(d.anchor, d.caret), std::max(d.anchor, d.caret)}; };
     auto wrap = [&](const std::string& open, const std::string& close) { // (around what's chosen, which stays chosen)
@@ -199,23 +241,25 @@ std::optional<std::string> Developer::drawFormatBar(DeveloperUi& ui, const std::
         d.caret = d.anchor = at + text.size();
     };
     std::optional<std::string> out;
-    for (std::size_t i = 0; i < kLabels.size(); ++i) {
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
         const SDL_FRect b{x + places[i].x, y + places[i].y, places[i].w, places[i].h};
-        const std::string_view label = kLabels[i];
+        const std::string_view label = buttons[i];
         const std::string bid = std::format("{}:format:{}", id, label);
         const RichText look = formatLook(label, engine.palette());
         const bool fits = ui.width(look.text, layout::smallButtonText) <= b.w - 2 * k; // (the room any button's words have; else its words alone, cut to fit, as any button's)
         const std::string_view words = fits ? std::string_view{} : tr(label);
         std::optional<std::string> picked;
-        auto list = [&](const StoryEditor::Field& f) { picked = ui.listButton(bid, b, words, f); };
+        auto list = [&](const StoryEditor::Field& f) { picked = ui.listButton(bid, b, words, f, tr(label)); };
         bool clicked = false;
         if (label == "Colour") list({.name = "colour", .box = Box::Colour});
         else if (label == "Speed") list({.name = "speed", .box = Box::TextSpeed});
         else if (label == "Tip") list({.name = "tip", .box = Box::Record, .context = "tip"});
         else if (label == "Pause") list({.name = "pause", .box = Box::Pause});
-        else if (label == "Variable") list({.name = "variable", .box = Box::Variable});
+        else if (label == "Variable") // (the story's variables; with the game's time, its values to show too: the date, the clock...)
+            list({.name = "variable", .box = Box::Variable,
+                  .suggest = lower(d.editor.setting("time").value_or("none")) != "none" ? "time_date|time_clock|time_day|time_part|time_weekday|time_month|time_year" : ""});
         else if (label == "Appears") list({.name = "appears", .box = Box::TextAppears, .choices = "letter word line"});
-        else clicked = ui.button(b, words, false, true, layout::smallButtonText);
+        else clicked = ui.button(b, words, false, true, layout::smallButtonText, tr(label)); // (said as its words, however it looks)
         if (fits) { // (pointed at, the ones that take time play it, from when it was first pointed at)
             if (!ui.over(b)) d.formatSince.erase(std::string(label));
             const float since = ui.over(b) ? engine.toolsTime() - d.formatSince.try_emplace(std::string(label), engine.toolsTime()).first->second : 1e6f;
@@ -251,7 +295,7 @@ std::optional<std::string> Developer::drawFormatBar(DeveloperUi& ui, const std::
         else if (label == "Pause") put(chosen().second, *picked == "click" ? std::string("{pause}") : std::format("{{pause {}}}", *picked));
         else if (label == "Variable") put(chosen().second, std::format("{{{}}}", *picked));
         else if (label == "Appears") put(0, std::format("{{appears {}}}", *picked));
-        d.focus = id; // (still typed into)
+        typeAgain();
         out = d.buffer;
     }
     y += places.back().y + places.back().h;
@@ -289,11 +333,15 @@ std::optional<std::string> Developer::drawFormatBar(DeveloperUi& ui, const std::
                 d.caret = d.anchor = from + with.size();
                 out = d.buffer;
             }
-            d.focus = id;
+            typeAgain();
         }
         y += row.back().y + row.back().h;
         break;
     }
+    d.formatBarNow = {.box = id, .keys = {}, .keysBack = std::move(keysBack)};
+    for (std::size_t n = 0; n < d.keyCount; ++n) d.formatBarNow.keys.push_back(d.stopKey(n));
+    d.keyGroup = group;
+    d.keyCount = count;
     return out;
 }
 

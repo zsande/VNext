@@ -53,7 +53,7 @@ struct Settings {
     // Language: a translation's id, "original" (as written), or empty: the computer's language when
     // there's a translation for it.
     std::string language;
-    // Keys the player chose (with a screen's control parts: Settings' Keys), by control name ("none" for an emptied slot).
+    // Keys the player chose (with a screen's inputs for controls' keys: Settings' Keys), by control name ("none" for an emptied slot).
     std::map<std::string, std::vector<std::string>, std::less<>> keys;
 
     // Sets one value by its name (settings.txt, setting default.NAME); false for unknown names.
@@ -64,7 +64,7 @@ struct Settings {
     bool save(const std::string& path) const;
 };
 
-// A player setting a slider can change (slider setting=NAME): its place on the slider (0 to 1), and
+// A player setting a slider can change (an input's setting=NAME): its place on the slider (0 to 1), and
 // how it reads ({NAME} on screens: "45 cps", "80%").
 struct SettingControl {
     std::function<float(const Settings&)> value; // where its slider is (0 to 1)

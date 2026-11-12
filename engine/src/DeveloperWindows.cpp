@@ -8,7 +8,7 @@
 
 namespace vn {
 
-// What a tool says (how it went wrong, or what it made where), in a window of its own with OK, as packing says how
+// What a tool says (how it went wrong, or what it made where), in a window of its own with OK, as exporting says how
 // it went. With SDL's offscreen video (the recorder's) there's no window: the log has it.
 void Developer::tell(const std::string& message, bool failed) {
     ask("VNext", message, {std::string("OK"_tr)}, 0, failed ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_INFORMATION);

@@ -190,6 +190,10 @@ public:
     void configure(std::map<std::string, File, std::less<>> files, std::vector<std::string> systemFonts,
                    std::vector<std::string> fallbacks = {});
     Font& get(const std::string& name, float size);
+    [[nodiscard]] const File* file(std::string_view name) const { // (a font's file by its name: none, the system's)
+        const auto it = files_.find(name);
+        return it != files_.end() ? &it->second : nullptr;
+    }
     void setPixelScale(float scale);
     void clear() { fonts_.clear(); }
 

@@ -1,9 +1,10 @@
 # Builds VNext for Windows, Linux and macOS, tries each one on GitHub's machines (a small game's story,
 # developer mode, and the game packed and played with the player next to it: a screenshot of each), and
 # zips each player with licences.txt (VNext-0.3.0-Windows.zip...: the version, then the system; the Linux player is
-# an AppImage). A tag like v0.3.0 also makes a release of it, with the three zips and What's new: the release
-# commit's message after its first line (write it as a list: "- ..."), or else the commits since the release
-# before. The zips and screenshots are in each run's "Artifacts" section.
+# an AppImage). Then each system's zip gets the other two systems' players too (bundle), for Export the game. A tag
+# like v0.3.0 also makes a release of it, with the three zips and What's new: the release commit's message after its
+# first line (write it as a list: "- ..."), or else the commits since the release before. The zips and screenshots are
+# in each run's "Artifacts" section.
 name: build
 
 # (not for a change to the README, the licence, the README's images or the Sponsor button alone: there's nothing to build)
@@ -193,7 +194,7 @@ jobs:
 
       - uses: actions/upload-artifact@v6
         with:
-          name: VNext-${{ matrix.system }}
+          name: Player-${{ matrix.system }}
           path: ${{ env.ZIP }}
 
       - uses: actions/upload-artifact@v6
@@ -203,9 +204,67 @@ jobs:
           path: try/*.png
           if-no-files-found: ignore
 
+  # Each system's zip with the other two systems' players in it (players/Windows.zip, players/macOS.zip,
+  # players/Linux.zip: their own zips), so Export the game zips a game for every system without downloading anything
+  # (Export.cpp reads them): Windows' and Linux's in a folder next to the player, a Mac's in the app (its
+  # Resources/players: dragged to Applications, they go with it), the app signed again.
+  bundle:
+    needs: build
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v5 # (the version, on a run that isn't a tag's)
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: Player-*
+          merge-multiple: true
+
+      - name: Bundle
+        shell: bash
+        run: |
+          set -eu
+          case "$GITHUB_REF" in
+            refs/tags/v*) v="${GITHUB_REF_NAME#v}" ;;
+            *) v=$(sed -n 's/^ *VERSION \([0-9][0-9.]*\)$/\1/p' engine/CMakeLists.txt | head -1) ;;
+          esac
+          mkdir players
+          for s in Windows macOS Linux; do cp "VNext-$v-$s.zip" "players/$s.zip"; done
+          for s in Windows Linux; do # (next to the player)
+            for o in Windows macOS Linux; do
+              if [ "$o" != "$s" ]; then zip -q -X "VNext-$v-$s.zip" "players/$o.zip"; fi
+            done
+          done
+          ditto -x -k "VNext-$v-macOS.zip" mac # (in the app, signed again)
+          mkdir mac/VNext.app/Contents/Resources/players
+          cp players/Windows.zip players/Linux.zip mac/VNext.app/Contents/Resources/players/
+          codesign --force --sign - mac/VNext.app
+          codesign --verify --deep --strict mac/VNext.app
+          mac/VNext.app/Contents/MacOS/VNext --help
+          rm "VNext-$v-macOS.zip"
+          ditto -c -k --norsrc --noextattr mac "VNext-$v-macOS.zip"
+          for s in Windows macOS Linux; do
+            echo "== VNext-$v-$s.zip" && unzip -l "VNext-$v-$s.zip" | grep players/
+            [ "$(unzip -l "VNext-$v-$s.zip" | grep -c 'players/[A-Za-z]*\.zip')" -eq 2 ] || { echo "::error::VNext-$v-$s.zip hasn't the other two players."; exit 1; }
+          done
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: VNext-Windows
+          path: VNext-*-Windows.zip
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: VNext-macOS
+          path: VNext-*-macOS.zip
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: VNext-Linux
+          path: VNext-*-Linux.zip
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: bundle
     runs-on: ubuntu-latest
     permissions:
       contents: write

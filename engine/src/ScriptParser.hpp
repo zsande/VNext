@@ -111,12 +111,11 @@ constexpr auto kCommands = std::to_array<CommandWord>({
     // The story's own: blocks, waiting, questions, its structure.
     {"scene", true, false}, {"if", true, false}, {"else", true, false}, {"choice", true, false},
     {"wait", true, false}, {"together", true, false},
-    {"movie", true, false},
     {"phone", true, false}, {"chat", true, false}, {"time", true, false},
     // Both.
-    {"background", true, true}, {"show", true, true}, {"hide", true, true},
-    {"effect", true, true}, {"weather", true, true}, {"camera", true, true}, {"music", true, true}, {"sound", true, true},
-    {"voice", true, true}, {"stop", true, true}, {"jump", true, true},
+    {"show", true, true}, {"hide", true, true},
+    {"effect", true, true}, {"weather", true, true}, {"camera", true, true},
+    {"stop", true, true}, {"jump", true, true},
     {"set", true, true},
     {"open app", false, true}, {"open chat", false, true},
     {"open image", false, true}, {"open tip", false, true}, {"open", true, true},
@@ -133,9 +132,10 @@ constexpr auto kCommands = std::to_array<CommandWord>({
     {"reset progress", false, true}, {"back", false, true}, {"move up", false, true}, {"move down", false, true}, {"move left", false, true},
     {"move right", false, true}, {"press", false, true}, {"choose", false, true}, {"scroll up", false, true}, {"scroll down", false, true},
     {"scroll to the top", false, true}, {"scroll to the end", false, true}, {"put back", false, true},
+    {"play", true, true}, // (after play song, a button's: the music room's)
 });
 
-constexpr auto kDefinitions = std::to_array<std::string_view>({"character", "colour", "place", "font", "atlas", "sub-image", "setting", "style",
+constexpr auto kDefinitions = std::to_array<std::string_view>({"character", "colour", "place", "type", "visual", "sound", "font", "atlas", "sub-image", "setting", "style",
                                                                 "control", "gallery", "ending", "song", "caption", "achievement", "tip", "animation",
                                                                 "screen", "variable"});
 
@@ -153,29 +153,45 @@ bool hasAppPart(const Line& screen, std::string_view name);
 // to scroll), besides any part's (place, size, look).
 struct KindSpec {
     std::string_view name;
-    ElementKind kind;
-    std::string_view style; // style used when the element names none
-    std::array<std::string_view, 28> options;
+    ElementKind kind; // (what it is unless how it's written says otherwise: partKindOf)
+    std::array<std::string_view, 32> options;
 };
 
+// The parts a screen is made of: a visual, a text, an input (what the player sets), the flowchart and a container. Any of
+// the first and last is clickable with action= (a text: a button; a visual: an icon; a container: a card); a text showing
+// {dialogue} is the line said, a visual showing {face} the speaker's face; an input is a slider, a box to type in or a key
+// to press, by what it sets (partKindOf).
 constexpr std::array kKinds{
-    KindSpec{"image", ElementKind::Image, "", {"fit", "flip", "repeat", "chosen", "scroll", "scroll_round", "bottom", "loop", "volume"}}, // (an image, a colour, one fading to bottom=, or a movie)
-    KindSpec{"text", ElementKind::Text, "text", {"chosen", "width_at_most", "lines"}},
-    KindSpec{"button", ElementKind::Button, "button", {"action", "confirm", "keys", "clickable", "chosen", "drag", "drop", "click_animation"}},
-    KindSpec{"dialogue", ElementKind::Dialogue, "dialogue", {}},
-    KindSpec{"face", ElementKind::Face, "face", {"fit", "flip"}}, // flip=yes mirrors every face (and face_flip=yes ones back)
-    KindSpec{"control", ElementKind::Control, "setting", {"slot", "waiting"}},
-    KindSpec{"input", ElementKind::Input, "input", {"variable", "most_letters", "placeholder", "action", "confirm", "clickable"}},
-    KindSpec{"slider", ElementKind::Slider, "slider", {"variable", "setting", "value", "minimum", "maximum", "step", "vertical", "track", "fill", "knob", "clickable", "action"}}, // (value=: shown, not dragged)
-    KindSpec{"flowchart", ElementKind::Flowchart, "flowchart", // (its points as a tree: no columns)
+    // (a visual: an image, a colour, one fading to bottom=, or a movie; a visual named by a visual line, or a character, as the
+    // story shows them: its type, a character's expression, its look and the animation it comes with; {face}: the speaker's,
+    // flip=yes mirroring every face, and face_flip=yes ones back)
+    KindSpec{"image", ElementKind::Image,
+             {"type", "expression", "zoom", "opacity", "rotation", "flip", "tint", "animation_on_show", "fit", "repeat", "chosen", "scroll", "scroll_round", "bottom", "loop",
+              "volume", "action", "confirm", "keys", "clickable", "click_animation"}},
+    KindSpec{"text", ElementKind::Text, {"chosen", "width_at_most", "lines", "action", "confirm", "keys", "clickable", "drag", "drop", "click_animation"}},
+    // (control=: a key to press for that control, slot= which of its keys; setting=, value= (shown, not dragged), or a variable
+    // with a range or a look of one: a slider; a variable: a box to type in)
+    KindSpec{"input", ElementKind::Input,
+             {"variable", "setting", "value", "control", "slot", "waiting", "most_letters", "placeholder", "minimum", "maximum", "step", "vertical", "track", "fill", "knob",
+              "clickable", "action", "confirm"}},
+    KindSpec{"flowchart", ElementKind::Flowchart, // (its points as a tree: no columns)
              {"line", "ending_style", "unreached_style", "choice_style", "confirm", "item_width", "item_height", "spacing", "spacing_across", "spacing_down", "scrollbar",
               "scrollbar_thickness", "glide", "glide_speed", "glide_distance"}},
-    KindSpec{"container", ElementKind::Container, "",
+    KindSpec{"container", ElementKind::Container,
              {"chosen", "fit", "scroll", "scrollbar", "scrollbar_thickness", "glide", "glide_speed", "glide_distance", "close_at_end", "edges", "fading_edges", "stack", "list",
-              "mode", "position", "item_animation", "columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down", "app", "title", "icon", "count"}},
+              "mode", "position", "item_animation", "columns", "item_width", "item_height", "spacing", "spacing_across", "spacing_down", "app", "title", "icon", "count", "screen",
+              "action", "confirm", "keys", "clickable", "click_animation"}},
 };
 
-constexpr auto kColourOptions = std::to_array<std::string_view>({"bottom", "track", "fill", "knob", "line"});
+// What a text or a visual takes of its word's settings, by what it is (partKindOf; one not here: all of them; an input's:
+// inputTakes): a text showing {dialogue} none of a text's own, a visual showing {face} how it fits and flip=.
+struct FlavourSpec {
+    ElementKind kind;
+    std::array<std::string_view, 2> options;
+};
+constexpr std::array kFlavours{FlavourSpec{ElementKind::Dialogue, {}}, FlavourSpec{ElementKind::Face, {"fit", "flip"}}};
+
+constexpr auto kColourOptions = std::to_array<std::string_view>({"bottom", "track", "fill", "knob", "line", "tint"});
 
 constexpr auto kFormulaOptions = std::to_array<std::string_view>({"value", "minimum", "maximum", "most_letters", "step"});
 
@@ -189,10 +205,6 @@ constexpr auto kSettingNames = std::to_array<std::string_view>({
 // Words that pick one of a few values.
 template <class T>
 using Choices = std::span<const std::pair<std::string_view, T>>;
-
-constexpr std::pair<std::string_view, Ease> kEases[]{{"linear", Ease::Linear}, {"in", Ease::In},         {"out", Ease::Out},
-                                                     {"inout", Ease::InOut},   {"bounce", Ease::Bounce}, {"spring", Ease::Spring},
-                                                     {"overshoot", Ease::Overshoot}};
 
 constexpr std::pair<std::string_view, TextAppears> kTextAppears[]{{"letter", TextAppears::Letter}, {"word", TextAppears::Word}, {"line", TextAppears::Line}};
 
@@ -217,7 +229,7 @@ std::optional<Align> toAlign(std::string_view s, bool vertical);
 
 class Parser {
 public:
-    Parser(Script& script, const FileReader& read) : s_(script), read_(read) {}
+    Parser(Script& script, const FileReader& read, FolderLister list = {}) : s_(script), read_(read), list_(std::move(list)) {}
 
     void run(const std::string& entry, std::string_view builtin);
 
@@ -245,6 +257,8 @@ private:
     std::optional<Expr> formula(const Line& line, std::string_view src, std::string missing = {});
 
     void checkTextOf(const Line& line, std::string_view text);
+    // No words to read in it: none, or only tags that show none ({pause}, {speed 20}...); a value ({name}) shows some.
+    [[nodiscard]] static bool nothingToRead(std::string_view text);
 
     // -- Names ----------------------------------------------------------------------------
 
@@ -260,12 +274,12 @@ private:
     std::vector<Read> reads_;
     std::vector<std::string> written_;
     std::vector<std::string> items_; // (while a screen's parts are read: the lists they're in)
-    struct PhoneSceneName { // a character's chat= or call= (checked once the scenes are read)
+    struct SceneName { // a character's chat= or call=, an ending's scene= (checked once the scenes are read)
         std::uint16_t file = 0;
         int number = 0;
         std::string scene;
     };
-    std::vector<PhoneSceneName> phoneSceneNames_;
+    std::vector<SceneName> sceneNames_;
     void read(const Line& line, std::string name);
     void readValues(const Line& line, std::string_view text); // (a text's {values})
     void wrote(std::string name);
@@ -348,6 +362,7 @@ private:
 
     void statement(const Line& line);
     void scene(const Line& line);
+    void sceneEnds(const Line& line); // (the endings reached as the scene being read ends: ending NAME scene=SCENE)
 
     void say(const Line& line);
 
@@ -362,6 +377,16 @@ private:
     const CharacterDef* takeCharacter(Cursor& c);
 
     bool place(const Line& line, Cursor& c, StageProps& props);
+    // Where on stage, as a line writes it (the stage's own 0 to 1 from the top left; a mistake said: none): across, a
+    // place's name or a number from -1 to 1 (at PLACE, at=PLACE); down, a number from -1 (the bottom) to 1 (the top) (y=).
+    std::optional<float> across(const Line& line, std::string_view value);
+    std::optional<float> down(const Line& line, std::string_view value);
+    // A colour's box's width= or height=: a part of the stage's, or pixels (640px) made one (a mistake said: none).
+    std::optional<float> boxSize(const Line& line, const std::string& key, const std::string& value);
+    // A setting of how a visual or a character comes, on its own line (at= y= zoom= opacity= rotation= flip= tint= layer=
+    // animation= animation_on_show=): No when it's none of them.
+    Took comesSetting(const Line& line, const std::string& key, const std::string& value, StageProps& comes, std::optional<std::string>& animation,
+                      std::optional<std::string>& onShow);
 
     std::optional<std::string> animationNamed(const Line& line, std::string_view name);
     Took withAnimation(const Line& line, Cursor& c, std::optional<std::string>& out);
@@ -371,7 +396,7 @@ private:
 
     std::optional<Command> change(const Line& line, std::string_view rest);
 
-    std::optional<Command> play(const Line& line, std::string_view verb, Cursor& c);
+    std::optional<Command> play(const Line& line, Cursor& c);
 
     std::optional<Command> weather(const Line& line, Cursor& c);
 
@@ -382,6 +407,7 @@ private:
     Commands actions(const Line& line, std::string_view text);
 
     void definitions();
+    void folderRecords(); // (the gallery's and the music room's from their folders)
 
     void startTime();
     void define(const Line& line, std::string_view kind);
@@ -419,6 +445,7 @@ private:
 
     void elements(ScreenDef& def, const std::vector<Line>& lines, int parent);
     std::optional<Element> element(const Line& line);
+    void screenVisual(const Line& line, Element& el, const std::vector<std::pair<std::string, std::string>>& props);
 
     void scaleBuiltIn(std::pair<std::string, std::string>& kv) const;
     void bindings();
@@ -427,6 +454,7 @@ private:
 
     Script& s_;
     const FileReader& read_;
+    FolderLister list_; // (none: no folders looked in)
     Phase phase_ = Phase::Definitions;
     std::size_t builtinFiles_ = 0; // the built-in menus' files: main.vnscript is the next one
     std::set<std::string> included_;
@@ -450,7 +478,12 @@ private:
     };
     std::vector<ControlLine> controlLines_; // the last definition of a name wins
     std::vector<std::pair<const Line*, std::string>> textboxes_;              // character textbox screens to check
+    std::vector<std::string> showing_; // the screens whose parts are being read into a container that shows them (screen=)
+    int quiet_ = 0;                    // ...their mistakes and names said once, where they're written: not again in each one shown
     std::string currentScene_ = "line";                // the scene the story lines being read are in
+    std::string endsDue_;                              // the one whose endings are still to be reached at its end
+    Line endsLine_;                                    // (its line: the story's last scene ends past the last line)
+    int branches_ = 0;                                 // how many choices, ifs, chats... the lines being read are in
     std::map<std::string, int, std::less<>> lineCounts_; // each character's lines in it so far (voice ids)
 };
 

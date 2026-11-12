@@ -123,12 +123,12 @@ void Sound::setVolume(float master, float music, float sound, float voice) {
     voiceVolume_ = voice;
     if (!mixer_) return;
     MIX_SetMixerGain(mixer_.get(), masterVolume_);
-    applyMusicGain();
-    for (std::size_t i = 0; i < sounds_.size(); ++i) MIX_SetTrackGain(sounds_[i], soundVolume_ * soundGain_[i]);
+    applyMusicGain(); // (the music's, and every sound following the music volume)
+    for (std::size_t i = 0; i < sounds_.size(); ++i) MIX_SetTrackGain(sounds_[i], sliderGain(soundSlider_[i]) * soundGain_[i]);
     for (const auto& entry : channels_)
         for (MIX_Track* track : entry.second.tracks)
-            if (track) MIX_SetTrackGain(track, soundVolume_ * entry.second.volume);
-    for (const Voice* v : {&voice_, &replay_}) MIX_SetTrackGain(v->track, voiceVolume_ * v->gain);
+            if (track) MIX_SetTrackGain(track, sliderGain(entry.second.slider) * entry.second.volume);
+    for (const Voice* v : {&voice_, &replay_}) MIX_SetTrackGain(v->track, voiceVolume_ * v->volume);
     for (const Stream& s : streams_) MIX_SetTrackGain(s.track.get(), musicVolume_ * s.gain);
 }
 
@@ -193,15 +193,30 @@ void Sound::stopMusic(float fadeOut) {
     MIX_StopTrack(track, frames(track, fadeOut));
 }
 
-void Sound::playSound(const std::string& path, float volume, float fadeIn, std::optional<float> fadeOut) {
-    if (!mixer_) return;
-    if (fadeOut)
-        for (MIX_Track* track : sounds_)
-            if (MIX_TrackPlaying(track)) MIX_StopTrack(track, frames(track, *fadeOut));
-    play(load(path, Kind::Sound), volume, fadeIn);
+float Sound::sliderGain(SoundSlider slider) const {
+    return slider == SoundSlider::Music ? musicVolume_ * duck_ : slider == SoundSlider::Voice ? voiceVolume_ : soundVolume_;
 }
 
-void Sound::playChannel(const std::string& channel, const std::string& path, bool loop, float volume, float fadeIn, float fadeOut) {
+void Sound::playSound(const std::string& path, float volume, float fadeIn, std::optional<float> fadeOut, SoundSlider slider, const std::string& type) {
+    if (!mixer_) return;
+    if (fadeOut) // (the others of its type)
+        for (std::size_t i = 0; i < sounds_.size(); ++i)
+            if (soundType_[i] == type && MIX_TrackPlaying(sounds_[i])) MIX_StopTrack(sounds_[i], frames(sounds_[i], *fadeOut));
+    play(load(path, Kind::Sound), volume, fadeIn, slider, type);
+}
+
+void Sound::stopType(const std::string& type, float fadeOut) {
+    if (!mixer_) return;
+    for (const auto& [name, c] : channels_)
+        if (c.type == type)
+            for (MIX_Track* track : c.tracks)
+                if (track && MIX_TrackPlaying(track)) MIX_StopTrack(track, frames(track, fadeOut));
+    for (std::size_t i = 0; i < sounds_.size(); ++i)
+        if (soundType_[i] == type && MIX_TrackPlaying(sounds_[i])) MIX_StopTrack(sounds_[i], frames(sounds_[i], fadeOut));
+}
+
+void Sound::playChannel(const std::string& channel, const std::string& path, bool loop, float volume, float fadeIn, float fadeOut, SoundSlider slider,
+                        const std::string& type) {
     if (!mixer_) return;
     MIX_Audio* clip = load(path, loop ? Kind::Music : Kind::Sound);
     if (!clip) return;
@@ -212,9 +227,11 @@ void Sound::playChannel(const std::string& channel, const std::string& path, boo
     c.current = 1 - c.current;
     c.path = path;
     c.volume = volume;
+    c.slider = slider;
+    c.type = type;
     MIX_Track* track = c.tracks[c.current];
     MIX_StopTrack(track, 0); // (one still fading from before: gone)
-    MIX_SetTrackGain(track, soundVolume_ * volume);
+    for (MIX_Track* t : c.tracks) MIX_SetTrackGain(t, sliderGain(slider) * volume); // (the one fading out too: as its type follows)
     start(track, clip, loop, fadeIn);
 }
 
@@ -231,11 +248,10 @@ void Sound::stopChannel(const std::string& channel, float fadeOut) {
     if (auto it = channels_.find(channel); it != channels_.end()) stop(it->second);
 }
 
-void Sound::say(Voice& v, MIX_Audio* clip, float volume, const Envelope* envelope) {
+void Sound::say(Voice& v, MIX_Audio* clip, const Envelope* envelope) {
     MIX_StopTrack(v.track, 0);
-    v.gain = volume;
     v.envelope = envelope;
-    MIX_SetTrackGain(v.track, voiceVolume_ * volume);
+    MIX_SetTrackGain(v.track, voiceVolume_ * v.volume);
     if (clip) start(v.track, clip, false, 0.0f);
 }
 
@@ -247,15 +263,16 @@ bool Sound::sayMadeUpVoice(Voice& v, std::string_view text, float pitch, float s
     if (!clip) return false;
     v.madeUpVoice = std::move(clip); // (the track keeps the one it was playing while it needs it)
     v.madeUpVoiceEnvelope = envelope(pcm, kPlaceholderRate);
-    say(v, v.madeUpVoice.get(), 1.0f, &v.madeUpVoiceEnvelope);
+    say(v, v.madeUpVoice.get(), &v.madeUpVoiceEnvelope);
     return true;
 }
 
 void Sound::playVoice(const std::string& path, float volume) {
     if (!mixer_) return;
     voicePaused_ = voiceHeld_ = false;
+    voice_.volume = volume;
     MIX_Audio* clip = load(path, Kind::Sound);
-    say(voice_, clip, volume, clip ? &measure(path) : nullptr);
+    say(voice_, clip, clip ? &measure(path) : nullptr);
 }
 
 bool Sound::playMadeUpVoice(std::string_view text, float pitch, float speed) {
@@ -269,8 +286,8 @@ void Sound::stopVoice() {
     voicePaused_ = voiceHeld_ = false;
 }
 
-void Sound::replayVoice(const std::string& path, float volume) {
-    if (mixer_) say(replay_, load(path, Kind::Sound), volume, nullptr);
+void Sound::replayVoice(const std::string& path) {
+    if (mixer_) say(replay_, load(path, Kind::Sound), nullptr);
 }
 
 bool Sound::replayMadeUpVoice(std::string_view text, float pitch, float speed) {
@@ -431,7 +448,7 @@ void Sound::playTestSound() {
     play(it != cache_.end() ? it->second.get() : placeholder(key, Kind::Sound, 7), 1.0f);
 }
 
-void Sound::play(MIX_Audio* clip, float volume, float fadeIn) {
+void Sound::play(MIX_Audio* clip, float volume, float fadeIn, SoundSlider slider, const std::string& type) {
     if (!clip) return;
     // Prefer an idle track; if all are busy, reuse them round-robin (the oldest sound is cut).
     std::size_t pick = nextSound_;
@@ -444,7 +461,9 @@ void Sound::play(MIX_Audio* clip, float volume, float fadeIn) {
     }
     nextSound_ = (pick + 1) % kSoundTracks;
     soundGain_[pick] = volume;
-    MIX_SetTrackGain(sounds_[pick], soundVolume_ * volume);
+    soundSlider_[pick] = slider;
+    soundType_[pick] = type;
+    MIX_SetTrackGain(sounds_[pick], sliderGain(slider) * volume);
     start(sounds_[pick], clip, false, fadeIn);
 }
 
@@ -456,6 +475,21 @@ void Sound::listen(const std::string& path) {
     listened_ = path;
     MIX_SetTrackGain(listen_, 1.0f);
     start(listen_, load(path, Kind::Music), false, 0.0f);
+}
+
+void Sound::listenMadeUpVoice(const std::string& name, float pitch, float speed) {
+    if (!mixer_) return;
+    const std::vector<float> pcm = madeUpVoice("Hello! It's nice to meet you, really nice.", pitch, kPlaceholderRate, speed);
+    const SDL_AudioSpec spec{SDL_AUDIO_F32, 1, kPlaceholderRate};
+    MixSoundPtr clip{pcm.empty() ? nullptr : MIX_LoadRawAudio(mixer_.get(), pcm.data(), pcm.size() * sizeof(float), &spec)};
+    if (!clip) return;
+    listenedMovie_ = false;
+    movieTrack_ = nullptr;
+    holdOthers();
+    listened_ = name;
+    MIX_SetTrackGain(listen_, voiceVolume_);
+    start(listen_, clip.get(), false, 0.0f);
+    listenedVoice_ = std::move(clip); // (after the track has it: the one before was still its)
 }
 
 void Sound::listen(const std::string& name, SDL_AudioStream* movie) {
@@ -526,6 +560,12 @@ void Sound::stopAll(float fadeOut) {
 void Sound::applyMusicGain() {
     if (!mixer_) return;
     for (std::size_t i = 0; i < music_.size(); ++i) MIX_SetTrackGain(music_[i], musicVolume_ * musicGain_[i] * duck_);
+    for (const auto& entry : channels_) // (a sound type following the music volume: quieter under voices too)
+        if (entry.second.slider == SoundSlider::Music)
+            for (MIX_Track* track : entry.second.tracks)
+                if (track) MIX_SetTrackGain(track, sliderGain(SoundSlider::Music) * entry.second.volume);
+    for (std::size_t i = 0; i < sounds_.size(); ++i)
+        if (soundSlider_[i] == SoundSlider::Music) MIX_SetTrackGain(sounds_[i], sliderGain(SoundSlider::Music) * soundGain_[i]);
 }
 
 void Sound::update(float dt) {

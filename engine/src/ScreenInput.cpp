@@ -73,10 +73,10 @@ void ScreenView::drop(const Element& target) {
     engine_.drop(what, target.drop);
 }
 
-void ScreenView::activate(const Target& t, std::optional<float> mouseX) {
+void ScreenView::activate(const Target& t, std::optional<SDL_FPoint> mouse) {
     const Element& el = def_->elements[t.spot.element];
     const auto item = static_cast<std::size_t>(t.spot.item);
-    if (el.kind == ElementKind::Button) { // dragging: take one (or put it back), drop it on a part that takes it
+    if (el.pressedAsButton()) { // (a text dragged: taken, or put back; dropped on a part that takes it)
         if (!el.option("drag").empty()) return held_ == t.spot.element ? held_.reset() : hold(t.spot.element);
         if (held_ && !el.drop.empty()) return drop(el);
         held_.reset();
@@ -99,26 +99,27 @@ void ScreenView::activate(const Target& t, std::optional<float> mouseX) {
             engine_.goToPlace(ids[item], def_->elements[t.spot.element].confirm);
         break;
     case ElementKind::Slider:
-        if (mouseX) {
+        if (mouse) {
             dragging_ = t.spot.element;
-            slide(t.spot.element, *mouseX);
+            slide(t.spot.element, *mouse);
         }
         break;
-    case ElementKind::Input: // the box pressed: typed into, and the on-screen keyboard comes up over it when a controller pressed it,
-                             // or a click did while no real keyboard's been used (a real one's key puts it away)
+    case ElementKind::Input: // the box pressed: typed into, and the on-screen keyboard comes up over it for a click or a controller's
+                             // press, each time (a real keyboard's key puts it away)
         typing_ = t.spot.element;
         keyboardShut_ = false;
-        if (engine_.padInUse() || (mouseX && !engine_.keyboardUsed())) engine_.wantKeyboard(*this, t.spot.element, !mouseX);
+        if (engine_.padInUse() || mouse) engine_.wantKeyboard(*this, t.spot.element, !mouse);
         break;
     default:
         break;
     }
 }
 
-void ScreenView::slide(std::size_t element, float x) {
+void ScreenView::slide(std::size_t element, SDL_FPoint pointer) {
     const Element& el = def_->elements[element];
     const SDL_FRect at = sliderBox(element);
-    const float t = std::clamp((x - at.x) / std::max(1.0f, at.w), 0.0f, 1.0f);
+    const float t = el.option("vertical", "no") == "yes" ? std::clamp(1.0f - (pointer.y - at.y) / std::max(1.0f, at.h), 0.0f, 1.0f) // (a vertical one: from its foot up)
+                                                         : std::clamp((pointer.x - at.x) / std::max(1.0f, at.w), 0.0f, 1.0f);
     if (const SettingControl* c = findSettingControl(el.option("setting"))) { // a player setting
         c->setValue(engine_.settings(), t);
         engine_.settingsChanged(false);
@@ -218,11 +219,13 @@ bool ScreenView::pointFirst() {
     return first != nullptr;
 }
 
-bool ScreenView::adjustPointed(int dx) {
+bool ScreenView::adjustPointed(int dx, int dy) {
     const Target* t = placeTarget();
     if (!t || t->spot.element >= def_->elements.size() || def_->elements[t->spot.element].kind != ElementKind::Slider) return false;
+    const int by = def_->elements[t->spot.element].option("vertical", "no") == "yes" ? -dy : dx; // (a vertical one: up and down; the other way goes on to the next part)
+    if (by == 0) return false;
     const Target at = *t; // (a copy: it's one of the targets)
-    adjustSlider(at.spot.element, dx);
+    adjustSlider(at.spot.element, by);
     pointByKeys(at); // (the keys are on it: its ring)
     return true;
 }
@@ -323,7 +326,7 @@ bool ScreenView::hasKey(const SDL_Event& e) {
 bool ScreenView::catches(const SDL_Event& e) {
     SDL_FPoint at{};
     if ((e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP) && e.button.button == SDL_BUTTON_LEFT) at = {e.button.x, e.button.y};
-    else if (e.type == SDL_EVENT_MOUSE_WHEEL) at = mouse_; // (where the pointer is, as the wheel's scrolling has it)
+    else if (e.type == SDL_EVENT_MOUSE_WHEEL) at = {e.wheel.mouse_x, e.wheel.mouse_y}; // (where the pointer is as it's turned: a trackpad's doesn't move it first)
     else return false;
     for (std::size_t i = 0; i < def_->elements.size(); ++i) {
         const Element& el = def_->elements[i];
@@ -352,7 +355,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
     if (dragging_) {
         if (e.type == SDL_EVENT_MOUSE_MOTION) {
             mouse_ = {e.motion.x, e.motion.y};
-            slide(*dragging_, e.motion.x);
+            slide(*dragging_, {e.motion.x, e.motion.y});
             return true;
         }
         if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT) {
@@ -417,7 +420,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
             }
             if (tapping_) { // (a list's item, pressed and let go without dragging: tapped)
                 const Target hit = *std::exchange(tapping_, std::nullopt);
-                if (const Target* t = targetAt(e.button.x, e.button.y); t && t->spot == hit.spot) activate(hit, e.button.x);
+                if (const Target* t = targetAt(e.button.x, e.button.y); t && t->spot == hit.spot) activate(hit, SDL_FPoint{e.button.x, e.button.y});
                 return true;
             }
             if (!pressing_ && !held_) { // (on nothing to click: a tap, as a click elsewhere would be; a button pressed is clicked below)
@@ -428,7 +431,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
     }
 
     if (handleInput(e)) return true;
-    if (e.type == SDL_EVENT_MOUSE_WHEEL && wheelAt(mouse_, e.wheel.y, e.wheel.x)) return true;
+    if (e.type == SDL_EVENT_MOUSE_WHEEL && wheelAt({e.wheel.mouse_x, e.wheel.mouse_y}, e.wheel.y, e.wheel.x)) return true; // (where it's turned)
 
     switch (e.type) {
     case SDL_EVENT_MOUSE_MOTION:
@@ -445,7 +448,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
             const Target* t = engine_.frameNumber() <= drawnFrame_ + 1 ? targetAt(e.button.x, e.button.y) : nullptr; // (not if it closed meanwhile)
             if (t && t->spot.element == was) {
                 const Target hit = *t;
-                activate(hit, e.button.x);
+                activate(hit, SDL_FPoint{e.button.x, e.button.y});
             }
             return true;
         }
@@ -481,7 +484,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
                 keyFocus_ = false;
                 mouse_ = {e.button.x, e.button.y};
                 const Element& el = def_->elements[hit.spot.element];
-                if (el.kind == ElementKind::Button && el.option("drag").empty() && !(held_ && !el.drop.empty())) {
+                if (el.pressedAsButton() && el.option("drag").empty() && !(held_ && !el.drop.empty())) {
                     pressing_ = hit.spot.element; // (clicked when the mouse comes up on it)
                     return true;
                 }
@@ -489,7 +492,7 @@ bool ScreenView::handleEvent(const SDL_Event& e) {
                     tapping_ = hit;
                     return true;
                 }
-                activate(hit, e.button.x);
+                activate(hit, SDL_FPoint{e.button.x, e.button.y});
                 return true;
             }
             if (held_) { // a click elsewhere puts it back
@@ -527,11 +530,18 @@ void ScreenView::drawSlider(SDL_Renderer* r, std::size_t index, float alpha) {
     const SettingControl* c = findSettingControl(el.option("setting"));
     const float f = c ? std::clamp(c->value(engine_.settings()), 0.0f, 1.0f) : hi > lo ? std::clamp((value - lo) / (hi - lo), 0.0f, 1.0f) : 0.0f;
     const SDL_FRect rr = sliderBox(index);
-    const float my = rr.y + rr.h * 0.5f;
     const bool hot = focused(index, 0) || dragging_ == index;
-    draw::rect(r, {rr.x, my - 2, rr.w, 4}, withAlpha(el.colour("track", {60, 64, 92, 255}), a));
-    draw::rect(r, {rr.x, my - 2, rr.w * f, 4}, withAlpha(el.colour("fill", {150, 170, 255, 255}), a));
-    draw::circle(r, rr.x + rr.w * f, my, hot ? 10.0f : 8.0f, withAlpha(el.colour("knob", s.colour), a));
+    if (el.option("vertical", "no") == "yes") { // (filling up from its foot)
+        const float mx = rr.x + rr.w * 0.5f, top = rr.y + rr.h * (1.0f - f);
+        draw::rect(r, {mx - 2, rr.y, 4, rr.h}, withAlpha(el.colour("track", {60, 64, 92, 255}), a));
+        draw::rect(r, {mx - 2, top, 4, rr.y + rr.h - top}, withAlpha(el.colour("fill", {150, 170, 255, 255}), a));
+        draw::circle(r, mx, top, hot ? 10.0f : 8.0f, withAlpha(el.colour("knob", s.colour), a));
+    } else {
+        const float my = rr.y + rr.h * 0.5f;
+        draw::rect(r, {rr.x, my - 2, rr.w, 4}, withAlpha(el.colour("track", {60, 64, 92, 255}), a));
+        draw::rect(r, {rr.x, my - 2, rr.w * f, 4}, withAlpha(el.colour("fill", {150, 170, 255, 255}), a));
+        draw::circle(r, rr.x + rr.w * f, my, hot ? 10.0f : 8.0f, withAlpha(el.colour("knob", s.colour), a));
+    }
     if (on) targets_.push_back({{index}, rr, true});
 }
 

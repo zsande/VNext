@@ -63,7 +63,7 @@ void Engine::showErrors(const std::vector<std::string>& lines) {
     std::string text;
     for (std::size_t i = 0; i < lines.size() && i < 16; ++i) text += lines[i] + '\n';
     if (lines.size() > 16) text += "... and {} more (see log.txt)"_tr(lines.size() - 16) + '\n';
-    errorText_.set(fonts_.get("", 18.0f * canvas_.h / 720.0f), std::move(text), canvas_.w - 120);
+    errorText_.set(fonts_.get("", 18.0f * lookScale(canvas_.w, canvas_.h)), std::move(text), canvas_.w - 120);
     closeAll();
     mode_ = Mode::Error;
 }
@@ -85,7 +85,7 @@ void Engine::drawGame(bool thumbnail) {
     thumbnail_ = thumbnail;
     SDL_Renderer* r = renderer_.get();
     game_->draw(fonts_.get("default", 18));
-    if (!game_->uiHidden() && !game_->playingMovie()) { // (a movie covers everything but menus)
+    if (!game_->uiHidden()) {
         for (const auto& name : game_->shownScreens())
             if (ScreenView* v = view(name)) v->draw(r);
         for (const std::string& box : game_->boxes()) // every textbox with a line, the line on screen's on top
@@ -122,7 +122,7 @@ void Engine::showTitle() {
 void Engine::drawErrors() {
     SDL_Renderer* r = renderer_.get();
     draw::rect(r, {0, 0, canvas_.w, canvas_.h}, {40, 12, 18, 255});
-    const float k = canvas_.h / 720.0f; // keep the layout proportional on bigger canvases
+    const float k = lookScale(canvas_.w, canvas_.h); // keep the layout proportional on bigger canvases (and taller ones)
     // (the game itself can't be opened: no script to fix)
     errorTitle_.set(fonts_.get("", 24 * k), cantOpen_ ? std::string_view("The game can't be opened"_tr) : std::string_view("Something in the script needs fixing"_tr));
     errorTitle_.draw(r, 60 * k, 50 * k, {255, 140, 150, 255});
@@ -199,7 +199,7 @@ SDL_AppResult Engine::iterate() {
     const bool covered = mode_ == Mode::Game && (developer_.isOpen() || std::ranges::any_of(overlays_, stops));
     if (covered != covered_) {
         covered_ = covered;
-        game_->setCovered(covered); // its voice line and movie wait under menus
+        game_->setCovered(covered); // the line's voice and the movie wait under menus
         if (!covered) sound_.stopReplay(); // a voice heard again from the history stops with it
     }
     if (touch_.down && !touch_.moved && !touch_.second && !touch_.longPressed && SDL_GetTicks() - touch_.start >= 600) {
@@ -290,7 +290,7 @@ SDL_AppResult Engine::iterate() {
         close();
     }
     if (musicBeforeSongs_ && !songsOpen()) { // the music room closed: back to what played before
-        if (mode_ == Mode::Game && !game_->music().empty()) sound_.playMusic(assets_->sound(game_->music()), true, 0.5f, game_->musicVolume());
+        if (mode_ == Mode::Game && !game_->music().empty()) sound_.playMusic(assets_->sound(script_.soundOf(game_->music(), "music").file), true, 0.5f, game_->musicVolume());
         else if (musicBeforeSongs_->empty()) sound_.stopMusic(0.5f);
         else sound_.playMusic(*musicBeforeSongs_, true, 0.5f);
         musicBeforeSongs_.reset();

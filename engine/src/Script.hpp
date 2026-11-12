@@ -16,6 +16,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -53,8 +54,8 @@ struct Translation;
 
 // When a character's mouth moves (their images need mouth frames: see Atlas).
 enum class MouthMoves : std::uint8_t {
-    Yes,   // with their voice line, or while their text types if the line has none
-    Voice, // only with a voice line
+    Yes,   // with the line's voice, or while their text types if it has none
+    Voice, // only while the line plays a voice
     No,
 };
 
@@ -81,13 +82,17 @@ struct CharacterDef {
     float madeUpVoice = 0.0f;            // made-up voice for every line, this high (Hz); 0: none
     float madeUpVoiceSpeed = 1.0f;       // how fast it talks (1 = normal)
 
-    // On stage (atlases with eyes and mouth frames).
+    // On stage: how they come when a line doesn't say (where, at= and y=: the stage's 0 to 1 from the top left, none the
+    // middle, standing at the bottom; their zoom, opacity, rotation, flip, tint and layer; the animation they play while
+    // shown and the one they come with), and how they blink and talk (atlases with eyes and mouth frames).
+    StageProps comes;
+    std::optional<std::string> animation, animationOnShow;
     bool blink = true;
     float secondsBetweenBlinks = 4.0f;  // seconds between blinks, on average
     MouthMoves mouthMoves = MouthMoves::Yes;
     float mouthSpeed = 4.0f;   // mouth movements a second while text types without a voice
 
-    // The face in the textbox: images/<face>.png, <face>_<expression>.png, shown by a "face" part.
+    // The face in the textbox: images/<face>.png, <face>_<expression>.png, shown by a visual showing {face}.
     std::string face;
     std::string faceSide = "left"; // which end of the textbox ({face_side} in screens)
     FaceCopies faceCopies;             // what it copies from the image on stage
@@ -101,6 +106,7 @@ struct CharacterDef {
     // scenes with the questions the player can ask them from the phone, in their chat and on a call (chat=, call=).
     std::string avatar, about, ringtone;
     std::optional<Expr> contact;
+    std::string love; // a love interest's (love=): its love's variable (loveVariable: mika.love)
     std::string chatScene, callScene;
     [[nodiscard]] std::string avatarOf(std::string_view expression) const {
         const std::string& base = avatar.empty() ? face : avatar;
@@ -198,13 +204,29 @@ enum class ElementKind : std::uint8_t {
     Flowchart,             // the flowchart
     Container, // parts in it (any part can hold parts; list=: once for each item of a list: the saves, the history...)
 };
+// The visual types every game has (a show line's "as TYPE", else what it shows), their layers (higher: in front) and
+// what each takes: the background at 0 (one at a time, the whole stage: an image, a movie or a colour), characters at 1,
+// images at 2 and movies at 3; the game's own types are at theirs, any whole number (under 0: behind the background),
+// taking what they accept (Script::visualTypes).
+inline constexpr std::array<std::string_view, 4> kVisualTypes{"background", "character", "image", "movie"};
+inline constexpr std::array<int, 4> kVisualTypeLayers{0, 1, 2, 3};
+inline constexpr std::array<std::string_view, 4> kVisualTypeAccepts{"image movie colour", "character", "image", "movie"};
+[[nodiscard]] constexpr int visualTypeLayer(std::string_view type) {
+    for (std::size_t i = 0; i < kVisualTypes.size(); ++i)
+        if (kVisualTypes[i] == type) return kVisualTypeLayers[i];
+    return 0;
+}
+// The sound types every game has (a play line's "as TYPE", else what it plays), as the player's three volumes are: music
+// one at a time (a new song fading over the one before) and looping; sounds many at once, playing once; a voice one at a
+// time, once; the game's own follow one of those volumes, as they say (Script::soundTypes).
+inline constexpr std::array<std::string_view, 3> kBuiltInSoundTypes{"music", "sound", "voice"};
 // What a container can repeat its parts for (list=NAME), and what one of them is called in its parts' values
 // ({chat.name}): the options of the choice being made (on the phone, in the phone's lists; else the story's), the
 // lines read (the history) and the lines on the page now, the save pages and the saves on the one open, the gallery's
 // images, the endings, songs, achievements and tips; the phone's apps, its chats, the messages in the one open, its
 // calls, the people in it and what's new on its lock screen; and the player's captions (what sounds and songs that
 // just began are) and a movie's subtitle now.
-inline constexpr std::array<std::pair<std::string_view, std::string_view>, 18> kLists{{{"options", "option"},
+inline constexpr std::array<std::pair<std::string_view, std::string_view>, 19> kLists{{{"options", "option"},
                                                                                       {"history", "line"},
                                                                                       {"lines", "line"},
                                                                                       {"pages", "page"},
@@ -221,11 +243,12 @@ inline constexpr std::array<std::pair<std::string_view, std::string_view>, 18> k
                                                                                       {"people", "person"},
                                                                                       {"notices", "notice"},
                                                                                       {"captions", "caption"},
-                                                                                      {"subtitles", "subtitle"}}};
+                                                                                      {"subtitles", "subtitle"},
+                                                                                      {"loves", "love"}}};
 // Each list's items' values, after its word ({chat.name}): ScreenView::listItems() gives these (a line's are the
 // history's or the page's: each has its own of them). Someone's (a chat's, a message's, a call's or a person's)
 // have their character, avatar, initial and colour too. A text part showing just {line.text} keeps its look.
-inline constexpr std::array<std::pair<std::string_view, std::string_view>, 17> kItemValues{{
+inline constexpr std::array<std::pair<std::string_view, std::string_view>, 18> kItemValues{{
     {"option", "text locked note on picked kind number"},
     {"line", "number name colour text choice voiced back typing"},
     {"page", "name number open"},
@@ -242,12 +265,28 @@ inline constexpr std::array<std::pair<std::string_view, std::string_view>, 17> k
     {"person", "name about character avatar initial colour"},
     {"notice", "who text chat call time"},
     {"caption", "text music"},
-    {"subtitle", "text"}}};
-// Whether a kind of part ("container", "slider"...) takes a setting of its own ("columns", "glide"...):
+    {"subtitle", "text"},
+    {"love", "name value hearts most character avatar initial colour"}}};
+// Whether a kind of part ("container", "input"...) takes a setting of its own ("columns", "glide"...):
 // the ones the editor's form for it shows, besides any part's place, size and look.
 [[nodiscard]] bool partTakes(std::string_view kind, std::string_view key);
-// The style a kind of part has when it names none, if the game has one by that name ("button"...): else "default".
-[[nodiscard]] std::string_view partStyle(std::string_view kind, const std::function<bool(std::string_view)>& hasStyle);
+// What a part is, as it's written (kKinds): a text showing {dialogue} the line said, one with something to do when clicked a
+// button; a visual showing {face} the speaker's face; an input a key to press, a slider or a box to type in (inputIs).
+// `says`: whether it has that setting.
+[[nodiscard]] ElementKind partKindOf(std::string_view kind, std::string_view text, const std::function<bool(std::string_view)>& says);
+// A made-up voice's pitch (Hz) as a character's made_up_voice= says it: high, medium, low, deep, or a pitch from 50 to 600
+// (none: no, or not one of those).
+[[nodiscard]] std::optional<float> madeUpVoicePitch(std::string_view value);
+
+// What an input is, by what it changes: a variable typed in, or slid (one with a range or a slider's look: minimum=, maximum=,
+// step=, vertical=, track=, fill=, knob=), a player setting slid (setting=), a control's key (control=), or nothing: a value
+// shown, filling it (value=).
+enum class InputIs : std::uint8_t { Typed, Slid, Setting, Key, Shown };
+[[nodiscard]] InputIs inputIs(const std::function<bool(std::string_view)>& says);
+// The settings each takes (what it changes first), in its form's order.
+[[nodiscard]] std::span<const std::string_view> inputTakes(InputIs is);
+// The style a part has when it names none (by what it is: a button's "button"...), if the game has one: else "default".
+[[nodiscard]] std::string_view partStyle(ElementKind kind, const std::function<bool(std::string_view)>& hasStyle);
 
 // What screens' conditions and texts (and the story's) know besides the variables: every value
 // Engine::builtin gives, in its order (the player's settings, by their names, too: Settings::has).
@@ -260,7 +299,8 @@ inline constexpr std::string_view kBuiltinValues[]{
     "call_incoming", "call_outgoing", "call_busy", "call_choice", "call_time", "caller_avatar", "caller_colour", "caller_initial", "open_image", "open_image_text", "phone_needs_code",
     "phone_code", "phone_wrong", "keyboard_shift", "keyboard_text", "dragging", "has_face", "face_side", "fullscreen", "developer", "thumbnail", "save_mode", "title", "language", "languages",
     "version", "engine_version", "sdl_version", "speaker", "speaker_colour", "question", "page", "window_size",
-    "time_day", "time_hour", "time_minute", "time_part", "time_weekday", "time_month", "time_year", "time_clock", "time_date", "time_waiting", "time_until"};
+    "time_day", "time_hour", "time_minute", "time_part", "time_weekday", "time_month", "time_year", "time_clock", "time_date", "time_waiting", "time_until",
+    "most_loved"};
 
 // A key (with modifiers), mouse button, wheel direction, controller button or touch gesture:
 // "escape", "alt+return", "mouse_right", "wheel_up", "pad_a", "swipe_left", "long_press".
@@ -292,9 +332,11 @@ struct Element {
     std::string text;  // a text's or button's words, an image's or a movie's name, a key's or a control's name...
     // Where it is and how big, as written: x and y places from -1 to 1 in the box it's in (the screen, or
     // the part it's in: -1 lines its left edge or bottom up with that one's; none: the top left corner),
-    // w and h shares of that box (none: automatic; a container fills it). A part without a width (or a
-    // height) is placed by its corner.
+    // w and h shares of that box, or pixels (140px; a width no wider than the box: in a smaller one, as wide
+    // as that), none: automatic (a container fills it; in a box whose parts go one after another, the room
+    // they leave). A part without a width (or a height) is placed by its corner.
     std::optional<float> placeX, placeY, shareWidth, shareHeight;
+    bool pixelWidth = false, pixelHeight = false; // (shareWidth, shareHeight: pixels)
     Style style;
     Commands actions;
     Commands drop;       // drop=: what dropping something dragged on it does ({dropped} is what it was)
@@ -306,6 +348,7 @@ struct Element {
     std::map<std::string, std::string, std::less<>> props;  // other widget options
     std::map<std::string, Expr, std::less<>> exprs;         // formula options (a slider's value=, minimum=...)
     std::shared_ptr<const Animation> animation;             // animation=
+    std::shared_ptr<const Animation> showAnimation;         // animation_on_show=: a visual's, played as it comes (from when it shows)
     std::shared_ptr<const Animation> pointedAnimation;        // pointed_animation=: while it's pointed at (and back to its start after)
     std::shared_ptr<const Animation> clickAnimation;        // click_animation=: a button's, played when it's clicked (then it does what it does)
     std::shared_ptr<const Animation> messageAnimation;      // message_animation=: played when a message comes
@@ -325,6 +368,11 @@ struct Element {
     [[nodiscard]] std::string edges() const;
     [[nodiscard]] bool glides(bool usually) const;
     [[nodiscard]] float dragDirection() const;
+    // Whether it's pressed as a button is (clicked when the pointer comes up on it): a text that's clicked, or a visual
+    // or a box with an action.
+    [[nodiscard]] bool pressedAsButton() const {
+        return kind == ElementKind::Button || ((kind == ElementKind::Image || kind == ElementKind::Container) && !actions.empty());
+    }
 };
 
 struct ScreenDef {
@@ -332,18 +380,15 @@ struct ScreenDef {
     std::vector<Element> elements;
     bool storyWaits = true; // story=waits: the story waits while it's open (and nothing underneath takes clicks)
     float closeAfter = 0.0f; // close_after=: it closes by itself after this many seconds (0: it doesn't)
-    // stop_music_on_open= and stop_voice_on_open= (or _on_close=): the music, or the voice line, stops then.
-    struct Stops {
-        bool music = false, voice = false;
-    };
-    Stops stopOnOpen, stopOnClose;
+    // stop_on_open= (or stop_on_close=): the sound types, with commas between them, whose sounds stop then (as stop TYPE).
+    std::vector<std::string> stopOnOpen, stopOnClose;
     Commands actionOnOpen, actionOnClose;
     // animation_on_open= / animation_on_close=: the whole screen moves and fades as these say when it opens
     // and when it closes (it stays on screen, without taking clicks, until that's over).
     std::shared_ptr<const Animation> animationOnOpen, animationOnClose;
 };
 
-// Something a key does ("control" lines). Players can change its keys with a screen's control parts (Settings' Keys).
+// Something a key does ("control" lines). Players can change its keys with a screen's inputs for them (Settings' Keys).
 struct Control {
     std::string name;
     std::vector<KeyChord> keys; // the defaults
@@ -364,7 +409,7 @@ inline constexpr std::array<std::string_view, 25> kToolsVerbs{"undo",  "redo",  
                                                             "previous page"};
 [[nodiscard]] std::optional<std::size_t> toolsVerbOf(const Control& control);
 
-// What a screen's control parts call the mouse buttons, the wheel, controller buttons and touch gestures
+// What a screen's inputs for controls' keys call the mouse buttons, the wheel, controller buttons and touch gestures
 // (keys are named by the system): the only words the player shows that aren't the game's own, so a
 // translation file lists them.
 inline constexpr std::array<std::pair<std::string_view, std::string_view>, 29> kKeyWords{{
@@ -480,16 +525,27 @@ struct ScriptError {
 
 // Reads a file relative to the game folder; nullopt if it does not exist.
 using FileReader = std::function<std::optional<std::string>(const std::string& relativePath)>;
+// The files in a folder of the game ("images/gallery/"), by their names: the gallery's and the music room's.
+using FolderLister = std::function<std::vector<std::string>(const std::string& folder)>;
 
 class Script {
 public:
     // Reads `builtin` (the engine's default UI), then `entry` and everything it includes; later
-    // definitions replace earlier ones. Always returns a Script; check ok() / errors.
-    static Script load(const std::string& entry, const FileReader& read, std::string_view builtin = {});
+    // definitions replace earlier ones; with `list`, the pictures in images/gallery and the songs in
+    // sounds/music are in the gallery and the music room too. Always returns a Script; check ok() / errors.
+    static Script load(const std::string& entry, const FileReader& read, std::string_view builtin = {}, const FolderLister& list = {});
 
     [[nodiscard]] bool ok() const { return errors.empty(); }
     [[nodiscard]] std::optional<std::size_t> findScene(std::string_view name) const;
     [[nodiscard]] const CharacterDef* character(std::string_view key) const;
+    // What a visual by `name` shows, wherever one goes (a screen's visual, a style's, the phone's wallpaper, a message's
+    // picture, a weather speck, a face...): a visual named by a visual line, what it shows (its shows=; none: what's named
+    // as it); a character, their picture (with `expression`, that one's); anything else, itself (a picture, a sub-image,
+    // an atlas's frame, a movie or a colour).
+    [[nodiscard]] std::string visualOf(std::string_view name, std::string_view expression = {}) const;
+    // The voice file a line plays, as sounds/ names it: its own (voice=NAME), else its speaker's for it (voice_files=:
+    // voices/aiko/start_3); empty: none (made-up speech, or nothing).
+    [[nodiscard]] std::string voiceOf(const cmd::Say& say) const;
     [[nodiscard]] const ScreenDef* screen(std::string_view name) const;
     // The scene containing `pc` and the offset from it (lets saves survive script edits).
     [[nodiscard]] std::pair<std::string, std::size_t> locate(std::size_t pc) const;
@@ -503,6 +559,60 @@ public:
     std::unordered_map<std::string, CharacterDef, StringHash, std::equal_to<>> characters;
     std::vector<Atlas> atlases;
     std::vector<SubImage> subImages;
+    // Every visual type: the ones every game has (kVisualTypes), then the game's own ("type NAME layer=N"). Each one's
+    // layer, and what it accepts (characters, images, movies, colours: words with spaces between them; one of the game's
+    // own with none written, all of them).
+    struct VisualType {
+        int layer = 0;
+        std::string accepts = "character image movie colour";
+    };
+    std::unordered_map<std::string, VisualType, StringHash, std::equal_to<>> visualTypes;
+    // The visuals with names of their own ("visual NAME type=TYPE shows=WHAT at=PLACE y=N zoom=... width=N height=N"): what
+    // each is (its type: background, image, movie or the game's own), what it shows (a picture, a sub-image, a movie or a
+    // colour; else the one named as it), how it comes when its line doesn't say (where: the stage's 0 to 1 from the top
+    // left, none the middle, a background's the part of a picture bigger than the stage that shows; its zoom, opacity,
+    // rotation, flip, tint and layer; the animation it plays while shown and the one it comes with; a movie's loop and
+    // volume) and, a colour's box, its size (a part of the stage's; none: all of it). "show NAME" shows it as that type.
+    struct NamedVisual {
+        std::string type = "image", shows;
+        StageProps comes;
+        std::optional<std::string> animation, animationOnShow;
+        std::optional<bool> loop;
+        std::optional<float> volume, width, height;
+    };
+    std::unordered_map<std::string, NamedVisual, StringHash, std::equal_to<>> visuals;
+    // Every sound type: the ones every game has (kBuiltInSoundTypes), then the game's own ("type NAME follows=music|sound|voice
+    // one_at_a_time=yes loop=yes volume=60%"): which of the player's volumes each follows, whether one of it plays at a time
+    // (a new one replacing the one playing, fading over) or many at once, whether what it plays loops unless a line says,
+    // and a volume of its own (under its slider's).
+    struct SoundType {
+        SoundSlider follows = SoundSlider::Sound;
+        bool oneAtATime = false, loop = false;
+        float volume = 1.0f;
+    };
+    std::unordered_map<std::string, SoundType, StringHash, std::equal_to<>> soundTypes;
+    // The sounds with names of their own ("sound NAME type=TYPE plays=FILE loop=yes volume=80% fade=2 fade_out=1"): what
+    // each is (its type: music, sound, voice or the game's own), what it plays (a file in sounds/; else the one named as
+    // it) and how, when its line doesn't say. "play NAME" plays it as that type; "stop NAME" stops it.
+    struct NamedSound {
+        std::string type = "sound", plays;
+        std::optional<bool> loop;
+        std::optional<float> volume, fade, fadeOut;
+    };
+    std::unordered_map<std::string, NamedSound, StringHash, std::equal_to<>> sounds;
+    // What a sound by `name` plays, wherever one goes (a play line, a button's, the phone's, a line's voice, the music
+    // room...): its file, as sounds/ names it, its type (`as`, else a named sound's own, else sound; a song, music/...:
+    // music), how loud (its own volume, times its type's) and on which of the player's volumes, whether it loops, and how
+    // it fades in and out (its own, else none; music's out: the game's crossfade, unset here).
+    struct SoundPlay {
+        std::string file, type = "sound";
+        float volume = 1.0f;
+        SoundSlider slider = SoundSlider::Sound;
+        bool oneAtATime = false, loop = false, named = false;
+        float fade = 0.0f;
+        std::optional<float> fadeOut;
+    };
+    [[nodiscard]] SoundPlay soundOf(std::string_view name, std::string_view as = {}) const;
     std::unordered_map<std::string, Animation, StringHash, std::equal_to<>> animations;
     std::vector<std::string> files;
     std::vector<ScriptError> errors;
@@ -528,9 +638,11 @@ public:
         std::string name;    // as written (an image's or a song's file name)
         std::string title;
         std::string text;    // an ending's hint (shown while it's locked), an achievement's description, a tip's text
+        std::string scene;   // an ending's scene= (lower-case): it's reached as that scene ends
         bool secret = false; // an achievement whose title and words aren't shown until it's earned (???: {achievement.secret})
     };
     std::array<std::vector<Record>, kRecordKinds.size()> lists;
+    std::vector<std::string> loves; // the love interests (characters with love=), in their order: their keys
     [[nodiscard]] const std::vector<Record>& records(RecordKind kind) const { return lists[static_cast<std::size_t>(kind)]; }
     [[nodiscard]] const Record* record(RecordKind kind, std::string_view name) const;
     // The persistent variable that remembers one, and whether a variable is one of those (they stay
@@ -561,11 +673,20 @@ private:
     const Translation* translation_ = nullptr;
 };
 
+// The gallery's or the music room's entries their folders give, as `list` finds them (the pictures in images/gallery,
+// the songs in sounds/music): named as the game has them (gallery/beach_sunset), titled as their files are called
+// ("Beach sunset"). The game has them after the ones its scripts list (Parser::folderRecords); none for the others.
+[[nodiscard]] std::vector<Script::Record> folderRecords(RecordKind kind, const FolderLister& list);
+
 // The story command a line starts with ("scene", "quick save"...), or empty (a line of text).
 [[nodiscard]] std::string storyCommandOf(std::string_view line);
 // "Name: words" or "Name expression: words" (at most three words before the colon, then a space or
 // nothing): someone saying it, with `speaker` and `words` set to its two parts.
 [[nodiscard]] bool spoken(std::string_view line, std::string_view* speaker = nullptr, std::string_view* words = nullptr);
+// A line said (someone's or narration) with its own voice: " voice=NAME" at its end (NAME in quotes when it has
+// spaces), the sound it plays. The line without it, and in `voice` the name (empty: none written after it); the
+// line as it is when it has none.
+[[nodiscard]] std::string_view withoutVoice(std::string_view line, std::optional<std::string>* voice = nullptr);
 // A line that starts as commands do, with a word in lower case, without being a story command, a
 // definition, someone speaking or text in quotes ("notify ...", "next line"): that word, else empty.
 // It's a mistake, not text: text that starts with a lower-case letter goes in quotes.

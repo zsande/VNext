@@ -5,6 +5,7 @@
 
 #include "Script.hpp"
 #include "Assets.hpp"
+#include "Movie.hpp"
 #include "Text.hpp"
 #include "Shapes.hpp"
 
@@ -29,7 +30,8 @@ namespace vn {
 
 // The visual layer: a background plus tagged objects (characters and images) with position,
 // anchor, zoom, rotation, opacity, flip, layer and tint; eased tweens; animations (as they come and
-// go, and while they're shown); weather; the camera; effects over the whole stage.
+// go, and while they're shown); weather; the camera; effects over the whole stage. A movie's name in
+// an image's place: it plays as the image (again and again, or once: then it stays at its last image).
 // Missing images are drawn as labelled placeholders.
 class Stage {
 public:
@@ -43,17 +45,37 @@ public:
         SDL_Color tint{255, 255, 255, 255};
         std::string animation; // what it plays while it's shown (show ... animation=)
         std::string played;    // one played on it (show ... with), on top of that
+        bool loop = true;      // a movie's (its image is one): again and again
+        float volume = 1.0f;   // ...and its sound
+        float width = 1.0f, height = 1.0f; // a colour's box (its image "#rrggbbaa"): its size, a part of the stage's
     };
+
+    // The movie a name is (none: it isn't one), playing again and again or once, its sound that loud.
+    using MovieMaker = std::function<std::unique_ptr<Movie>(const std::string& name, bool loop, float volume)>;
+    void setMovieMaker(MovieMaker make) { makeMovie_ = std::move(make); }
 
     // A new background, playing `entrance` as it comes in over the one before (which goes, with what was
     // on stage, when that ends; none: at once). The one already there (`key` is its name): only
     // `entrance`, played on it. `done`: at its end at once (skipping, or animations off).
-    void setBackground(std::string key, std::shared_ptr<const Animation> entrance, bool done);
+    // `part`: the part of a picture bigger than the stage that shows (0 to 1 from the top left: 0.5, its middle).
+    void setBackground(std::string key, std::shared_ptr<const Animation> entrance, bool done, bool loop = true, float volume = 1.0f,
+                       SDL_FPoint part = {0.5f, 0.5f});
+    [[nodiscard]] SDL_FPoint backgroundPart() const { return backgroundPart_; }
     [[nodiscard]] bool backgroundComing() const { return !previous_.empty(); } // (the one before still under it)
-    // Shows a character (`def`) or an image under `tag`, playing `played` as it comes, or changes the one
-    // already there (it slides to a new place in `slide` seconds, and plays `played`).
-    void show(const std::string& tag, const CharacterDef* def, const std::string& image, const std::string& expression,
-              const StageProps& props, std::shared_ptr<const Animation> played, float slide, bool done);
+    // The background's a movie playing once, not over yet (the story waits for it, as for one coming in); the movie
+    // (its subtitles'), and how it plays (saves).
+    [[nodiscard]] bool backgroundPlaying() const { return backgroundMovie_.once(); }
+    [[nodiscard]] const Movie* backgroundMovie() const { return backgroundMovie_.done ? nullptr : backgroundMovie_.movie.get(); } // (none once clicked past)
+    [[nodiscard]] bool backgroundLoops() const { return backgroundLoop_; }
+    [[nodiscard]] float backgroundVolume() const { return backgroundVolume_; }
+    // The movies playing once, at their end at once, where they stay, silent (clicked past, skipping; a load's and a
+    // rollback's, which come after them). Under a menu they all wait, sound and all.
+    void skipMovies();
+    void pauseMovies(bool paused);
+    // Shows a character (`def`) or an image (a colour's box) as a show line says, playing `played` as it comes (where it
+    // comes, at its type's layer), or changes the one already there (it slides to a new place in `slide` seconds, and
+    // plays `played`).
+    void show(const cmd::Show& line, const CharacterDef* def, std::shared_ptr<const Animation> played, float slide, bool done);
     [[nodiscard]] bool has(std::string_view tag) const; // (on stage, not going)
     // What an image on stage plays: its own (`own`: while it's shown; else one played on it, on top
     // of that). Null: none. `done`: as it ends (skipping, or a save loaded), unless it's looping. (Nothing
@@ -66,7 +88,7 @@ public:
     [[nodiscard]] std::string expression(std::string_view tag) const; // what an image on stage shows ("": its own)
     // It plays `exit`, then it's gone (none, or `done`: at once).
     void hide(std::string_view tag, std::shared_ptr<const Animation> exit, bool done);
-    [[nodiscard]] bool moving() const; // (a slide, the camera, or an animation played on something that hasn't ended)
+    [[nodiscard]] bool moving() const; // (a slide, the camera, an animation played on something that hasn't ended, or a movie playing once)
 
     // Weather over the stage; a kind of "" stops it. Fades in or out over `fade` seconds.
     void setWeather(const cmd::Weather& weather, float fade);
@@ -127,6 +149,22 @@ private:
         [[nodiscard]] Animation::Look playedLook(SDL_Color tint, const Animation::Offset& offset, SDL_FPoint screen) const;
     };
 
+    // A movie playing as an image: `done` once clicked past (it stays where it is, silent).
+    struct Playing {
+        std::unique_ptr<Movie> movie;
+        bool loop = true, done = false;
+        [[nodiscard]] bool once() const { return movie && !loop && !done && !movie->ended(); } // (what a wait waits for)
+        [[nodiscard]] Image image() const; // its image now (none before its first)
+        void settle();                     // (playing once: at its end, done)
+    };
+    [[nodiscard]] Playing movieFor(const std::string& name, bool loop, float volume) const;
+    MovieMaker makeMovie_;
+    Playing backgroundMovie_, previousMovie_;
+    bool backgroundLoop_ = true;
+    float backgroundVolume_ = 1.0f;
+    SDL_FPoint backgroundPart_{0.5f, 0.5f}, previousPart_{0.5f, 0.5f}; // (the part of each that shows)
+    bool moviesPaused_ = false;
+
     struct Object {
         ObjectState s;
         CharacterDef def; // for characters: image prefix, placeholder colour and name
@@ -137,6 +175,7 @@ private:
         float tweenTime = 1.0f, tweenDuration = 0.0f;
         Ease ease = Ease::InOut;
         Animations animations; // (its own, animation=; and the one its line plays, with)
+        Playing movie;         // an image that's a movie
     };
 
     Object* find(std::string_view tag);

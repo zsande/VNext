@@ -204,6 +204,7 @@ add_executable(vnext
     # The developer tools
     src/Developer.cpp           # developer mode: the developer tools opened and closed, each frame of them
     src/DeveloperButtons.cpp    # ...their own part: the buttons at the window's foot
+    src/Export.cpp              # ...Export the game: a zip for each system, named after the game
     src/DeveloperInput.cpp      # ...their input: keys, a controller, moving between stops
     src/DeveloperKeyboard.cpp   # ...their on-screen keyboard
     src/DeveloperWindows.cpp    # ...their messages and questions, and choosing files
@@ -221,6 +222,7 @@ add_executable(vnext
     src/LibraryAnimations.cpp   # ...its animations
     src/LibraryImages.cpp       # ...its atlases and sub-images
     src/LibraryTranslations.cpp # ...its translations, and the languages
+    src/NoGamePage.cpp          # ...the page without a game: making one, or finding it
     src/About.cpp               # ...About
     src/StoryEditor.cpp         # the editor: the scripts as the pages show them, read
     src/StoryEditorForms.cpp    # ...its forms: each kind of box, each line's fields and back

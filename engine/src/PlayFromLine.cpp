@@ -1,5 +1,5 @@
-// Playing from the developer tools: Play from this line (the story played silently to a line first), Stop here, and
-// the lines the story has reached.
+// Playing from the developer tools: Play scene and Play from here (the story played silently to a line first), Stop
+// here and Next line, and the lines the story has reached.
 #include "DeveloperUi.hpp"
 
 #include <charconv>
@@ -170,10 +170,16 @@ std::optional<std::pair<std::string, std::size_t>> Developer::storyAt() const {
     return std::pair{script.files[script.code[pc].file], static_cast<std::size_t>(script.code[pc].line - 1)};
 }
 
-float Developer::stopHereButton(DeveloperUi& ui, const std::string& path, std::size_t line, float rightEdge, float y) {
-    const float w = ui.buttonWidth("Stop here"_tr, layout::buttonText, layout::toggleW);
-    if (ui.button({rightEdge - w, y, w, layout::buttonH * ui.k}, "Stop here"_tr, hasStop(path, line), true, layout::buttonText)) toggleStop(path, line);
-    return w;
+// The row of a scene's `rows` (in its file, `path`) the story under the developer tools is at: its own, or the one it's
+// inside (a line with no row of its own).
+std::optional<std::size_t> Developer::storyRow(const std::vector<StoryEditor::Row>& rows, std::string_view path) const {
+    const auto at = storyAt();
+    if (!at || at->first != path) return std::nullopt;
+    for (std::size_t i = 0; i < rows.size(); ++i)
+        if (rows[i].line == at->second) return i;
+    for (std::size_t i = 0; i < rows.size(); ++i)
+        if (at->second > rows[i].line && at->second < rows[i].end) return i;
+    return std::nullopt;
 }
 
 // A game of the tools' own, heard through silence, with fresh copies of what the player has seen and kept
@@ -226,7 +232,7 @@ std::unique_ptr<Game> Developer::playedTo(const Script& s, const StoryEditor::Sc
     return game;
 }
 
-// Play from this line (or this scene: its first line): the story played silently to it, then the game
+// Play from here (or Play scene: its first line): the story played silently to it, then the game
 // goes on from there as from a save made at it (its music, the stage and the variables as they are
 // there).
 void Developer::playFromLine(const std::string& scene, std::optional<std::size_t> line) {

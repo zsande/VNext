@@ -227,6 +227,8 @@ bool Developer::drawTranslationsList(DeveloperUi& ui, const ListRoom& at, const 
         return true;
     case ListKind::Renamed: // (its language: once Enter is pressed, below)
     case ListKind::Moved:
+    case ListKind::Opened:
+    case ListKind::Closed:
     case ListKind::None:
         break;
     }
@@ -241,7 +243,6 @@ bool Developer::drawTranslationsList(DeveloperUi& ui, const ListRoom& at, const 
     if (ui.button(at.rows[0], "+ New language"_tr, false, true, layout::buttonText)) {
         const std::string id = uniqueName("new_language", [&](const std::string& n) { return std::ranges::contains(ids, n); }); // (named after its language once that's picked)
         fillTranslation(id);
-        if (t.id == id) d.focusOn("lang:language", languageLabel(id), true); // (its language, ready to type over, as every new one's name)
         return true;
     }
     if (ui.button(at.rows[1], "Add new texts"_tr, false, !t.id.empty(), layout::buttonText)) {
@@ -315,7 +316,7 @@ void Developer::drawTranslationForm(DeveloperUi& ui, const SDL_FRect& right, con
         if (!d.untranslatedOnly || untranslated(p)) shown.push_back(&p);
     const float rowH = layout::tableRowH * k, total = static_cast<float>(shown.size()) * rowH + 12 * k;
     const float half = std::round((table.w - 30 * k - (total > table.h ? layout::scrollbarRoom * k : 0.0f)) / 2); // (each column: beside its scrollbar)
-    d.translationScroll = std::clamp(d.translationScroll - ui.wheelOver(table) * rowH * 2, 0.0f, std::max(0.0f, total - table.h));
+    d.translationScroll = std::clamp(d.translationScroll - ui.wheelScrolls(table, d.translationScroll, total - table.h, rowH * 2) * rowH * 2, 0.0f, std::max(0.0f, total - table.h));
     ui.scrollbar(&d.translationScroll, ui.barInside(table), table.h, total, d.translationScroll);
     std::optional<DeveloperUi::Clip> clipped(std::in_place, ui, table);
     struct Typed {

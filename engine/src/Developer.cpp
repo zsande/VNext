@@ -11,6 +11,7 @@
 #include "DeveloperUi.hpp"
 
 #include <cfloat>
+#include <chrono>
 #include <cmath>
 #include <iterator>
 
@@ -81,7 +82,11 @@ void Developer::openDeveloper() {
     d.focus.clear();
     d.armed.clear();
     d.row.reset();
+    d.visualType.reset();
     d.character.reset();
+    d.namedVisual.reset();
+    d.soundType.reset();
+    d.namedSound.reset();
     if (engine.noGame()) {
         d.editor.clear();
         return;
@@ -104,10 +109,15 @@ void Developer::openDeveloper() {
                 d.scene = i;
                 d.row = line;
             }
-        if (d.row && d.scene < scenes.size()) {
+        if (d.row && d.scene < scenes.size()) { // (its row chosen: the form has Next line)
             const auto rows = d.editor.rows(scenes[d.scene]);
-            if (const auto row = std::ranges::find(rows, *d.row, &StoryEditor::Row::line); row != rows.end())
+            auto row = std::ranges::find(rows, *d.row, &StoryEditor::Row::line);
+            if (row == rows.end()) // (a line with no row of its own: the one it's inside, as the lines outline it)
+                row = std::ranges::find_if(rows, [&](const StoryEditor::Row& r) { return *d.row > r.line && *d.row < r.end; });
+            if (row != rows.end()) {
+                d.row = row->line;
                 d.linesScroll = std::max(0.0f, static_cast<float>(row - rows.begin() - 4) * layout::listItemH * d.k);
+            }
         }
     } else {
         const auto found = std::ranges::find(scenes, last, &StoryEditor::Scene::name);
@@ -119,6 +129,7 @@ void Developer::closeDeveloper() {
     DeveloperTools& d = tools;
     d.open = false;
     d.pagePartDrag.reset();
+    d.toolsMenu.group.reset(); // (a menu open: it shuts with them)
     showPointer(std::nullopt);
     engine.sound().stopListening();
     d.stopMovie();
@@ -163,7 +174,7 @@ void Developer::reloaded() {
     const bool start = std::exchange(d.play, false);
     const std::string scene = std::exchange(d.playScene, {});
     const auto line = std::exchange(d.playLine, std::nullopt);
-    if (engine.mode() != Engine::Mode::Error && (start || !scene.empty())) { // Play, Play this scene, or Play from this line
+    if (engine.mode() != Engine::Mode::Error && (start || !scene.empty())) { // Play, Play scene, or Play from here
         d.open = false;
         engine.waiting_ = false;
         d.stepping = false;
@@ -173,9 +184,9 @@ void Developer::reloaded() {
     } else if (d.open) {
         d.editor.load(engine.gameRoot()); // (the files may have changed outside the player)
         d.failed = engine.mode() == Engine::Mode::Error;
-        if (d.packIn > 0) return; // (packing says how it went)
+        if (d.exportIn > 0) return; // (exporting says how it went)
         if (d.failed) d.status = "The scripts need fixing: their mistakes are marked in red in the pages."_tr;
-        else logInfo("{}", "Reloaded the scripts, images and sounds."_tr());
+        else logInfo("{}", "Reloaded the scripts, visuals and sounds."_tr());
     }
 }
 
@@ -186,36 +197,39 @@ void Developer::updateDeveloper() {
         d.open = false;
         if (std::exchange(engine.waiting_, false) && engine.mode() != Engine::Mode::Error) engine.play();
     }
-    const bool packNow = d.packIn == 1; // (the game read again)
-    if (d.packIn > 0) --d.packIn;
-    if (packNow) {
-        const auto packed = engine.finishGame();
-        const std::string& said = packed ? *packed : packed.error(); // (a sentence or two a line)
-        std::string line = said;
-        std::ranges::replace(line, '\n', ' '); // (the log has it on one line)
-        if (packed) logInfo("{}", line);
-        else logWarn("{}", line);
-        // Said in a window of its own: its title says how it went, the rest a line apart, and after a pack there's
-        // the way to it.
-        const std::string title = packed ? "Packed the game"_tr() : "Can't pack the game"_tr();
-        std::string body = said.starts_with(title + ": ") ? upperFirst(said.substr(title.size() + 2)) : said;
-        for (std::size_t at = body.find('\n'); at != std::string::npos; at = body.find('\n', at + 2)) body.insert(at, 1, '\n');
+    const bool exportNow = d.exportIn == 1; // (the game read again)
+    if (d.exportIn > 0) --d.exportIn;
+    if (exportNow) {
+        if (!engine.script().ok()) {
+            ask("Can't export the game"_tr(), "The scripts need fixing: their mistakes are marked in red in the pages."_tr(), {"OK"_tr()}, 0, SDL_MESSAGEBOX_ERROR, {});
+        } else {
+            startExport();
+        }
+    }
+    if (d.exported.exchange(false)) { // (the export's thread done: how it went, in a window of its own, with the way to it)
+        d.exporting.join();
+        logInfo("{}", d.exportSaid);
+        const bool some = !d.exportSaid.starts_with("Exported nothing."_tr());
         std::vector<std::string> buttons{"OK"_tr()};
-        if (packed) buttons.insert(buttons.begin(), "Show the folder"_tr());
-        ask(title, body, std::move(buttons), packed ? 1 : 0, packed ? SDL_MESSAGEBOX_INFORMATION : SDL_MESSAGEBOX_ERROR, [this, packed = packed.has_value()](std::size_t answer) {
-            if (!packed || answer != 0) return;
-            const std::string folder = engine.finishedFolder();
-            if (!SDL_OpenURL(fileUrl(folder).c_str())) {
-                tools.failed = true;
-                tools.status = "Can't show '{}': {}."_tr(folder, SDL_GetError());
-            }
-        });
+        if (some) buttons.insert(buttons.begin(), "Show the folder"_tr());
+        ask(some ? "Exported the game"_tr() : "Can't export the game"_tr(), d.exportSaid, std::move(buttons), some ? 1 : 0, some ? SDL_MESSAGEBOX_INFORMATION : SDL_MESSAGEBOX_ERROR,
+            [this, some](std::size_t answer) {
+                if (!some || answer != 0) return;
+                const std::string folder = engine.finishedFolder();
+                if (!SDL_OpenURL(fileUrl(folder).c_str())) {
+                    tools.failed = true;
+                    tools.status = "Can't show '{}': {}."_tr(folder, SDL_GetError());
+                }
+            });
     }
 }
 
 void Developer::drawDeveloper() {
     SDL_Renderer* r = engine.renderer();
     DeveloperTools& d = tools;
+    d.shownActs = std::exchange(d.acts, {}); // (what the editing keys could act on as the last frame was drawn: their buttons are made before this one's)
+    d.formatBar = std::exchange(d.formatBarNow, {}); // (the text format bar as the last frame drew it: kept while the keys are on it)
+    if (!d.formatBar.keysBack.empty()) d.keyAt = d.formatBar.keysBack; // (one of its buttons pressed by them: on its box again)
     if (++d.textFrame % 60 == 0) // (text not drawn for two seconds or so goes)
         std::erase_if(d.texts, [&](const auto& kept) { return kept.second.drawn + 120 < d.textFrame; });
     // The window as the tools have it (Engine::useView): its own size, in its own points (bigger where the
@@ -241,7 +255,7 @@ void Developer::drawDeveloper() {
     padMoves();
     const bool modal = modalFrame(); // (the tools' own question or file picker: it takes the input)
     if (!modal) screenKeysFrame();
-    const std::string focusBefore = d.focus; // (a click into a box: the on-screen keyboard comes up, until a real one's been used)
+    const std::string focusBefore = d.focus; // (a click into a box: the on-screen keyboard comes up, until a real key's pressed)
     const bool clickedNow = d.clicked;
     if (!d.popup.id.empty() && d.focus != d.popup.id && std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) { return d.isKey(key, ToolKey::Back); }) > 0)
         d.popup.id.clear();
@@ -251,7 +265,13 @@ void Developer::drawDeveloper() {
     d.popupWheel = wheelOnPopup ? std::exchange(d.wheel, 0.0f) : 0.0f;
     if (wheelOnPopup) d.wheelAcross = 0.0f;
     if (d.clicked && !pointInRect(d.mouseX, d.mouseY, d.popup.at)) d.popup.id.clear();
+    toolsMenuFrame(); // (an open menu of the tools' own part: its clicks and its keys come first)
     keyMoves();
+    if (d.editLayout) // (while the page parts are laid out, what's in them stays as it is: the keys that change it go nowhere, as their buttons are grey)
+        std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) {
+            constexpr ToolKey kChanging[]{ToolKey::Undo, ToolKey::Redo, ToolKey::Cut, ToolKey::Copy, ToolKey::Paste, ToolKey::Duplicate, ToolKey::Delete, ToolKey::SelectAll, ToolKey::StopHere};
+            return std::ranges::any_of(kChanging, [&](ToolKey which) { return d.isKey(key, which); });
+        });
 
     // Mistakes in the scripts as the editor has them, found again after every change.
     const bool editing = !engine.noGame() && d.editor.loaded();
@@ -265,9 +285,15 @@ void Developer::drawDeveloper() {
             logInfo("{}", "The scripts changed in another program, so the developer tools read them again."_tr());
         }
     }
+    // A ready-made screen a change brought, once nothing's typed in (Relationships, with a love interest), when the game
+    // has none.
+    if (editing && !d.bringLater.empty() && d.focus.empty()) {
+        if (std::ranges::none_of(d.editor.screens(), [&](const StoryEditor::Screen& s) { return lower(s.name) == d.bringLater; })) addReadyMadeScreen(d.bringLater);
+        d.bringLater.clear();
+    }
     // The game's size changed in Settings (and its box was left): the screens' places and shares fit any
     // size; their text sizes and padding grow or shrink to fit it, as one step for undo with the change.
-    if (editing && d.sizeFrom && d.focus != "setting:game_size") {
+    if (editing && d.sizeFrom && !d.focus.starts_with("setting:game_size")) { // (its width's or its height's box)
         auto sizeOf = [](std::string_view v) -> std::optional<SDL_FPoint> {
             const auto words = rawWords(v);
             const auto width = words.size() == 2 ? parseNumber(words[0]) : std::nullopt, height = words.size() == 2 ? parseNumber(words[1]) : std::nullopt;
@@ -281,20 +307,31 @@ void Developer::drawDeveloper() {
             d.status = "The screens' text sizes were changed from {} x {} to fit {} x {}."_tr(from->x, from->y, to->x, to->y);
         }
     }
-    if (editing && d.checked != d.editor.version()) {
+    // (while a box is typed in and finding them takes a while, a long game's, once the typing stops a moment or the box is
+    // let go of: the typing doesn't wait for them)
+    if (editing && d.changeSeen != d.editor.version()) {
+        d.changeSeen = d.editor.version();
+        d.changedAt = engine.toolsTime();
+    }
+    d.editor.filesGeneration = d.filesGeneration; // (what a visual is: a character, an image or a movie, as the files are now)
+    const bool checkWaits = !d.focus.empty() && d.checkTook > 0.03f && engine.toolsTime() - d.changedAt < 0.4f;
+    if (editing && d.checked != d.editor.version() && !checkWaits) {
+        const auto checkBegan = std::chrono::steady_clock::now(); // (the real clock: how long it takes)
         d.checked = d.editor.version();
         d.dropPreviews(); // (it plays the scripts read before)
         auto before = std::move(d.script);
-        d.script = std::make_unique<Script>(Script::load("scripts/main.vnscript", [this](const std::string& p) { return readTextFile(engine.gameRoot() + p); }, defaultUi()));
+        d.script = std::make_unique<Script>(Script::load("scripts/main.vnscript", [this](const std::string& p) { return readTextFile(engine.gameRoot() + p); }, defaultUi(),
+                                                         [this](const std::string& folder) { return listFiles(engine.gameRoot() + folder, ""); }));
         if (before) // (the texts changed keep their translations; the Library shows them as they are now)
             for (const std::string& id : keepTranslations(engine.gameRoot(), *before, *d.script))
                 if (id == d.translation.id) d.translation.lines = linesOf(*readTextFile(engine.gameRoot() + "translations/" + id + ".vnscript"));
-        d.problems = d.script->errors;
+        d.allProblems = d.script->errors;
         d.runLines.clear(); // (the lines Stop here is for: with a command of their own)
         for (const Instruction& ins : d.script->code)
             if (!ins.tail && ins.line > 0 && ins.file < d.script->files.size()) d.runLines.emplace(d.script->files[ins.file], static_cast<std::size_t>(ins.line - 1));
         followStops();
-        engine.assets().setSubImages(d.script->subImages); // (the previews and lists show them as they are now)
+        engine.assets().setAtlases(d.script->atlases); // (the previews and lists show them as they are now)
+        engine.assets().setSubImages(d.script->subImages);
         engine.script_.palette = d.script->palette;        // (and the game's colours: a ready-made screen's backdrop, a colour just made)
         // The game's size as Settings has it now (the screens are drawn at it; the game
         // takes it when it's played again).
@@ -306,15 +343,23 @@ void Developer::drawDeveloper() {
         // Whether the window can be resized, as Settings has it now: the tools' window is the game's.
         if (const bool resizable = d.script->gameSettings.resizable; resizable != ((SDL_GetWindowFlags(window) & SDL_WINDOW_RESIZABLE) != 0))
             SDL_SetWindowResizable(window, resizable);
-        std::ranges::move(missingFiles(*d.script), std::back_inserter(d.problems));
+        std::ranges::move(missingFiles(*d.script), std::back_inserter(d.allProblems));
+        d.showProblems();
+        d.checkTook = std::chrono::duration<float>(std::chrono::steady_clock::now() - checkBegan).count();
+    }
+    // A fresh row left (another row, scene or page chosen; in the Library, another of its list): its own mistakes show now.
+    if (const auto& fresh = d.freshRow;
+        fresh && (d.page != fresh->page || (fresh->page == DeveloperTools::Page::Library ? d.library != fresh->library || d.libraryItem != fresh->item
+                                                                                         : d.scene != fresh->scene || d.row != fresh->from))) {
+        d.freshRow.reset();
+        d.showProblems();
     }
 
     // The tools' own keys as their controls have them now, and the tools' own part's button pressed last frame: done
     // first, as the tools are drawn.
     readToolKeys();
     if (const auto pressed = std::exchange(d.pressedTool, std::nullopt)) runCommand(*pressed);
-    const std::vector<std::vector<ToolButton>> buttons = toolButtons();
-    d.stoppable.reset(); // (the Story page says it again as it's drawn)
+    const std::vector<ToolGroup> buttons = toolButtons();
 
     // What the last tool said goes to the log and shows in a window of its own (tell), once: the same words said
     // again show again, but a save that can't be written says so once, until one can be.
@@ -335,7 +380,7 @@ void Developer::drawDeveloper() {
     d.failed = false;
     if (engine.noGame() && !d.saidNoGame) {
         d.saidNoGame = true;
-        logInfo("{}", "There's no game yet: make a New game, or put a game folder or game.vnext next to the player and Look again."_tr());
+        logInfo("{}", "There's no game next to VNext yet: make a New game, or put a game folder or game.vnext there and Look again."_tr());
     }
 
     // The tools' own part, at the window's foot in every page (as wide as the window, as tall as its buttons: it's
@@ -352,33 +397,33 @@ void Developer::drawDeveloper() {
     };
     if (d.page == Page::About) {
         one("about", {.id = "about", .heading = "About"_tr, .at = area, .draw = [&](const SDL_FRect& box) { return drawAbout(ui, box), false; }, .least = {aboutLeastW(ui), 0.0f}});
-    } else if (!editing) { // (no game yet: what to do)
-        const std::string_view say = "There's no game yet: make a New game, or put a game folder or game.vnext next to the player and Look again."_tr;
+    } else if (!editing) { // (no game yet: making one, or finding it)
         one("no_game", {.id = "no_game",
                         .heading = "No game"_tr,
                         .at = area,
-                        .draw = [&](const SDL_FRect& box) { return ui.text(say, box.x, box.y, layout::noteText, theme::dim, box.w), false; },
-                        .tallAt = [&](float width) { return ui.measure(say, layout::noteText, width).y; }});
+                        .draw = [&](const SDL_FRect& box) { return noGamePage(ui, box, true), false; },
+                        .tallAt = [&](float width) { return noGamePage(ui, {0.0f, 0.0f, width, 0.0f}, false); }});
     } else if (d.page == Page::Story) drawStory(ui, area);
     else if (d.page == Page::Screens) drawScreens(ui, area);
     else drawLibrary(ui, area);
     d.keyGroup = "tools"; // (its buttons: the last stops)
     d.keyOrder = {FLT_MAX, FLT_MAX};
     d.keyCount = 0;
-    drawToolsPart(ui, buttons, toolsAt);
+    const ToolsPlaced placed = drawToolsPart(ui, buttons, toolsAt);
     showPointer(d.wantPointer);
     drawPopup(ui);
-    // A box handed the typing by a press (on it, on + New...): the on-screen keyboard comes up for a controller's A (unless
-    // its list opened: A picks from that), and for a click while no real keyboard's been used.
-    if (!d.screenKeys.open && !d.focus.empty() && d.focus != focusBefore && ((clickedNow && !engine.keyboardUsed()) || (d.padPressed && d.popup.id != d.focus)))
+    drawToolsMenu(ui, buttons, placed); // (over the pages: its menu opens upward from the tools' own part)
+    // A box handed the typing by a press (on it, on + New...), or pressed again: the on-screen keyboard comes up for a click
+    // and for a controller's A (unless its list opened: A picks from that), each time (a real keyboard's key puts it away).
+    if (!d.screenKeys.open && !d.focus.empty() && (d.focus != focusBefore || d.boxPressed) && (clickedNow || (d.padPressed && d.popup.id != d.focus)))
         openScreenKeys(d.padPressed);
-    d.padPressed = false;
+    d.padPressed = d.boxPressed = false;
     drawScreenKeys(ui);
     drawTip(ui);
     keyRing(ui);
     drawModal(ui);
 
-    // Keys nothing else took: the tools' own that act on them as a whole (undo and redo, the pages, Reload, Quit; the
+    // Keys nothing else took: the tools' own that act on them as a whole (undo and redo, the pages, Reload the game, Quit; the
     // others are the keys of what they act on, as their controls have them), and Esc, back to the game.
     std::vector<int> commands;
     for (const SDL_KeyboardEvent& key : d.keys) {
@@ -434,28 +479,29 @@ std::vector<ScriptError> Developer::missingFiles(const Script& script) const {
     auto at = [&](std::size_t file, int line, std::string message) {
         if (file < script.files.size() && script.files[file].starts_with("scripts/")) out.push_back({script.files[file], line, std::move(message)});
     };
-    auto noImage = [](const std::string& name) { return "There's no image called '{}'."_tr(name); };
+    auto noImage = [](const std::string& name) { return "There's no visual called '{}'."_tr(name); };
     for (const Instruction& ins : script.code) {
-        if (const auto* background = std::get_if<cmd::Background>(&ins.command)) {
-            if (!image(background->image)) at(ins.file, ins.line, noImage(background->image));
+        if (const auto* background = std::get_if<cmd::Background>(&ins.command)) { // (an image, or a movie: it plays)
+            if (!image(background->image) && !movie(background->image)) at(ins.file, ins.line, noImage(background->image));
         } else if (const auto* show = std::get_if<cmd::Show>(&ins.command)) {
             if (const CharacterDef* def = show->character.empty() ? nullptr : script.character(show->character)) {
                 const std::string key = def->imageOf(show->expression);
                 if (!image(key) && !(!show->expression.empty() && image(def->image))) at(ins.file, ins.line, noImage(key)); // (else its usual image shows)
-            } else if (!image(show->image)) {
+            } else if (!show->image.starts_with('#') && !image(show->image) && !movie(show->image)) { // (a colour's box: no picture)
                 at(ins.file, ins.line, noImage(show->image));
             }
-        } else if (const auto* play = std::get_if<cmd::Play>(&ins.command)) {
-            if (!sound(play->file)) at(ins.file, ins.line, "There's no sound called '{}'."_tr(play->file));
-        } else if (const auto* film = std::get_if<cmd::Movie>(&ins.command)) {
-            if (!movie(film->file)) at(ins.file, ins.line, "There's no movie called '{}'."_tr(film->file));
+        } else if (const auto* play = std::get_if<cmd::Play>(&ins.command)) { // (a named sound: what it plays)
+            if (const std::string file = script.soundOf(play->name, play->type).file; !play->stop && !sound(file)) at(ins.file, ins.line, "There's no sound called '{}'."_tr(file));
+        } else if (const auto* say = std::get_if<cmd::Say>(&ins.command)) {
+            if (const std::string file = script.soundOf(say->voice, "voice").file; !sound(file)) at(ins.file, ins.line, "There's no sound called '{}'."_tr(file));
         } else if (const auto* weather = std::get_if<cmd::Weather>(&ins.command)) {
             if (!image(weather->image)) at(ins.file, ins.line, noImage(weather->image));
         }
     }
     for (const auto& [name, def] : script.screens)
-        for (const Element& el : def.elements) {
-            if (el.kind == ElementKind::Image && !image(el.text) && !movie(el.text) && !parseColour(el.text, &script.palette)) at(el.file, el.line, noImage(el.text)); // (a colour or a movie isn't an image)
+        for (const Element& el : def.elements) { // (a colour or a movie isn't an image; a visual named by a visual line or a character: what it shows)
+            const std::string shows = el.kind == ElementKind::Image ? script.visualOf(el.text, el.option("expression")) : std::string{};
+            if (el.kind == ElementKind::Image && !image(shows) && !movie(shows) && !parseColour(shows, &script.palette)) at(el.file, el.line, noImage(shows));
         }
     // What the scripts list by name, at their lines in the editor.
     auto listed = [&](std::size_t file, std::size_t line, std::string message) { out.push_back({editor.path(file), static_cast<int>(line) + 1, std::move(message)}); };
@@ -466,13 +512,14 @@ std::vector<ScriptError> Developer::missingFiles(const Script& script) const {
                 listed(def.file, def.line, noImage(shaped->shape));
     for (const StoryEditor::Character& c : editor.characters())
         if (const CharacterDef* def = script.character(lower(c.name))) {
-            if (!sound(def->typingSound)) listed(c.file, c.line, "There's no sound called '{}'."_tr(def->typingSound));
+            if (const std::string file = def->typingSound.empty() ? std::string{} : script.soundOf(def->typingSound).file; !sound(file)) // (a named sound: what it plays)
+                listed(c.file, c.line, "There's no sound called '{}'."_tr(file));
             if (!image(def->face)) listed(c.file, c.line, noImage(def->face));
         }
-    for (const auto& def : editor.definitions("gallery"))
-        if (!image(def.name) && !movie(def.name)) listed(def.file, def.line, noImage(def.name));
-    for (const auto& def : editor.definitions("song"))
-        if (!sound(def.name)) listed(def.file, def.line, "There's no song called '{}'."_tr(def.name));
+    for (const auto& def : editor.definitions("gallery")) // (a visual named by a visual line or a character: what it shows)
+        if (const std::string shows = script.visualOf(def.name); !image(shows) && !movie(shows)) listed(def.file, def.line, noImage(shows));
+    for (const auto& def : editor.definitions("song")) // (a named sound: what it plays)
+        if (!sound(script.soundOf(def.name, "music").file)) listed(def.file, def.line, "There's no song called '{}'."_tr(def.name));
     for (const auto& def : editor.definitions("sub-image"))
         if (const auto p = std::ranges::find(script.subImages, lower(def.name), &SubImage::name);
             p != script.subImages.end() && !engine.assets().hasImageFile(p->image) && !engine.assets().hasImageFile(lower(p->image)))
@@ -500,7 +547,11 @@ bool Developer::goTo(const std::string& path, std::size_t line) {
         if (scenes[i].file == *file && scenes[i].line <= line && line < std::max(scenes[i].end, scenes[i].line + 1)) {
             d.page = Page::Story;
             d.scene = i;
+            d.visualType.reset();
             d.character.reset();
+            d.namedVisual.reset();
+            d.soundType.reset();
+            d.namedSound.reset();
             d.asText = false;
             d.row.reset();
             const auto rows = editor.rows(scenes[i]);
@@ -525,25 +576,63 @@ bool Developer::goTo(const std::string& path, std::size_t line) {
         d.library = "settings";
         return true;
     }
+    // A character's line: the character, under character in the Story page's Visual types.
     const auto characters = editor.characters();
     for (std::size_t i = 0; i < characters.size(); ++i)
         if (characters[i].file == *file && characters[i].line == line) {
             d.page = Page::Story;
             d.row.reset();
+            d.moreRows.clear();
+            d.visualType.reset();
+            d.namedVisual.reset();
+            d.soundType.reset();
+            d.namedSound.reset();
             d.character = i;
+            d.asText = false;
+            d.formScroll = 0.0f;
             return true;
         }
     for (const DefinitionKind& kind : kDefinitionKinds) {
         const auto defs = editor.definitions(kind.kind);
         for (std::size_t i = 0; i < defs.size(); ++i)
             if (defs[i].file == *file && defs[i].line <= line && line < defs[i].end) {
+                if (kind.kind == "type" || kind.kind == "visual") { // (the Story page's Visual types: a type after every game's own, a visual under its type)
+                    d.page = Page::Story;
+                    d.row.reset();
+                    d.moreRows.clear();
+                    d.character.reset();
+                    d.visualType.reset();
+                    d.namedVisual.reset();
+                    d.soundType.reset();
+                    d.namedSound.reset();
+                    (kind.kind == "type" ? d.visualType : d.namedVisual) = kind.kind == "type" ? kVisualTypes.size() + i : i;
+                    d.asText = false;
+                    d.formScroll = 0.0f;
+                    return true;
+                }
+                if (kind.kind == "sound type" || kind.kind == "sound") { // (the Story page's Sound types: a type after every game's own, a sound under its type)
+                    d.page = Page::Story;
+                    d.row.reset();
+                    d.moreRows.clear();
+                    d.character.reset();
+                    d.visualType.reset();
+                    d.namedVisual.reset();
+                    d.soundType.reset();
+                    d.namedSound.reset();
+                    (kind.kind == "sound type" ? d.soundType : d.namedSound) = kind.kind == "sound type" ? kBuiltInSoundTypes.size() + i : i;
+                    d.asText = false;
+                    d.formScroll = 0.0f;
+                    return true;
+                }
                 if (kind.kind == "place") return false; // (not listed)
                 if (kind.kind == "gallery" || kind.kind == "song") { // (its image, sub-image, movie or song, with its title)
                     const std::string name = lower(defs[i].name);
                     d.page = Page::Library;
-                    d.library = kind.kind == "song" ? "sounds" : engine.assets().findMovie(name) ? "movies" : "images";
+                    d.library = kind.kind == "song" ? "sounds" : "images"; // (a movie's among the images)
                     d.libraryItem.reset();
                     d.librarySub.reset();
+                    d.libraryAtlas.reset();
+                    d.libraryVoice.reset();
                     d.libraryFind = name;
                     if (d.library == "images") {
                         const auto subs = editor.definitions("sub-image");
@@ -557,11 +646,13 @@ bool Developer::goTo(const std::string& path, std::size_t line) {
                 d.library = kind.kind;
                 d.libraryItem = i;
                 d.librarySub.reset();
+                d.libraryAtlas.reset();
+                d.libraryVoice.reset();
                 d.pickingAnimation = false; // (the definition, not + New animation's list)
-                if (kind.kind == "sub-image" || kind.kind == "font") { // (under the file it's made from)
-                    d.library = kind.kind == "sub-image" ? "images" : "fontfiles";
+                if (kind.kind == "atlas" || kind.kind == "sub-image" || kind.kind == "font") { // (under the file it's made from)
+                    d.library = kind.kind == "font" ? "fontfiles" : "images";
                     d.libraryItem.reset();
-                    d.librarySub = i;
+                    (kind.kind == "atlas" ? d.libraryAtlas : d.librarySub) = i;
                 }
                 d.formScroll = 0.0f;
                 return true;
@@ -634,6 +725,47 @@ std::optional<std::string> DeveloperTools::cachedFoundSound(const Assets& assets
     return it != foundSound.end() ? it->second : foundSound.emplace(name, assets.findSound(name)).first->second;
 }
 
+Image Developer::pictureOf(const std::string& name) {
+    if (engine.assets().hasImage(name)) return engine.assets().image(name);
+    const auto file = engine.assets().findMovie(name);
+    return file ? movieThumbnail(*file) : Image{};
+}
+
+Image Developer::movieThumbnail(const std::string& file) {
+    DeveloperTools& d = tools;
+    auto& t = d.movieThumbnails[file];
+    if (t.generation != d.filesGeneration) {
+        if (d.thumbnailMadeAt == engine.frameNumber()) return {}; // (one a frame: the rest come in the next ones)
+        d.thumbnailMadeAt = engine.frameNumber();
+        t = {.texture = nullptr, .w = 0.0f, .h = 0.0f, .generation = d.filesGeneration};
+        SDL_Renderer* r = engine.renderer();
+        Movie movie(r, d.silence, file, false, 1.0f); // (silent: the tools' own sound, never started)
+        movie.showFirst();
+        if (SDL_Texture* image = movie ? movie.texture() : nullptr) { // (drawn small into one of its own: the movie goes)
+            float w = 0.0f, h = 0.0f;
+            SDL_GetTextureSize(image, &w, &h);
+            const float s = std::min(1.0f, 256.0f / std::max({w, h, 1.0f}));
+            t.w = std::max(1.0f, std::round(w * s));
+            t.h = std::max(1.0f, std::round(h * s));
+            t.texture.reset(SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, static_cast<int>(t.w), static_cast<int>(t.h)));
+            if (t.texture) {
+                SDL_Texture* was = SDL_GetRenderTarget(r);
+                SDL_SetRenderTarget(r, t.texture.get());
+                SDL_RenderTexture(r, image, nullptr, nullptr);
+                SDL_SetRenderTarget(r, was);
+            }
+        }
+    }
+    return t.texture ? Image{.texture = t.texture.get(), .src = {0.0f, 0.0f, t.w, t.h}} : Image{};
+}
+
+void DeveloperTools::showProblems() {
+    problems.clear();
+    for (const ScriptError& e : allProblems)
+        if (!freshRow || e.file != freshRow->path || e.line <= static_cast<int>(freshRow->from) || e.line > static_cast<int>(freshRow->end)) problems.push_back(e);
+    wrongScenesVersion = SIZE_MAX; // (the scenes' marks again)
+}
+
 const ScriptError* DeveloperTools::problemAt(std::size_t file, std::size_t line) const {
     const std::string& path = editor.path(file);
     const auto it = std::ranges::find_if(problems, [&](const ScriptError& e) { return e.file == path && e.line == static_cast<int>(line) + 1; });
@@ -685,7 +817,7 @@ DeveloperTools::Edited DeveloperTools::edited(const std::string& id, StoryEditor
         return {focusFields, std::format("{}:{}{}", id, name, focusCount), focusKind};
     }
     Edited out{fields, {}, kind};
-    std::ranges::find(out.fields, name, &StoryEditor::Field::name)->value = value;
+    if (const auto f = std::ranges::find(out.fields, name, &StoryEditor::Field::name); f != out.fields.end()) f->value = value;
     focus.clear();
     return out;
 }

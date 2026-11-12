@@ -146,15 +146,22 @@ public:
     // turned (under the pointer, or the right stick's: where the keys are), where that shows.
     [[nodiscard]] bool wheelOn(const SDL_FRect& box) const { return pointInRect(d.wheelX, d.wheelY, box) && shows(d.wheelX, d.wheelY); }
     float wheelOver(const SDL_FRect& box) { return d.wheel != 0.0f && wheelOn(box) ? std::exchange(d.wheel, 0.0f) : 0.0f; }
+    // The wheel turned over `box`, taken only when it scrolls what's there (`scroll`, 0 to `most`, `step` a turn): with
+    // nothing to scroll, or at its end that way, it's left for what's around it (its page part's own scrolling).
+    float wheelScrolls(const SDL_FRect& box, float scroll, float most, float step) {
+        if (d.wheel == 0.0f || !wheelOn(box) || std::clamp(scroll - d.wheel * step, 0.0f, std::max(0.0f, most)) == scroll) return 0.0f;
+        return std::exchange(d.wheel, 0.0f);
+    }
     float wheelAcrossOver(const SDL_FRect& box) { return d.wheelAcross != 0.0f && wheelOn(box) ? std::exchange(d.wheelAcross, 0.0f) : 0.0f; }
-    bool button(const SDL_FRect& box, std::string_view label, bool chosen = false, bool enabled = true, float size = layout::lineText);
+    // (`said`: what a screen reader hears of it, when its label is drawn otherwise: the text format bar's look as they say)
+    bool button(const SDL_FRect& box, std::string_view label, bool chosen = false, bool enabled = true, float size = layout::lineText, std::string_view said = {});
     // A stop for the keys (see DeveloperTools::keyStops), as it's drawn: whether the keys are on it (lit: with their ring,
     // so it looks pointed at), whether Enter or Space pressed it, and which way up or down moves in it (a list). `own`: the
     // arrows it uses itself now (DeveloperTools::kOwnLeft...). A click on it puts the keys there, and so does the pointer
     // moving onto it (while no box is typed into).
     struct KeyStopNow {
         bool on = false, lit = false, pressed = false;
-        int step = 0;
+        int step = 0, fold = 0; // (a list's: up or down a row, and Right or Left)
     };
     KeyStopNow keyStop(DeveloperTools::KeyStop::Kind kind, const SDL_FRect& box, std::string words, const std::string& id = {}, const std::string& value = {},
                        std::uint8_t own = 0);
@@ -188,15 +195,19 @@ public:
         std::function<std::optional<int>(std::size_t, std::size_t, float)> place;
         float indentStep = 0.0f;
         std::function<float(std::size_t)> indent;                     // how far in it's drawn
+        // What Right and Left do on it, chosen: 1, Right opens it (what's under it shows); -1, Left closes it (or, on one
+        // under another, goes to that one).
+        std::function<int(std::size_t)> fold;
         std::function<void(std::size_t, const SDL_FRect&)> paint;     // draws it (else its label)
         float itemH = layout::listItemH;
     };
     struct ListEvent {
-        enum class Kind : std::uint8_t { None, Chosen, Renamed, Deleted, Moved };
+        enum class Kind : std::uint8_t { None, Chosen, Renamed, Deleted, Moved, Opened, Closed };
         Kind kind = Kind::None;
         std::size_t item = 0, to = 0; // Moved: before item `to` (count: after the last)
         std::string name;             // Renamed: as typed so far
         int depth = 0;                // Moved, with `place`: how far in
+        bool clicked = false;         // Chosen: by a click (not the keys)
     };
     ListEvent editList(const std::string& id, const SDL_FRect& box, float& scroll, const ListItems& items);
     // Buttons side by side from (x, y), as wide as their labels (narrower, if they don't fit in `w`);
@@ -238,7 +249,7 @@ public:
     std::optional<std::string> takePicked(const std::string& id);
     void openPopup(const std::string& id, const StoryEditor::Field& f, const SDL_FRect& box);
     // A button that opens a list (as a field's, from `f`), and gives what's picked from it.
-    std::optional<std::string> listButton(const std::string& id, const SDL_FRect& box, std::string_view label, const StoryEditor::Field& given);
+    std::optional<std::string> listButton(const std::string& id, const SDL_FRect& box, std::string_view label, const StoryEditor::Field& given, std::string_view said = {});
     // A colour as a small square at `x`, centred on `middle` (dim: half seen, for a default); gives
     // the x after it. Every colour shows this way: in a box, a list, a popup's entry.
     float swatch(float x, float middle, SDL_Color colour, bool dim = false, std::optional<SDL_Color> bottom = std::nullopt, float size = layout::swatch) const;

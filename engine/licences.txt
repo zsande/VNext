@@ -4,8 +4,8 @@ Third-party software in the VNext player
 The player (VNext.app, VNext.exe or VNext-Linux.AppImage) has the software below built into it.
 Its licences let anyone use it in games, free or sold, and some of them ask for their notices to
 come with the program: here they all are. This file comes with the player (in its zip on GitHub,
-and inside the AppImage), the developer tools' Pack writes it next to game.vnext, and their About
-shows it too.
+and inside the AppImage), the developer tools' Export the game puts it in each zip it makes, next
+to game.vnext, and their About shows it too.
 
 If a game uses fonts, images or sounds made by others, check their licences as well.
 

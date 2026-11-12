@@ -134,6 +134,17 @@ std::optional<Value> Engine::builtin(std::string_view name) const {
     if (name == "engine_version") return std::string(kVersion);
     if (name == "sdl_version") return sdlVersion();
     if (name == "speaker") return g ? g->speaker() : std::string{};
+    if (name == "most_loved") { // (the love interest loved most now: of those even, the first; none: no love interests)
+        std::string most;
+        std::optional<double> best;
+        for (const std::string& key : script_.loves)
+            if (const CharacterDef* def = script_.character(key))
+                if (const double love = g ? toNumber(g->variable(def->love)) : 0.0; !best || love > *best) {
+                    best = love;
+                    most = def->name;
+                }
+        return most;
+    }
     if (name == "question") return question_;
     if (name == "page" && !slots_.pages().empty()) return slots_.pages()[slots_.page()];
     // The player's settings: a slider's as a number (text_speed 45, 0 at once; auto_delay 1.5 seconds; master_volume 80,

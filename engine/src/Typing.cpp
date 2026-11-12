@@ -26,13 +26,14 @@ void ScreenView::drawInput(SDL_Renderer* r, std::size_t index, float alpha) {
     if (typed) {
         engine_.wantTextInput();
         if (engine_.padInUse() && !engine_.keyboardOpen() && !keyboardShut_ && !tools_) engine_.wantKeyboard(*this, index, true); // (a controller: the keyboard, by itself)
-        if (still() || std::fmod(now(), 1.0f) < 0.6f) { // blinking caret after the text (still: steady)
+        if (still() || std::fmod(now(), 1.0f) < 0.6f) { // blinking caret where typing goes (still: steady)
             Font& font = styleFont(s);
             const float w = empty ? 0.0f : font.measure(value), h = font.lineHeight();
+            const float at = empty ? 0.0f : font.measure(value.substr(0, utf8::offset(value, caretAt(index, value))));
             const float left = rectOf(index).x + s.padding + (s.align == Align::Centre ? (rectOf(index).w - 2 * s.padding - w) * 0.5f
                                                        : s.align == Align::End ? rectOf(index).w - 2 * s.padding - w : 0.0f);
             const float top = rectOf(index).y + (rectOf(index).h > 0 ? (rectOf(index).h - h) * 0.5f : s.padding);
-            draw::rect(r, {left + w + 2, top, 2, h}, withAlpha(textColour(s, Look::Hover), alpha * s.opacity));
+            draw::rect(r, {left + at + 2, top, 2, h}, withAlpha(textColour(s, Look::Hover), alpha * s.opacity));
         }
     }
     if (on) targets_.push_back({{index}, rectOf(index), true});
@@ -77,6 +78,11 @@ bool ScreenView::handleInput(const SDL_Event& e) {
     return false;
 }
 
+std::size_t ScreenView::caretAt(std::size_t index, std::string_view value) const {
+    const std::size_t letters = utf8::length(value);
+    return caretBox_ == index ? letters - std::min(caretBack_, letters) : letters;
+}
+
 void ScreenView::typeInto(std::size_t index, std::string_view text) {
     const Element& el = def_->elements[index];
     const std::string var = el.option("variable");
@@ -84,10 +90,12 @@ void ScreenView::typeInto(std::size_t index, std::string_view text) {
     const int max = static_cast<int>(number(el, "most_letters", 64.0f));
     std::string typed(text);
     std::erase_if(typed, [](char c) { return c == '\n' || c == '\r' || c == '{' || c == '}'; });
+    std::size_t at = utf8::offset(value, caretAt(index, value)); // (where it goes: at the caret; it stays after what's added)
     for (std::size_t n = 0; n < typed.size();) { // add codepoints until the limit
         const auto len = utf8::offset(std::string_view(typed).substr(n), 1);
         if (max > 0 && static_cast<int>(utf8::length(value)) >= max) break;
-        value += typed.substr(n, len);
+        value.insert(at, typed.substr(n, len));
+        at += len;
         n += std::max<std::size_t>(len, 1);
     }
     engine_.game().setVariable(var, value);
@@ -96,15 +104,23 @@ void ScreenView::typeInto(std::size_t index, std::string_view text) {
 void ScreenView::eraseLast(std::size_t index) {
     const std::string var = def_->elements[index].option("variable");
     std::string value = engine_.game().typedValue(var);
-    if (value.empty()) return;
-    value.erase(utf8::offset(value, utf8::length(value) - 1));
+    const std::size_t at = caretAt(index, value);
+    if (at == 0) return;
+    const std::size_t from = utf8::offset(value, at - 1);
+    value.erase(from, utf8::offset(value, at) - from);
     engine_.game().setVariable(var, value);
+}
+
+void ScreenView::moveCaret(std::size_t index, int by) {
+    const std::size_t letters = utf8::length(engine_.game().typedValue(def_->elements[index].option("variable")));
+    if (caretBox_ != index) caretBox_ = index, caretBack_ = 0;
+    caretBack_ = static_cast<std::size_t>(std::clamp(static_cast<long>(caretBack_) - by, 0L, static_cast<long>(letters)));
 }
 
 std::string ScreenView::keyLetter(const Element& el) const {
     const auto* u = el.kind == ElementKind::Button && el.actions.size() == 1 ? std::get_if<cmd::Ui>(&el.actions.front()) : nullptr;
     if (!u || u->verb != "type" || utf8::length(u->arg) != 1) return {};
-    return engine_.keyboardShift() ? upper(u->arg) : u->arg;
+    return engine_.keyboardShift() ? shiftedKey(u->arg) : u->arg;
 }
 
 void ScreenView::enterBox(std::size_t index) {
@@ -143,6 +159,7 @@ void Engine::keyboardKey(std::string_view key) {
     const std::size_t box = keyboardFor_->element;
     if (key == "shift") keyboardFor_->shift = !keyboardFor_->shift;
     else if (key == "space") v->typeIntoBox(box, " ");
+    else if (key == "left" || key == "right") v->moveCaret(box, key == "left" ? -1 : 1);
     else if (key == "delete") {
         v->eraseInBox(box);
         if (v->boxText(box).empty()) keyboardFor_->shift = true; // (a name starts with a capital)
@@ -150,7 +167,7 @@ void Engine::keyboardKey(std::string_view key) {
         closeKeyboard();
         v->enterBox(box);
     } else {
-        v->typeIntoBox(box, keyboardFor_->shift ? upper(key) : std::string(key));
+        v->typeIntoBox(box, keyboardFor_->shift ? shiftedKey(key) : std::string(key));
         keyboardFor_->shift = false;
     }
 }

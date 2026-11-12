@@ -189,7 +189,7 @@ void SlotBrowser::refresh(std::size_t index) {
 
 namespace {
 
-constexpr std::string_view kSaveMagic = "vnext-save 3";
+constexpr std::string_view kSaveMagic = "vnext-save 5"; // (5: 2026-11-11, looping sounds with their name and sound type)
 
 // Saves keep one value per line: spaces, backslashes and newlines are escaped.
 std::string escape(std::string_view s) {
@@ -204,13 +204,19 @@ std::string unescape(std::string_view s) {
 std::string field(std::string_view s) { return s.empty() ? std::string("~") : "=" + escape(s); }
 std::string unfield(std::string_view s) { return s.size() < 2 || s.front() != '=' ? std::string{} : unescape(s.substr(1)); }
 
+// A movie's way of playing as a save has it (" loop=0 volume=500"; nothing for again and again, as loud as it is).
+std::string movieFields(bool loop, float volume) {
+    return std::string(loop ? "" : " loop=0") + (volume == 1.0f ? std::string{} : std::format(" volume={}", std::lround(volume * 1000.0f)));
+}
+
 // An image on stage as a save has it ("object TAG char=... x=..."), and read back (after "object").
 std::string objectLine(const Stage::ObjectState& o) {
-    return std::format("object {} char={} image={} expr={} x={} y={} zoom={} alpha={} rotation={} flip={} layer={} tint=#{:02x}{:02x}{:02x}{}{}\n",
+    const std::string box = o.image.starts_with('#') ? std::format(" width={} height={}", std::lround(o.width * 10000.0f), std::lround(o.height * 10000.0f)) : ""; // (a colour's)
+    return std::format("object {} char={} image={} expr={} x={} y={} zoom={} alpha={} rotation={} flip={} layer={} tint=#{:02x}{:02x}{:02x}{}{}{}{}\n",
                        escape(o.tag), escape(o.character), escape(o.image), escape(o.expression), std::lround(o.x * 10000.0f),
                        std::lround(o.y * 10000.0f), std::lround(o.zoom * 10000.0f), std::lround(o.opacity * 10000.0f), std::lround(o.rotation * 100.0f),
                        o.flip ? 1 : 0, o.layer, o.tint.r, o.tint.g, o.tint.b, o.animation.empty() ? "" : " animation=" + escape(o.animation),
-                       o.played.empty() ? "" : " played=" + escape(o.played));
+                       o.played.empty() ? "" : " played=" + escape(o.played), movieFields(o.loop, o.volume), box);
 }
 Stage::ObjectState readObject(std::istream& ls) {
     Stage::ObjectState o;
@@ -235,6 +241,10 @@ Stage::ObjectState readObject(std::istream& ls) {
         else if (k == "tint") o.tint = parseColour(v).value_or(o.tint);
         else if (k == "animation") o.animation = v;
         else if (k == "played") o.played = v;
+        else if (k == "loop") o.loop = n != 0.0f;
+        else if (k == "volume") o.volume = n / 1000.0f;
+        else if (k == "width") o.width = n / 10000.0f;
+        else if (k == "height") o.height = n / 10000.0f;
     }
     return o;
 }
@@ -251,12 +261,14 @@ std::string Game::save(bool history) const {
     for (const auto& [name, value] : vars_) out += std::format("variable {} {}\n", name, encodeValue(value));
     for (const auto& o : stage_.objects()) out += objectLine(o);
     if (!stage_.background().empty())
-        out += std::format("background {}{}{}\n", stage_.background(), stage_.backgroundAnimation(true).empty() ? "" : " animation=" + escape(stage_.backgroundAnimation(true)),
-                           stage_.backgroundAnimation(false).empty() ? "" : " played=" + escape(stage_.backgroundAnimation(false)));
+        out += std::format("background {}{}{}{} x={} y={}\n", stage_.background(), stage_.backgroundAnimation(true).empty() ? "" : " animation=" + escape(stage_.backgroundAnimation(true)),
+                           stage_.backgroundAnimation(false).empty() ? "" : " played=" + escape(stage_.backgroundAnimation(false)),
+                           movieFields(stage_.backgroundLoops(), stage_.backgroundVolume()), std::lround(stage_.backgroundPart().x * 10000.0f),
+                           std::lround(stage_.backgroundPart().y * 10000.0f));
     if (!flowchartNode_.empty()) out += std::format("flowchartpoint {} {}\n", flowchartNode_, flowchartOption_);
     if (!music_.empty()) out += std::format("musicvol {}\nmusic {}\n", std::lround(musicVolume_ * 1000.0f), music_);
     for (const auto& [channel, loop] : loops_)
-        out += std::format("loop {} {} {}\n", escape(channel), std::lround(loop.volume * 1000.0f), loop.file);
+        out += std::format("loop {} {} {} {} {}\n", escape(channel), std::lround(loop.volume * 1000.0f), escape(loop.type), escape(loop.name), loop.file);
     for (const auto& screen : screens_) out += std::format("screen {}\n", screen);
     // The phone: how many messages have come (pphone), its messages and calls, and a chat scene or a call under
     // way. Texts are one word each (field()); a command, "-" or where it is.
@@ -284,9 +296,8 @@ std::string Game::save(bool history) const {
     if (history)
         for (std::size_t i = 0; i + (wait_ == Wait::Say ? 1 : 0) < history_.size(); ++i) {
             const HistoryEntry& h = history_[i];
-            out += std::format("hist {} {} {} {} {} {} {} {} {} {} {}", h.colour.r, h.colour.g, h.colour.b, h.choice ? 1 : 0, std::lround(h.voiceVolume * 1000.0f),
-                               std::lround(h.madeUpVoice * 1000.0f), std::lround(h.madeUpVoiceSpeed * 1000.0f), field(h.speaker), field(h.voice), field(h.text),
-                               h.spans.size());
+            out += std::format("hist {} {} {} {} {} {} {} {} {} {}", h.colour.r, h.colour.g, h.colour.b, h.choice ? 1 : 0, std::lround(h.madeUpVoice * 1000.0f),
+                               std::lround(h.madeUpVoiceSpeed * 1000.0f), field(h.speaker), field(h.voice), field(h.text), h.spans.size());
             for (const TextSpan& s : h.spans)
                 out += std::format(" {} {} {} {} {}", s.begin, s.end, s.colour ? std::format("#{:02x}{:02x}{:02x}{:02x}", s.colour->r, s.colour->g, s.colour->b, s.colour->a) : "-",
                                    static_cast<unsigned>(s.style), field(s.ruby));
@@ -316,9 +327,6 @@ std::string Game::save(bool history) const {
                            s.colour ? hex(*s.colour) : "-", s.wipeShape.empty() ? "-" : escape(s.wipeShape));
     }
     for (const auto& [character, expression] : expressions_) out += std::format("expr {} {}\n", escape(character), escape(expression));
-    if (wait_ == Wait::Say && !lineVoice_.file.empty()) // the line's voice plays again when it's loaded
-        out += std::format("voice {} {} {}\n", lineVoice_.textFollows ? (*lineVoice_.textFollows ? 1 : 0) : -1, std::lround(lineVoice_.volume * 1000.0f),
-                           lineVoice_.file);
     return out;
 }
 
@@ -404,6 +412,9 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     Variables vars;
     std::vector<Stage::ObjectState> objects;
     std::string background, backgroundAnimation, backgroundPlayed, music, flowchartNode;
+    bool backgroundLoop = true;
+    float backgroundVolume = 1.0f;
+    SDL_FPoint backgroundPart{0.5f, 0.5f};
     int flowchartOption = -1;
     float musicVolume = 1.0f;
     std::map<std::string, Loop, std::less<>> loops;
@@ -415,7 +426,6 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     std::uint32_t messageCount = 0, arrivals = 0;
     std::optional<CallNow> callNow;
     std::map<std::string, std::string, std::less<>> expressions;
-    std::optional<LineVoice> voice;
     std::vector<PageLine> page;
     std::vector<HistoryEntry> history;
     std::optional<std::size_t> prompt;
@@ -477,18 +487,22 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
             while (ls >> field)
                 if (field.starts_with("animation=")) backgroundAnimation = unescape(field.substr(10));
                 else if (field.starts_with("played=")) backgroundPlayed = unescape(field.substr(7));
+                else if (field.starts_with("loop=")) backgroundLoop = toInt(Value(field.substr(5))) != 0;
+                else if (field.starts_with("volume=")) backgroundVolume = static_cast<float>(toInt(Value(field.substr(7)))) / 1000.0f;
+                else if (field.starts_with("x=")) backgroundPart.x = static_cast<float>(toInt(Value(field.substr(2)))) / 10000.0f; // (the part that shows)
+                else if (field.starts_with("y=")) backgroundPart.y = static_cast<float>(toInt(Value(field.substr(2)))) / 10000.0f;
         } else if (key == "flowchartpoint") {
             ls >> flowchartNode >> flowchartOption;
         } else if (key == "music") {
             music = rest;
         } else if (key == "musicvol") {
             musicVolume = static_cast<float>(toInt(rest)) / 1000.0f;
-        } else if (key == "loop") {
-            std::string channel, file;
+        } else if (key == "loop") { // (its channel, how loud, its sound type, its name, its file)
+            std::string channel, type, name, file;
             long volume = 1000;
-            ls >> channel >> volume;
+            ls >> channel >> volume >> type >> name;
             std::getline(ls >> std::ws, file);
-            loops.insert_or_assign(unescape(channel), Loop{file, static_cast<float>(volume) / 1000.0f});
+            loops.insert_or_assign(unescape(channel), Loop{unescape(name), file, static_cast<float>(volume) / 1000.0f, unescape(type)});
         } else if (key == "screen") {
             screens.push_back(rest);
         } else if (key == "pphone") { // (its things come next)
@@ -550,13 +564,13 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
             expressions.insert_or_assign(unescape(character), unescape(expression));
         } else if (key == "hist") {
             int r = 0, g = 0, b = 0, choice = 0;
-            long volume = 1000, madeUp = 0, madeUpSpeed = 1000;
+            long madeUp = 0, madeUpSpeed = 1000;
             std::string speaker, voiceFile, text;
             std::size_t spans = 0;
-            if (!(ls >> r >> g >> b >> choice >> volume >> madeUp >> madeUpSpeed >> speaker >> voiceFile >> text >> spans)) continue;
+            if (!(ls >> r >> g >> b >> choice >> madeUp >> madeUpSpeed >> speaker >> voiceFile >> text >> spans)) continue;
             HistoryEntry h{.speaker = unfield(speaker), .colour = {static_cast<Uint8>(r), static_cast<Uint8>(g), static_cast<Uint8>(b), 255}, .text = unfield(text),
-                           .choice = choice != 0, .voice = unfield(voiceFile), .voiceVolume = static_cast<float>(volume) / 1000.0f,
-                           .madeUpVoice = static_cast<float>(madeUp) / 1000.0f, .madeUpVoiceSpeed = static_cast<float>(madeUpSpeed) / 1000.0f};
+                           .choice = choice != 0, .voice = unfield(voiceFile), .madeUpVoice = static_cast<float>(madeUp) / 1000.0f,
+                           .madeUpVoiceSpeed = static_cast<float>(madeUpSpeed) / 1000.0f};
             for (std::size_t i = 0; i < spans; ++i) {
                 TextSpan s;
                 std::string colour, ruby;
@@ -603,15 +617,6 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
             cameraStart = {.x = thousandths(x), .y = thousandths(y), .opacity = thousandths(opacity), .zoom = thousandths(zoom), .rotation = thousandths(rotation),
                            .colour = colour == "-" ? std::nullopt : parseColour(colour), .fade = thousandths(fade),
                            .fadeColour = parseColour(fadeColour).value_or(SDL_Color{0, 0, 0, 255}), .wipe = thousandths(wipe), .wipeShape = named(shape)};
-        } else if (key == "voice") {
-            int follows = -1;
-            long volume = 1000;
-            LineVoice v;
-            ls >> follows >> volume;
-            std::getline(ls >> std::ws, v.file);
-            v.volume = static_cast<float>(volume) / 1000.0f;
-            if (follows >= 0) v.textFollows = follows == 1;
-            voice = std::move(v);
         }
     }
     if (!resume) return std::unexpected("this save points to a scene that no longer exists");
@@ -627,10 +632,12 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
         stage_.animate(o.tag, animation(o.played), false, true);
     }
     if (!background.empty()) {
-        stage_.setBackground(background, nullptr, true);
+        stage_.setBackground(background, nullptr, true, backgroundLoop, backgroundVolume, backgroundPart);
         stage_.animateBackground(animation(backgroundAnimation), true, true);
         stage_.animateBackground(animation(backgroundPlayed), false, true);
     }
+    stage_.skipMovies(); // (movies that play once were over by then: at their last image)
+    subtitles_ = stage_.backgroundMovie() ? subtitlesOf(ctx_.assets, background) : std::vector<Subtitle>{};
     flowchartNode_ = flowchartNode;
     flowchartOption_ = flowchartOption;
     stage_.setWeather(weather, 0.0f);
@@ -657,15 +664,21 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     musicVolume_ = musicVolume;
     ctx_.sound.stopVoice();
     if (music.empty()) ctx_.sound.stopMusic(0.5f);
-    else ctx_.sound.playMusic(ctx_.assets.sound(music), true, 0.5f, musicVolume); // the same song keeps playing
-    // Looping sounds: a load starts them over; rollback keeps those that are already right.
+    else ctx_.sound.playMusic(ctx_.assets.sound(script_.soundOf(music, "music").file), true, 0.5f, musicVolume); // the same song keeps playing
+    // Looping sounds: a load starts them over; rollback keeps those that are already right (each as its type follows).
     const bool rollingBack = keepHistory.has_value();
     if (!rollingBack) ctx_.sound.stopChannel("", 0.3f);
     for (const auto& [channel, loop] : loops_)
         if (rollingBack && (!loops.contains(channel) || loops.at(channel).file != loop.file)) ctx_.sound.stopChannel(channel, 0.3f);
     for (const auto& [channel, loop] : loops)
-        if (!rollingBack || !loops_.contains(channel) || loops_.at(channel).file != loop.file)
-            ctx_.sound.playChannel(channel, ctx_.assets.sound(loop.file), true, loop.volume, 0.5f);
+        if (!rollingBack || !loops_.contains(channel) || loops_.at(channel).file != loop.file) {
+            const auto t = script_.soundTypes.find(loop.type);
+            ctx_.sound.playChannel(channel, ctx_.assets.sound(loop.file), true, loop.volume, 0.5f, 0.0f, t != script_.soundTypes.end() ? t->second.follows : SoundSlider::Sound,
+                                   loop.type);
+        }
+    typePlaying_.clear(); // (a type's one: what loops on it, stopped by its name)
+    for (const auto& [channel, loop] : loops)
+        if (channel.starts_with("type:")) typePlaying_.insert_or_assign(channel.substr(5), loop.name);
     loops_ = std::move(loops);
 
     // Rollback keeps the entries before its line (counting those let go); a load has the save's.
@@ -689,8 +702,6 @@ std::expected<std::string, std::string> Game::restore(std::string_view data, std
     together_ = !others_.empty(); // (the last line of a together block is said again)
     error_.clear();
     skip_ = uiHidden_ = menuPrompt_ = false;
-    pendingVoice_ = voice; // the line's own voice line plays again
-    if (voice && !skipping()) ctx_.sound.playVoice(ctx_.assets.sound(voice->file), voice->volume);
     pc_ = resumePc_ = *resume;
     if (random) random_ = *random;
     // A choice with its question on screen: that line back as it was, all there at once, then the choice.

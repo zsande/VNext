@@ -77,13 +77,17 @@ public:
     Image image(std::string_view name, Frame frame = {});
     // What a button does (`item`: a list item's values when it's in one: {chat.name}, and what choose acts on).
     void run(const Commands& commands, const std::string& confirm = {}, const Variables& item = {});
-    // What a screen does as it opens (or closes): the music and the voice line stop when its stop_music_on_open=
-    // and stop_voice_on_open= (or _on_close=) say so, then its action_on_open= (action_on_close=) runs.
+    // What a screen does as it opens (or closes): the sound types its stop_on_open= (stop_on_close=) says stop, then its
+    // action_on_open= (action_on_close=) runs.
     void screenHook(const ScreenDef& def, bool opening);
     [[nodiscard]] Game& game() { return *game_; }
     [[nodiscard]] const Lookup& lookup() const { return game_->lookup(); }
     void wantTextInput() { textInputWanted_ = true; }
-    void playSound(const std::string& file) { sound_.playSound(assets_->sound(file)); }
+    // A sound by its name (a button's: a named sound, as loud as it is and as its type follows, or a file).
+    void playSound(const std::string& name) {
+        const Script::SoundPlay s = script_.soundOf(name);
+        sound_.playSound(assets_->sound(s.file), s.volume, s.fade, std::nullopt, s.slider, s.type);
+    }
     [[nodiscard]] const GameSettings& gameSettings() const { return script_.gameSettings; }
     [[nodiscard]] const Palette& palette() const { return script_.palette; }
     [[nodiscard]] Assets& assets() { return *assets_; }
@@ -92,7 +96,6 @@ public:
     [[nodiscard]] std::uint64_t pointerMoves() const { return pointerMoves_; } // (how many times the pointer has moved: screens tell whether the last move came to them)
     [[nodiscard]] bool padInUse() const { return padInUse_; } // the last thing pressed was a controller's (the on-screen keyboard comes up by itself)
     [[nodiscard]] bool keysInCharge() const { return keysInCharge_; } // a key or a controller's button came after the pointer last moved or clicked
-    [[nodiscard]] bool keyboardUsed() const { return keyboardUsed_; } // a real keyboard's key came (a click doesn't bring up the on-screen one)
     void pointedIn(const ScreenView& view); // a part of this screen is pointed at now (by the pointer or the keys): the others' the keys work on with it go
     [[nodiscard]] float time() const { return time_; } // the game's clock: it stands still while the developer tools are open over it
     [[nodiscard]] float toolsTime() const { return toolsTime_; }
@@ -153,15 +156,16 @@ public:
     void keypad(std::string_view key); // the lock screen's keypad: a digit (once there are enough, they're tried), or back
     // The on-screen keyboard: the screen keyboard (built in, or the game's own), open over a box being typed into, when the box
     // is pressed with a controller, or clicked while no real keyboard's been used, or typed into while a controller is in
-    // use (`keys`: the ring goes to its first letter at once). Its buttons' type actions go into that box: a letter (a
-    // capital with Shift, which goes after one, and is on for a box's first letter), shift, space, delete, done (what Enter
-    // does in the box: its action, and the keyboard goes). A real keyboard's key puts it away (Esc only that), and so does a
+    // use (`keys`: the ring goes to its first letter at once). Its buttons' type actions go into that box, at its caret: a
+    // letter (with Shift, which goes after one and is on for a box's first letter, a capital or the sign over it), shift,
+    // space, left and right (the caret), delete (the letter before the caret), done (what Enter does in the box: its
+    // action, and the keyboard goes). A real keyboard's key puts it away (Esc only that), and so does a
     // controller's B (what's typed stays); then it stays away until the box is pressed again.
     void wantKeyboard(const ScreenView& view, std::size_t element, bool keys);
     void keyboardKey(std::string_view key);
     void closeKeyboard();
     [[nodiscard]] bool keyboardOpen() const { return keyboardFor_.has_value(); }
-    [[nodiscard]] bool keyboardShift() const { return keyboardFor_ && keyboardFor_->shift; }
+    [[nodiscard]] bool keyboardShift() const { return toolsShift_ ? *toolsShift_ : keyboardFor_ && keyboardFor_->shift; }
     [[nodiscard]] std::string keyboardText() const; // what the box it types into holds
     // Languages: the game's own first, then its translations (the "language" setting).
     [[nodiscard]] std::vector<std::string> languageNames() const;
@@ -171,7 +175,7 @@ public:
     // or "original"), a translation's id for its file, name or code; none for a word that's no language.
     [[nodiscard]] std::optional<std::string> languageIdNamed(std::string_view word) const;
     void changeSetting(std::string_view what); // a button's "setting NAME VALUE"
-    // A control part: the key in a control's slot, and changing it (the next key pressed).
+    // An input for a control's key: the key in a control's slot, and changing it (the next key pressed).
     [[nodiscard]] std::string keyLabel(std::string_view control, std::size_t slot) const;
     static constexpr std::size_t kPadSlot = 99; // a control's controller button (slot=pad)
     [[nodiscard]] static std::size_t slotOf(const Element& el); // slot=1, 2... or pad
@@ -239,12 +243,11 @@ private:
     void play(); // the game from the beginning: scene start
     bool lookForGame(); // developer mode without a game: one found next to the player begins (false: still none)
     [[nodiscard]] Script readScript() const;
-    // Packs the game folder into `file` (game.vnext next to the folder): what was done, or why not.
+    // --pack FILE: the game folder packed into `file`, licences.txt next to it: what was done, or why not.
     [[nodiscard]] std::expected<std::string, std::string> pack(const std::string& file) const;
-    [[nodiscard]] std::expected<std::string, std::string> packInto(const std::string& file) const; // (what pack() and finishGame() share)
-    [[nodiscard]] std::string packPath() const;
-    // Pack (and --pack): game.vnext and licences.txt in a folder named after the game, next to
-    // the game folder (finishedFolder()): what was made, or why not.
+    [[nodiscard]] std::expected<std::string, std::string> packInto(const std::string& file) const; // (what pack(), finishGame() and Export the game share)
+    // --pack: game.vnext and licences.txt in a folder named after the game, next to the game folder (finishedFolder(), where
+    // Export the game puts its zips too): what was made, or why not.
     [[nodiscard]] std::expected<std::string, std::string> finishGame() const;
     [[nodiscard]] std::string finishedFolder() const;
     [[nodiscard]] bool writeVoiceList() const;
@@ -388,7 +391,7 @@ private:
     std::vector<Translation> translations_;
     std::uint64_t frameNumber_ = 0;
     std::uint64_t pointerMoves_ = 0;
-    bool padInUse_ = false, keysInCharge_ = false, keyboardUsed_ = false;
+    bool padInUse_ = false, keysInCharge_ = false;
     bool covered_ = false; // a menu covers the game (its voice and movie wait)
     std::unique_ptr<Game> game_;                          // idle (not started) on the title screen
     std::map<std::string, ScreenView, std::less<>> views_; // every screen of the script
@@ -430,6 +433,7 @@ private:
         bool shift = false;
     };
     std::optional<KeyboardFor> keyboardFor_;                            // the box the on-screen keyboard is open for
+    std::optional<bool> toolsShift_;                                    // (the developer tools' Shift, while they draw the keyboard screen as theirs)
     std::optional<std::pair<KeyboardFor, bool>> keyboardWanted_; // (asked for while drawing: opened as the frame ends; with the keys on it)
     bool dataFolder_ = false;                             // --data: everything, saves too, goes there
     bool packed_ = false;                                 // the game is a pack (game.vnext): finished

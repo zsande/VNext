@@ -16,12 +16,12 @@ void Engine::ask(std::string question, std::function<void()> yes) {
 }
 
 void Engine::screenHook(const ScreenDef& def, bool opening) {
-    const ScreenDef::Stops& stops = opening ? def.stopOnOpen : def.stopOnClose;
     Commands stop;
-    if (stops.music) stop.emplace_back(cmd::Play{.track = cmd::Play::Track::Music, .fade = 0.5f});
-    if (stops.voice) stop.emplace_back(cmd::Play{.track = cmd::Play::Track::Voice});
+    for (const std::string& type : opening ? def.stopOnOpen : def.stopOnClose) stop.emplace_back(cmd::Play{.name = type, .stop = true, .fade = 0.5f});
     run(stop);
     run(opening ? def.actionOnOpen : def.actionOnClose);
+    // (a screen showing the picture opened, its viewer, closed: the picture's put away with it, not left open under it)
+    if (!opening && std::ranges::any_of(def.elements, [](const Element& el) { return el.text.contains("{open_image}"); })) phone_.image.clear();
 }
 
 void Engine::run(const Commands& commands, const std::string& confirm, const Variables& item) {
@@ -219,7 +219,7 @@ void Engine::historyVoice(std::size_t entry) {
     if (sampling_) return;
     if (mode_ != Mode::Game || entry >= game_->history().size()) return;
     const HistoryEntry& h = game_->history()[entry];
-    if (!h.voice.empty()) sound_.replayVoice(h.voice, h.voiceVolume);
+    if (!h.voice.empty()) sound_.replayVoice(h.voice);
     else if (h.madeUpVoice > 0.0f && settings_.madeUpVoices) sound_.replayMadeUpVoice(h.text, h.madeUpVoice, h.madeUpVoiceSpeed);
 }
 

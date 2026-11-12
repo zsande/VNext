@@ -368,18 +368,20 @@ Engine::~Engine() {
     }
 }
 
-// --voices: game/voices.txt lists every line of the characters with voice_files=, with the file it
-// plays, as a script for recording them.
+// --voices: game/voices.txt lists every line that plays a voice file (its own voice=, or its speaker's voice_files=),
+// with the file, as a script for recording them.
 bool Engine::writeVoiceList() const {
     std::string out = "# The voice file each line plays (in game/sounds, ending .ogg, .mp3, .flac or .wav), and its text.\n";
     std::size_t lines = 0;
     for (const Instruction& ins : script_.code)
         if (const auto* say = std::get_if<cmd::Say>(&ins.command))
-            if (const CharacterDef* def = script_.character(say->character); def && !def->voiceFiles.empty()) {
-                out += std::format("{}/{}\t{}: {}\n", def->voiceFiles, say->voiceId, def->name, say->text);
+            if (const std::string voice = script_.voiceOf(*say); !voice.empty() && !voice.contains('{')) {
+                const CharacterDef* def = say->character.empty() ? nullptr : script_.character(say->character);
+                const std::string who = def ? def->name : say->speaker;
+                out += std::format("{}\t{}{}\n", voice, who.empty() ? "" : who + ": ", say->text);
                 ++lines;
             }
-    if (lines == 0) out += "# No character has voice_files= yet, like  character Aiko voice_files=yes\n";
+    if (lines == 0) out += "# No line plays a voice file yet: give one voice=NAME at its end, or a character voice_files=yes.\n";
     const std::string file = gameRoot_ + "voices.txt";
     const bool ok = SDL_SaveFile(file.c_str(), out.data(), out.size());
     SDL_Log("%s", (ok ? std::format("Wrote '{}' ({} lines).", file, lines) : std::format("Can't write '{}': {}.", file, SDL_GetError())).c_str());
@@ -444,20 +446,14 @@ std::string Engine::findGame(const std::string& requested) const {
 // Every game starts in scripts/main.vnscript; the built-in menus come first, and the game's own replace
 // them. A pack is a finished game, so it never runs in developer mode.
 Script Engine::readScript() const {
-    Script script = Script::load("scripts/main.vnscript", [this](const std::string& p) { return files_.readText(gameRoot_ + p); }, defaultUi());
+    Script script = Script::load("scripts/main.vnscript", [this](const std::string& p) { return files_.readText(gameRoot_ + p); }, defaultUi(),
+                                 [this](const std::string& folder) { return files_.list(gameRoot_ + folder, ""); });
     if (packed_) script.gameSettings.developer = false;
     auto count = [](std::size_t n, std::string_view what) { return std::format("{} {}{}", n, what, n == 1 ? "" : "s"); };
     const auto files = static_cast<std::size_t>(std::ranges::count_if(script.files, [](const std::string& f) { return !f.starts_with('<'); }));
     logInfo("Read {}: {}, {} and {}.", count(files, "script file"), count(script.scenes.size(), "scene"), count(script.characters.size(), "character"),
             count(script.screens.size(), "screen"));
     return script;
-}
-
-// Where the developer tools' Pack puts the pack: next to the game folder.
-std::string Engine::packPath() const {
-    const std::string folder = gameRoot_.substr(0, gameRoot_.size() - 1);
-    const auto slash = folder.find_last_of("/\\");
-    return (slash == std::string::npos ? std::string{} : folder.substr(0, slash + 1)) + std::string(kPackName);
 }
 
 // What packing says, a sentence or two a line (the developer tools' window shows the lines apart, the log on
@@ -493,15 +489,14 @@ std::expected<std::string, std::string> Engine::packInto(const std::string& file
                               : "The pack holds {} files ({:.1f} MB) in {:.1f} MB, made in {:.1f} seconds."_tr(report->files, size, packed, took);
 }
 
-// Pack: next to the game folder, a folder named after the game with game.vnext (the game in
+// --pack: next to the game folder, a folder named after the game with game.vnext (the game in
 // one file, which keeps its players' saves and progress in it too) and licences.txt. To play it, the player goes
-// next to game.vnext: VNext.app, VNext.exe or VNext-Linux.AppImage, from VNext's releases on GitHub. One made before
-// goes to the Trash first.
+// next to game.vnext: VNext.app, VNext.exe or VNext-Linux.AppImage, from VNext's releases on GitHub. (One there already:
+// the command says to move it away first.)
 std::expected<std::string, std::string> Engine::finishGame() const {
     if (packed_) return std::unexpected(packedAlready());
     if (!script_.ok()) return std::unexpected(scriptsWrong());
     const std::string folder = finishedFolder();
-    if (SDL_GetPathInfo(folder.c_str(), nullptr) && !moveToTrash(folder)) return std::unexpected("Can't replace '{}': move it away first."_tr(folder));
     if (!SDL_CreateDirectory(folder.c_str())) return std::unexpected("Can't make '{}': {}."_tr(folder, SDL_GetError()));
     const auto holds = packInto(folder + "/" + std::string(kPackName));
     if (!holds) return holds;
@@ -512,7 +507,9 @@ std::expected<std::string, std::string> Engine::finishGame() const {
 std::string Engine::finishedFolder() const {
     std::string name = fileNameOf(script_.gameSettings.title); // (the game's title, as a folder's name)
     if (name.empty()) name = "Game";
-    return packPath().substr(0, packPath().size() - kPackName.size()) + name;
+    const std::string game = gameRoot_.substr(0, gameRoot_.size() - 1); // (next to the game folder)
+    const auto slash = game.find_last_of("/\\");
+    return (slash == std::string::npos ? std::string{} : game.substr(0, slash + 1)) + name;
 }
 
 namespace {
@@ -542,17 +539,18 @@ void Engine::configure() {
         saves = gameRoot_ + "saves/";
     saves_.setFolder(saves, inPack_ ? &files_ : nullptr);
     assets_->setPixelArt(game.pixelArt);
-    // The mouse pointer: an image from images/ (setting mouse_pointer), or the system's.
-    cursor_.reset();
-    if (!game.mousePointer.empty()) {
-        const std::string file = game.mousePointer.find('.') == std::string::npos ? std::format("images/{}.png", game.mousePointer) : game.mousePointer;
-        if (SurfacePtr image{IMG_Load_IO(files_.open(gameRoot_ + file).release(), true)})
-            cursor_.reset(SDL_CreateColorCursor(image.get(), game.pointerTip.x, game.pointerTip.y));
-        if (!cursor_) logWarn("Can't use '{}' as the mouse pointer: {}.", file, SDL_GetError());
-    }
-    SDL_SetCursor(cursor_ ? cursor_.get() : SDL_GetDefaultCursor());
     assets_->setAtlases(script_.atlases);
     assets_->setSubImages(script_.subImages);
+    // The mouse pointer (setting mouse_pointer): a picture or a sub-image (a visual named by a visual line or a character:
+    // what it shows; a file by its path: images/arrow.png), or the system's.
+    cursor_.reset();
+    if (!game.mousePointer.empty()) {
+        const std::string shows = script_.visualOf(game.mousePointer);
+        if (SurfacePtr image = shows.contains('.') ? SurfacePtr{IMG_Load_IO(files_.open(gameRoot_ + shows).release(), true)} : assets_->pixels(shows))
+            cursor_.reset(SDL_CreateColorCursor(image.get(), game.pointerTip.x, game.pointerTip.y));
+        if (!cursor_) logWarn("Can't use '{}' as the mouse pointer: {}.", game.mousePointer, SDL_GetError());
+    }
+    SDL_SetCursor(cursor_ ? cursor_.get() : SDL_GetDefaultCursor());
     sound_.setCrossfade(game.musicCrossfade);
     sound_.setDucking(game.musicUnderVoices);
     assets_->setMemoryLimit(static_cast<std::size_t>(game.imageMemory) * 1024 * 1024);
@@ -668,7 +666,7 @@ bool Engine::playing() const {
     return mode_ == Mode::Game;
 }
 
-// Reload (the developer tools', or a reload action): reads the scripts, images and sounds again and continues where the player was.
+// Reload the game (the developer tools'), or a reload action: reads the scripts, images and sounds again and continues where the player was.
 void Engine::reload() {
     std::optional<std::string> snapshot;
     if (mode_ == Mode::Game && game_->canSave()) snapshot = game_->save();

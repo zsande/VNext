@@ -59,11 +59,18 @@ void setValues(Stage::ObjectState& s, const std::array<float, 8>& v) {
 
 } // namespace
 
-void Stage::setBackground(std::string key, std::shared_ptr<const Animation> entrance, bool done) {
-    if (key == background_ && !key.empty()) return backgroundAnimations_.set(std::move(entrance), false, done); // (the one there: only the animation, on it)
+void Stage::setBackground(std::string key, std::shared_ptr<const Animation> entrance, bool done, bool loop, float volume, SDL_FPoint part) {
+    if (key == background_ && !key.empty()) { // (the one there: the animation, on it, and the part that shows)
+        backgroundPart_ = part;
+        return backgroundAnimations_.set(std::move(entrance), false, done);
+    }
     if (!previous_.empty()) dropPrevious(); // (one still coming in: it's in)
+    previousPart_ = std::exchange(backgroundPart_, part);
     previous_ = std::exchange(background_, std::move(key));
     previousAnimations_ = std::exchange(backgroundAnimations_, {});
+    previousMovie_ = std::exchange(backgroundMovie_, movieFor(background_, loop, volume)); // (the one going plays on under it)
+    backgroundLoop_ = loop;
+    backgroundVolume_ = volume;
     backgroundAnimations_.set(std::move(entrance), false, done || still_);
     if (!backgroundAnimations_.going()) dropPrevious();
 }
@@ -71,7 +78,42 @@ void Stage::setBackground(std::string key, std::shared_ptr<const Animation> entr
 void Stage::dropPrevious() {
     previous_.clear();
     previousAnimations_ = {};
+    previousMovie_ = {};
     std::erase_if(objects_, [](const Object& o) { return o.oldBackground; });
+}
+
+Stage::Playing Stage::movieFor(const std::string& name, bool loop, float volume) const {
+    Playing p{.movie = makeMovie_ && !name.empty() ? makeMovie_(name, loop, volume) : nullptr, .loop = loop};
+    if (p.movie && moviesPaused_) p.movie->setPaused(true);
+    return p;
+}
+
+Image Stage::Playing::image() const {
+    SDL_Texture* t = movie ? movie->texture() : nullptr;
+    if (!t) return {};
+    float w = 0, h = 0;
+    SDL_GetTextureSize(t, &w, &h);
+    return Image{.texture = t, .src = {0, 0, w, h}};
+}
+
+void Stage::Playing::settle() {
+    if (!once()) return;
+    done = true;
+    movie->showLast();
+    movie->setPaused(true);
+}
+
+void Stage::skipMovies() {
+    backgroundMovie_.settle();
+    for (Object& o : objects_) o.movie.settle();
+}
+
+void Stage::pauseMovies(bool paused) {
+    moviesPaused_ = paused;
+    for (Playing* p : {&backgroundMovie_, &previousMovie_})
+        if (p->movie && !p->done) p->movie->setPaused(paused);
+    for (Object& o : objects_)
+        if (o.movie.movie && !o.movie.done) o.movie.movie->setPaused(paused);
 }
 
 Stage::Object* Stage::find(std::string_view tag) {
@@ -102,33 +144,45 @@ void Stage::apply(Object& o, const StageProps& p, float seconds, Ease ease) {
     }
 }
 
-void Stage::show(const std::string& tag, const CharacterDef* def, const std::string& image, const std::string& expression,
-                 const StageProps& props, std::shared_ptr<const Animation> played, float slide, bool done) {
+void Stage::show(const cmd::Show& line, const CharacterDef* def, std::shared_ptr<const Animation> played, float slide, bool done) {
     auto play = [&](Object& o) {
         if (!played) return;
         o.s.played = played->name;
         o.animations.set(std::move(played), false, done || still_);
     };
-    if (Object* o = find(tag)) {
+    if (Object* o = find(line.tag)) {
         if (o->leaving || o->oldBackground) { // (going: it stays, as it was before it began to go)
             o->leaving = o->oldBackground = false;
             o->s.played.clear();
             o->animations.set(nullptr, false, true);
         }
-        if (!expression.empty()) o->s.expression = expression;
-        if (!image.empty()) o->s.image = image;
-        apply(*o, props, slide);
+        if (!line.expression.empty()) o->s.expression = line.expression;
+        // (a colour's box shown again by its name alone, no type said: the colour it is)
+        const bool sameBox = o->s.image.starts_with('#') && !line.box && lower(line.image) == line.tag;
+        if (!line.image.empty() && !sameBox) o->s.image = line.image;
+        if (line.box) o->s.width = line.box->x, o->s.height = line.box->y;
+        apply(*o, line.props, slide);
         play(*o);
+        // Shown again: in front of the others of its layer, as one just come is (and last among them, so a save keeps that).
+        o->order = nextOrder_++;
+        const auto at = std::ranges::find_if(objects_, [&](const Object& x) { return &x == o; });
+        std::rotate(at, at + 1, objects_.end());
         return;
     }
-    Object o{.s = {.tag = tag, .image = image, .expression = expression}, .order = nextOrder_++};
+    Object o{.s = {.tag = line.tag, .image = line.image, .expression = line.expression, .loop = line.loop, .volume = line.volume}, .order = nextOrder_++};
     if (def) {
         o.s.character = def->key;
         o.def = *def;
-    } else { // images start in the middle (characters stand at the bottom)
+    } else { // images start in the middle (characters stand at the bottom); a movie plays
         o.s.y = 0.5f;
+        o.movie = movieFor(line.image, line.loop, line.volume);
     }
-    apply(o, props, 0.0f);
+    if (line.box) o.s.width = line.box->x, o.s.height = line.box->y;
+    // Its kind's layer, then where it comes and its type's layer (its character's or visual's, the type the line names),
+    // then the line's own.
+    o.s.layer = visualTypeLayer(def ? "character" : o.movie.movie ? "movie" : "image");
+    apply(o, line.comes, 0.0f);
+    apply(o, line.props, 0.0f);
     play(o);
     objects_.push_back(std::move(o));
 }
@@ -217,7 +271,7 @@ std::string Stage::backgroundAnimation(bool own) const {
 
 bool Stage::moving() const { // (an animation played on something, until it ends: one time through, if it's looping)
     return camera_.going() || backgroundAnimations_.going() ||
-           std::ranges::any_of(objects_, [](const Object& o) { return o.tweenTime < 1.0f || o.animations.going(); });
+           std::ranges::any_of(objects_, [](const Object& o) { return o.tweenTime < 1.0f || o.animations.going() || o.movie.once(); });
 }
 
 // The camera's places: what it looks at, as far from the middle as the place is (x=-1: the left edge).
@@ -504,7 +558,10 @@ void Stage::clearObjects() {
 void Stage::reset() {
     background_.clear();
     previous_.clear();
+    backgroundPart_ = previousPart_ = {0.5f, 0.5f};
     backgroundAnimations_ = previousAnimations_ = {};
+    backgroundMovie_ = {};
+    previousMovie_ = {};
     objects_.clear();
     setWeather({}, 0.0f);
     camera_ = {};
@@ -516,11 +573,18 @@ void Stage::reset() {
 void Stage::restore(const ObjectState& state, const CharacterDef* def) {
     Object o{.s = state, .order = nextOrder_++};
     if (def) o.def = *def;
+    else o.movie = movieFor(state.image, state.loop, state.volume);
     objects_.push_back(std::move(o));
 }
 
 void Stage::update(float dt) {
     clock_ += dt;
+    if (!moviesPaused_) {
+        for (Playing* p : {&backgroundMovie_, &previousMovie_})
+            if (p->movie && !p->done) p->movie->update(dt);
+        for (Object& o : objects_)
+            if (o.movie.movie && !o.movie.done) o.movie.movie->update(dt);
+    }
     updateWeather(dt);
     updateEffects(dt);
     camera_.onward(dt, still_);
@@ -645,29 +709,33 @@ void Stage::drawView(SDL_Renderer* r, Assets& assets, const Font* font, float ch
 }
 
 void Stage::drawStage(SDL_Renderer* r, Assets& assets, const Font* font, float characterHeight, const FrameOf& frameOf) {
-    // What's on stage, in its layers (and, among those, in the order they came).
-    auto drawObjects = [&](bool old) {
+    // What's on stage, in its layers (and, among those, in the order they came): the background at 0, the ones under 0
+    // behind it, the rest in front.
+    auto drawObjects = [&](bool old, bool behind) {
         std::vector<const Object*> sorted;
         sorted.reserve(objects_.size());
         for (const auto& o : objects_)
-            if (o.oldBackground == old) sorted.push_back(&o);
+            if (o.oldBackground == old && (o.s.layer < kVisualTypeLayers[0]) == behind) sorted.push_back(&o);
         std::ranges::stable_sort(sorted, [](const Object* a, const Object* b) { return a->s.layer != b->s.layer ? a->s.layer < b->s.layer : a->order < b->order; });
         for (const Object* o : sorted) drawObject(r, assets, font, *o, characterHeight, frameOf ? frameOf(o->s) : Frame{});
     };
     // The background before, with what was on stage then, under the new one while it comes in.
     if (!previous_.empty()) {
+        drawObjects(true, true);
         drawBackground(r, assets, font, true);
-        drawObjects(true);
+        drawObjects(true, false);
     }
+    drawObjects(false, true);
     drawBackground(r, assets, font, false);
     if (weather_.behind) drawWeather(r, assets);
-    drawObjects(false);
+    drawObjects(false, false);
     if (!weather_.behind) drawWeather(r, assets);
 }
 
 void Stage::drawBackground(SDL_Renderer* r, Assets& assets, const Font* font, bool previous) {
     const std::string& key = previous ? previous_ : background_;
     const Animations& animations = previous ? previousAnimations_ : backgroundAnimations_;
+    const SDL_FPoint part = previous ? previousPart_ : backgroundPart_; // (of a picture bigger than the stage: the part that shows)
     if (key.empty()) return;
     const SDL_FRect screen = whole();
     // Its animations move it, zoom and turn it around its middle, fade it, tint it, cover it with a
@@ -715,16 +783,21 @@ void Stage::drawBackground(SDL_Renderer* r, Assets& assets, const Font* font, bo
         });
         return;
     }
-    if (assets.image(key)) {
-        paint(assets, key, {}, [&](const Image& pic, float a) {
-            const float w = pic.w(), h = pic.h();
-            const float scale = std::max(canvas.w / w, canvas.h / h); // cover
-            const Placed at = placed({screen.x + (canvas.w - w * scale) * 0.5f, screen.y + (canvas.h - h * scale) * 0.5f, w * scale, h * scale});
-            wiped(at, [&] {
-                pic.draw(r, at.box, at.alpha * a, at.look.rotation, &at.pivot, false, shade(at.look.colour.value_or(SDL_Color{255, 255, 255, 255}), true));
-                if (at.look.fade > 0.0f) drawCovered(r, pic, at.box, at.look.rotation, at.pivot, false, shade(at.look.fadeColour), at.alpha * a * std::min(1.0f, at.look.fade));
-            });
+    auto picture = [&](const Image& pic, float a) {
+        const float w = pic.w(), h = pic.h();
+        const float scale = std::max(canvas.w / w, canvas.h / h); // cover
+        const Placed at = placed({screen.x + (canvas.w - w * scale) * part.x, screen.y + (canvas.h - h * scale) * part.y, w * scale, h * scale});
+        wiped(at, [&] {
+            pic.draw(r, at.box, at.alpha * a, at.look.rotation, &at.pivot, false, shade(at.look.colour.value_or(SDL_Color{255, 255, 255, 255}), true));
+            if (at.look.fade > 0.0f) drawCovered(r, pic, at.box, at.look.rotation, at.pivot, false, shade(at.look.fadeColour), at.alpha * a * std::min(1.0f, at.look.fade));
         });
+    };
+    if (const Playing& movie = previous ? previousMovie_ : backgroundMovie_; movie.movie) { // (a movie: its image now; none yet: nothing)
+        if (const Image pic = movie.image()) picture(pic, 1.0f);
+        return;
+    }
+    if (assets.image(key)) {
+        paint(assets, key, {}, picture);
         return;
     }
 
@@ -772,16 +845,49 @@ void Stage::drawObject(SDL_Renderer* r, Assets& assets, const Font* font, const 
         wiper_.draw(r, assets, {canvas.w, canvas.h}, at.box, at.look.wipe, at.look.wipeShape, paint);
     };
 
-    if (assets.image(key, frame)) {
-        paint(assets, key, frame, [&](const Image& pic, float a) {
-            const float scale = (character ? std::min(1.0f, canvas.h * characterHeight / pic.h()) : 1.0f) * s.zoom;
-            const Placed at = placed(pic.w() * scale, pic.h() * scale);
-            const float seen = alpha * a * std::clamp(at.look.opacity, 0.0f, 1.0f), turn = s.rotation + at.look.rotation;
-            wiped(at, [&] {
-                pic.draw(r, at.box, seen, turn, &at.pivot, s.flip, shade(at.look.colour.value_or(s.tint), true));
-                if (at.look.fade > 0.0f) drawCovered(r, pic, at.box, turn, at.pivot, s.flip, shade(at.look.fadeColour), seen * std::min(1.0f, at.look.fade));
-            });
+    if (!character && key.starts_with('#')) { // a colour's box ("#top-#bottom": one fading down to another), as big as its type has it
+        const Placed at = placed(s.width * canvas.w * s.zoom, s.height * canvas.h * s.zoom);
+        const float seen = alpha * std::clamp(at.look.opacity, 0.0f, 1.0f), cover = std::clamp(at.look.fade, 0.0f, 1.0f);
+        const SDL_Color tint = at.look.colour.value_or(s.tint), fadeColour = shade(at.look.fadeColour);
+        auto colourOf = [&](std::string_view text) { // (tinted, then covered with its animations' colour as far as they have it)
+            const SDL_Color c = parseColour(text).value_or(SDL_Color{0, 0, 0, 255});
+            auto times = [](Uint8 a, Uint8 b) { return static_cast<Uint8>(a * b / 255); };
+            const SDL_Color tinted = shade({times(c.r, tint.r), times(c.g, tint.g), times(c.b, tint.b), c.a});
+            auto toward = [&](Uint8 from, Uint8 to) { return static_cast<Uint8>(std::lround(from + (to - from) * cover)); };
+            return withAlpha({toward(tinted.r, fadeColour.r), toward(tinted.g, fadeColour.g), toward(tinted.b, fadeColour.b), tinted.a}, seen);
+        };
+        wiped(at, [&] {
+            if (const auto dash = key.find('-', 1); dash != std::string::npos) { // (fading down: it doesn't turn)
+                draw::gradient(r, at.box, colourOf(std::string_view(key).substr(0, dash)), colourOf(std::string_view(key).substr(dash + 1)));
+                return;
+            }
+            const float turn = (s.rotation + at.look.rotation) * std::numbers::pi_v<float> / 180.0f, cs = std::cos(turn), sn = std::sin(turn);
+            const SDL_FPoint mid{at.box.x + at.pivot.x, at.box.y + at.pivot.y}; // (it turns around its place, as an image does)
+            auto corner = [&](float x, float y) {
+                const float dx = x - mid.x, dy = y - mid.y;
+                return SDL_FPoint{mid.x + dx * cs - dy * sn, mid.y + dx * sn + dy * cs};
+            };
+            const float x0 = at.box.x, y0 = at.box.y, x1 = x0 + at.box.w, y1 = y0 + at.box.h;
+            draw::quad(r, corner(x0, y0), corner(x1, y0), corner(x1, y1), corner(x0, y1), colourOf(key));
         });
+        return;
+    }
+
+    auto picture = [&](const Image& pic, float a) {
+        const float scale = (character ? std::min(1.0f, canvas.h * characterHeight / pic.h()) : 1.0f) * s.zoom;
+        const Placed at = placed(pic.w() * scale, pic.h() * scale);
+        const float seen = alpha * a * std::clamp(at.look.opacity, 0.0f, 1.0f), turn = s.rotation + at.look.rotation;
+        wiped(at, [&] {
+            pic.draw(r, at.box, seen, turn, &at.pivot, s.flip, shade(at.look.colour.value_or(s.tint), true));
+            if (at.look.fade > 0.0f) drawCovered(r, pic, at.box, turn, at.pivot, s.flip, shade(at.look.fadeColour), seen * std::min(1.0f, at.look.fade));
+        });
+    };
+    if (o.movie.movie) { // (a movie: its image now; none yet: nothing)
+        if (const Image pic = o.movie.image()) picture(pic, 1.0f);
+        return;
+    }
+    if (assets.image(key, frame)) {
+        paint(assets, key, frame, picture);
         return;
     }
 

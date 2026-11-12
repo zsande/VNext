@@ -169,6 +169,7 @@ void Developer::drawPopup(DeveloperUi& ui) {
         p.keyed = static_cast<std::size_t>(std::clamp(p.keyed ? static_cast<long>(*p.keyed) + by : by > 0 ? 0L : n - 1, 0L, n - 1));
         const float rowH = images ? cellH + pad : itemH, top = gridH + (byVariable ? itemH : 0.0f) + static_cast<float>(*p.keyed / perRow) * rowH;
         p.scroll = std::clamp(p.scroll, top + rowH + 2 * pad - h, top);
+        if (engine.screenReader()) announce(entries[*p.keyed].label); // (a screen reader says what they're on now)
     }
     p.keyMove = {};
     if (p.keyed && *p.keyed >= entries.size()) p.keyed.reset();
@@ -191,6 +192,7 @@ void Developer::drawPopup(DeveloperUi& ui) {
     const float itemsTop = listTop + (byVariable ? itemH : 0.0f);
     if (entries.empty() && !colours) ui.textAround("Empty"_tr, box.x + 10 * k, itemsTop + itemH / 2, layout::popupText, theme::dim);
     const std::string imagesOf = f.pick == Pick::Expressions ? d.editor.imageBaseOf(f.context) : std::string{}; // (an expression's picture: the character's image)
+    std::optional<std::size_t> pointed; // (the entry the pointer or the keys are on: what it shows, beside the list)
     for (std::size_t i = 0; i < entries.size(); ++i) {
         const PopupEntry& e = entries[i];
         if (images) { // a small image, its name under it
@@ -202,9 +204,12 @@ void Developer::drawPopup(DeveloperUi& ui) {
                 if (const auto slash = image.rfind('/'); slash != npos) image.erase(0, slash + 1);
                 if (const auto dot = image.rfind('.'); dot != npos) image.erase(dot);
             }
-            if (const auto colour = e.empty ? std::nullopt : parseColour(e.value, &engine.palette())) {
+            // (a visual named by a visual line, or a character: what it shows)
+            const std::string shows = f.pick != Pick::Expressions && f.pick != Pick::ImageFiles && d.script && !e.empty ? d.script->visualOf(e.value) : e.value;
+            if (lower(shows) != lower(e.value)) image = lower(shows);
+            if (const auto colour = e.empty ? std::nullopt : parseColour(shows, &engine.palette())) {
                 draw::rect(r, {c.x + 6 * k, c.y + 6 * k, c.w - 12 * k, c.h - 32 * k}, *colour);
-            } else if (const Image pic = e.empty ? Image{} : engine.assets().image(image)) {
+            } else if (const Image pic = e.empty ? Image{} : pictureOf(image)) { // (a movie: its first image)
                 const float s = std::min((cellW - 8 * k) / std::max(1.0f, pic.w()), (cellH - 26 * k) / std::max(1.0f, pic.h()));
                 pic.draw(r, {c.x + (cellW - pic.w() * s) / 2, c.y + 4 * k, pic.w() * s, pic.h() * s}, 1.0f);
             }
@@ -219,11 +224,22 @@ void Developer::drawPopup(DeveloperUi& ui) {
         const SDL_FRect play{row.x + row.w - row.h, row.y, row.h, row.h};
         if (chosen(e) || ui.over(row) || p.keyed == i) draw::rect(r, row, chosen(e) ? kChosen : kButtonHover);
         if (p.keyed == i) draw::outline(r, row, kAccent); // (the keys are on it)
+        if ((ui.over(row) || p.keyed == i) && !e.empty) {
+            pointed = i;
+            d.choicePointed = {p.id, e.value, d.textFrame}; // (a choice row's list: the one pointed at, as its buttons say it)
+        }
         if (const auto colour = e.empty ? std::nullopt : colours ? parseColour(e.value, &engine.palette()) : people ? d.characterColour(engine.palette(), e.value) : std::nullopt)
             tx = ui.swatch(tx, row.y + row.h / 2, *colour); // (a colour, or a character's name colour: as its box shows it)
-        const float end = row.x + row.w - (sounds && !e.empty ? row.h : 0.0f) - 6 * k; // (cut to fit)
-        ui.textFitted(e.label, tx, row.y + row.h / 2, layout::popupText, e.empty ? theme::dim : theme::text, end - tx);
-        if (sounds && !e.empty) listenButton(ui, play, d.cachedSound(engine.assets(), lower(e.value)), true); // (heard, not picked)
+        const bool voice = f.box == StoryEditor::Box::MadeUpVoice; // (a made-up voice's pitch: heard in a few words)
+        const bool heard = sounds && !e.empty && (!voice || madeUpVoicePitch(e.value));
+        const float end = row.x + row.w - (heard ? row.h : 0.0f) - 6 * k; // (cut to fit)
+        if (const SDL_Texture* own = f.box == StoryEditor::Box::Font && !e.empty ? fontLabel(ui, e.value, e.label, layout::popupText * k) : nullptr) { // (a font: its name in it)
+            drawFontWords(ui, own, e.label, tx, row.y + row.h / 2, end - tx);
+        } else {
+            ui.textFitted(e.label, tx, row.y + row.h / 2, layout::popupText, e.empty ? theme::dim : theme::text, end - tx);
+        }
+        if (heard) // (heard, not picked; a named sound's file)
+            listenButton(ui, play, voice ? std::string(kMadeUpVoiceHeard) + lower(e.value) : d.cachedSound(engine.assets(), d.soundFileOf(e.value)), true);
         if (ui.click(row)) pop.clicked = colours ? pop.changed(e.value) : e.value; // (a gradient's: the colour the wheel is on)
     }
     if (p.keyPick && p.keyed) pop.clicked = colours ? pop.changed(entries[*p.keyed].value) : entries[*p.keyed].value; // (Enter on it)
@@ -231,6 +247,7 @@ void Developer::drawPopup(DeveloperUi& ui) {
     if (gridH > 0.0f) drawColourWheel(pop);
     clipped.reset(); // (its outline: over the edge)
     draw::outline(r, box, kAccent);
+    drawPickPreview(ui, box, f, pointed ? entries[*pointed].value : f.value.empty() ? f.hint : f.value); // (beside it)
     d.clicked = false; // (a click on it, but on nothing in it)
     d.wheel = 0.0f;
     if (!pop.clicked) return;
@@ -376,6 +393,82 @@ void Developer::drawColourWheel(PopupFrame& pop) {
         const float markY = bar.y + (1.0f - where) * bar.h;
         draw::rect(r, {bar.x - 2 * k, markY - 1.5f * k, bar.w + 4 * k, 3 * k}, theme::text);
         draw::outline(r, {bar.x - 2 * k, markY - 1.5f * k, bar.w + 4 * k, 3 * k}, {0, 0, 0, 255});
+    }
+}
+
+// Words in a font file (its style: bold, italic, as a font line says it), this big: kept by file, style, words and size; none
+// when the file doesn't open.
+const SDL_Texture* Developer::wordsInFont(DeveloperUi& ui, const std::string& path, std::string_view style, std::string_view words, float size) {
+    DeveloperTools& d = tools;
+    const std::string key = std::format("{}|{}|{}|{}", path, lower(style), words, size);
+    if (const auto kept = d.fontLabels.find(key); kept != d.fontLabels.end()) return kept->second.get();
+    TexturePtr made;
+    if (const FontPtr opened{TTF_OpenFont(path.c_str(), size)}) {
+        TTF_FontStyleFlags flags = TTF_STYLE_NORMAL;
+        if (lower(style).contains("bold")) flags |= TTF_STYLE_BOLD;
+        if (lower(style).contains("italic")) flags |= TTF_STYLE_ITALIC;
+        TTF_SetFontStyle(opened.get(), flags);
+        const std::string text(words);
+        if (const SurfacePtr drawn{TTF_RenderText_Blended(opened.get(), text.c_str(), 0, SDL_Color{240, 240, 245, 255})})
+            made.reset(SDL_CreateTextureFromSurface(ui.r, drawn.get()));
+    }
+    return d.fontLabels.emplace(key, std::move(made)).first->second.get();
+}
+
+// ...a game's font by its name (none: it has no file, the system's).
+const SDL_Texture* Developer::fontLabel(DeveloperUi& ui, std::string_view font, std::string_view words, float size) {
+    const FontCache::File* file = engine.fonts_.file(lower(font));
+    return file ? wordsInFont(ui, file->path, file->style, words, size) : nullptr;
+}
+
+// Those words drawn from `x`, around `middle`, at most `room` wide (cut there, the whole of them in a tip): how wide.
+float Developer::drawFontWords(DeveloperUi& ui, const SDL_Texture* words, std::string_view whole, float x, float middle, float room) {
+    float tw = 0.0f, th = 0.0f;
+    SDL_GetTextureSize(const_cast<SDL_Texture*>(words), &tw, &th);
+    const SDL_FRect src{0.0f, 0.0f, std::min(tw, std::max(0.0f, room)), th};
+    const SDL_FRect at{x, std::round(middle - th / 2), src.w, th};
+    SDL_RenderTexture(ui.r, const_cast<SDL_Texture*>(words), &src, &at);
+    if (tw > room) ui.tip(at, whole);
+    return src.w;
+}
+
+// Beside a box's list (at its right, else at its left), what the entry pointed at shows, else the box's own: an animation
+// playing (again a moment after it ends), a style's sample (its button and words), a screen as the game draws it (over the
+// story at its first line, or its first choice for a choice's options). None for other boxes (an easing's list: the sample
+// under its row follows it), or one the game hasn't.
+void Developer::drawPickPreview(DeveloperUi& ui, const SDL_FRect& list, const StoryEditor::Field& f, std::string_view value) {
+    using B = StoryEditor::Box;
+    DeveloperTools& d = tools;
+    const bool animation = f.box == B::Animation, style = f.box == B::Style, screen = f.box == B::Screen || f.box == B::Textbox;
+    const std::string name = lower(trim(value));
+    if (!(animation || style || screen) || name.empty() || !d.script) return;
+    const auto played = animation ? d.script->animations.find(name) : d.script->animations.end();
+    const auto shown = screen ? d.script->screens.find(name) : d.script->screens.end();
+    if ((animation && played == d.script->animations.end()) || (screen && shown == d.script->screens.end())) return;
+    if (style && name != "default" && !d.editor.defines("style", name) && !std::ranges::contains(d.editor.names(StoryEditor::Pick::Styles), name)) return;
+    const float k = ui.k, gap = layout::gap * k, margin = layout::popupMargin * k, now = engine.toolsTime();
+    const float w = std::round((style ? 400.0f : 288.0f) * k);
+    const float h = style ? std::round(110.0f * k) : std::round(w * engine.canvas().h / engine.canvas().w);
+    SDL_FRect at{list.x + list.w + gap, list.y, w, h};
+    if (at.x + w > d.size.x - margin) at.x = list.x - gap - w; // (no room at its right: at its left)
+    at.x = std::max(margin, at.x);
+    at.y = std::clamp(at.y, margin, std::max(margin, d.size.y - margin - h));
+    const std::string what = std::format("{}:{}", static_cast<int>(f.box), name);
+    if (d.pickShown != what) d.pickShown = what, d.pickShownAt = now; // (another: it plays from its start)
+    draw::rect(ui.r, {at.x + layout::popupShadow * k, at.y + layout::popupShadow * k, at.w, at.h}, {0, 0, 0, 120}); // (a shadow, as the list's)
+    if (animation) {
+        const Animation& a = played->second;
+        const float round = (a.loops() ? a.length : a.total()) + 0.6f; // (a moment after its end, then again)
+        const float t = round > 0.0f ? std::fmod(now - d.pickShownAt, round) : 0.0f;
+        drawAnimationSample(ui, a, std::min(t, a.loops() ? a.length : a.total()), at);
+    } else if (style) {
+        drawStyleSample(ui, name, at, d.pickStyle, engine.canvas().w / 2); // (its words read at half the game's size, or more)
+    } else {
+        if (!d.pickScreenView || &d.pickScreenView->def() != &shown->second) {
+            d.pickScreenView = std::make_unique<ScreenView>(shown->second, engine, true);
+            d.pickSample = sampleGame(hasChoiceOptions(shown->second));
+        }
+        paintScreenSample(ui.r, *d.pickScreenView, d.pickSample, name == "title", at);
     }
 }
 

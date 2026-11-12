@@ -10,9 +10,9 @@
 
 namespace vn {
 
-Script Script::load(const std::string& entry, const FileReader& read, std::string_view builtin) {
+Script Script::load(const std::string& entry, const FileReader& read, std::string_view builtin, const FolderLister& list) {
     Script script;
-    parse::Parser(script, read).run(entry, builtin);
+    parse::Parser(script, read, list).run(entry, builtin);
     std::ranges::stable_sort(script.errors, {}, [](const ScriptError& e) { return std::tie(e.file, e.line); });
     return script;
 }
@@ -25,6 +25,38 @@ std::optional<std::size_t> Script::findScene(std::string_view name) const {
 const CharacterDef* Script::character(std::string_view key) const {
     auto it = characters.find(key);
     return it != characters.end() ? &it->second : nullptr;
+}
+
+std::string Script::visualOf(std::string_view name, std::string_view expression) const {
+    const std::string key = lower(trim(name));
+    if (const auto v = visuals.find(key); v != visuals.end() && !v->second.shows.empty()) return v->second.shows;
+    if (const CharacterDef* def = character(key)) return def->imageOf(lower(trim(expression)));
+    return std::string(name);
+}
+
+Script::SoundPlay Script::soundOf(std::string_view name, std::string_view as) const {
+    SoundPlay out;
+    const std::string key = lower(trim(name));
+    const auto s = sounds.find(key);
+    const NamedSound* own = s != sounds.end() ? &s->second : nullptr;
+    out.named = own != nullptr;
+    out.file = own && !own->plays.empty() ? own->plays : std::string(trim(name));
+    out.type = !as.empty() ? lower(as) : own ? own->type : key.starts_with("music/") ? std::string("music") : std::string("sound"); // (a song: music)
+    const auto t = soundTypes.find(out.type);
+    const SoundType type = t != soundTypes.end() ? t->second : SoundType{};
+    out.slider = type.follows;
+    out.oneAtATime = type.oneAtATime;
+    out.loop = own && own->loop ? *own->loop : type.loop;
+    out.volume = (own && own->volume ? *own->volume : 1.0f) * type.volume;
+    out.fade = own && own->fade ? *own->fade : 0.0f;
+    out.fadeOut = own ? own->fadeOut : std::nullopt;
+    return out;
+}
+
+std::string Script::voiceOf(const cmd::Say& say) const {
+    if (!say.voice.empty()) return soundOf(say.voice, "voice").file; // (a sound named by a sound line: what it plays)
+    const CharacterDef* def = say.character.empty() ? nullptr : character(say.character);
+    return def && !def->voiceFiles.empty() ? def->voiceFiles + "/" + say.voiceId : std::string{};
 }
 
 const Control* Script::control(std::string_view name) const {
@@ -73,6 +105,21 @@ bool spoken(std::string_view line, std::string_view* speaker, std::string_view* 
     if (speaker) *speaker = who;
     if (words) *words = trim(t.substr(colon + 1));
     return true;
+}
+
+std::string_view withoutVoice(std::string_view line, std::optional<std::string>* voice) {
+    const std::string_view t = trim(line);
+    std::size_t at = std::string_view::npos; // (the space before voice=)
+    if (t.ends_with('"')) // voice="a name"
+        if (const auto open = t.rfind(" voice=\""); open != std::string_view::npos && t.find('"', open + 8) == t.size() - 1) at = open;
+    if (at == std::string_view::npos)
+        if (const auto space = t.find_last_of(" \t"); space != std::string_view::npos) {
+            const std::string_view last = t.substr(space + 1);
+            if (last.starts_with("voice=") && !last.contains('"')) at = space;
+        }
+    if (at == std::string_view::npos) return t;
+    if (voice) *voice = unquote(t.substr(at + 7));
+    return trim(t.substr(0, at));
 }
 
 std::string unknownCommand(std::string_view line) {

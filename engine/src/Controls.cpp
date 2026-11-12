@@ -218,7 +218,7 @@ std::string Engine::keyLabel(std::string_view control, std::size_t slot) const {
     return {};
 }
 
-// While a control part waits for a key: Esc cancels, Backspace / Delete empties the slot,
+// While an input for a control's key waits for a key: Esc cancels, Backspace / Delete empties the slot,
 // anything else (a key, possibly with Ctrl/Shift/Alt/Cmd, a mouse button or the wheel) is taken; a controller's button
 // goes in its controller slot. A mouse button coming up goes on to the screens (the press that started the wait ends
 // there: else the list it's in would think it's still being dragged, and the next click would end that).

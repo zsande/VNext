@@ -89,6 +89,12 @@ template <class T> bool hasNamed(const std::vector<T>& all, std::string_view nam
 [[nodiscard]] std::string renamed(const std::string& line, std::string_view from, std::string_view to);
 [[nodiscard]] std::string screenRenamed(const std::string& line, std::string_view from, std::string_view to);
 [[nodiscard]] std::string animationRenamed(std::string line, std::string_view from, std::string_view to);
+// `line` with the sound `from` called `to` wherever a story line or an action plays or stops it (play NAME, stop NAME, play
+// song NAME); `type`: the sound type `from`, played as (play NAME as TYPE) or stopped (stop TYPE).
+[[nodiscard]] std::string soundRenamed(std::string line, std::string_view from, std::string_view to, bool type);
+// `line` with the visual `from` called `to` wherever a story line or an action shows or hides it (show NAME, hide NAME);
+// `type`: the visual type `from`, shown as (show NAME as TYPE).
+[[nodiscard]] std::string visualRenamed(std::string line, std::string_view from, std::string_view to, bool type);
 [[nodiscard]] std::string assetRenamed(const std::string& line, std::string_view folder, const std::string& from, const std::string& to,
                                        const std::vector<std::pair<std::string, std::string>>& bases);
 [[nodiscard]] std::string lineWithVariable(const std::string& line, std::string_view from, std::string_view to);

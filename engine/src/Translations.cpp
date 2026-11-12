@@ -96,7 +96,7 @@ std::string written(const std::string& text) {
 
 constexpr std::string_view kAddedNote = "# Texts added since the file was made."; // (over the texts --translate adds to a file)
 
-// Whether a screen shows what keys do (a control part): then the player's names for the mouse
+// Whether a screen shows what keys do (an input for a control's key): then the player's names for the mouse
 // buttons, controller buttons and gestures show too, so a translation file lists them.
 bool showsKeyNames(const Script& script) {
     return std::ranges::any_of(script.screens, [](const auto& screen) {
@@ -190,8 +190,9 @@ Translation Translation::parse(std::string id, std::string_view source, std::vec
                 error(number, "This line is indented, but there's no text above it to translate."_tr());
             } else if (translated) {
                 error(number, "A text has one line of translation."_tr());
-            } else {
-                t.texts.insert_or_assign(*original, unquote(text));
+            } else { // (one without words: the original shows, and it's a mistake to read nothing in its language)
+                if (const std::string words = unquote(text); trim(words).empty()) error(number, "This translation has no words."_tr());
+                else t.texts.insert_or_assign(*original, words);
                 translated = true;
             }
             continue;

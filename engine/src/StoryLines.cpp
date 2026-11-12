@@ -134,20 +134,18 @@ void Game::revealTo(std::size_t position) {
     const auto before = static_cast<std::size_t>(reveal_);
     reveal_ = static_cast<float>(std::min(position, length_));
     if (!typingSound_.empty() && ctx_.settings.typingSounds && !voiced_ && static_cast<std::size_t>(reveal_) > before && typingSoundTimer_ <= 0.0f && !skipping()) {
-        ctx_.sound.playSound(ctx_.assets.sound(typingSound_), gameSettings().typingSoundVolume);
+        playNamed(typingSound_, gameSettings().typingSoundVolume);
         typingSoundTimer_ = gameSettings().typingSoundGap;
     }
 }
 
 // A line said (or narrated): its speaker's face and textbox (the other textboxes' lines go, unless said together with it), its
-// voice (a voice line just before it, their voice file, or made-up speech), the history, and the story
-// waiting for a click.
+// voice (its own, else their voice file, else made-up speech), the history, and the story waiting for a click.
 void Game::sayLine(const cmd::Say& c, std::size_t here, bool fast) {
     const CharacterDef* def = c.character.empty() ? nullptr : script_.character(c.character);
     takeExpression(c, def);
     if (hiddenLines_ > 0) { // gone past unseen (a choice's return=no)
         --hiddenLines_;
-        pendingVoice_.reset();
         return;
     }
     if (trigger_ && trigger_->lines-- <= 0) { // a choice up for some lines: its time is over
@@ -160,25 +158,28 @@ void Game::sayLine(const cmd::Say& c, std::size_t here, bool fast) {
     together_ = false;
     const std::string box = boxOf(def);
     std::erase_if(others_, [&](const BoxLine& l) { return l.box == box; });
-    lineVoice_ = std::exchange(pendingVoice_, std::nullopt).value_or(LineVoice{}); // a voice line just before it
-    bool voiced = !lineVoice_.file.empty();
-    const std::optional<bool> follows = lineVoice_.textFollows;
-    if (!voiced) ctx_.sound.stopVoice();
     say(def ? def->name : c.speaker, def ? def->nameColour : gameSettings().narrationColour, c.text, def);
-    // Its voice (kept in the history to hear again): the voice line, else their own voice file
-    // for this line (voice_files=), else made-up speech (made_up_voice=).
+    // Its voice (kept in the history to hear again): its own (voice=), else their voice file for this line
+    // (voice_files=), else made-up speech (made_up_voice=). Skipping, none plays; the one before stops.
     HistoryEntry entry{.speaker = speaker_, .colour = speakerColour_, .text = text_, .spans = spans_};
-    if (voiced) entry.voice = ctx_.assets.sound(lineVoice_.file), entry.voiceVolume = lineVoice_.volume;
+    float voiceVolume = 1.0f; // (a named sound's own, and its type's)
+    if (!c.voice.empty()) {
+        const Script::SoundPlay s = script_.soundOf(c.voice.contains('{') ? fillValues(c.voice, lookup_) : c.voice, "voice");
+        entry.voice = ctx_.assets.sound(s.file);
+        voiceVolume = s.volume;
+    }
     else if (def && !def->voiceFiles.empty())
         if (const auto file = ctx_.assets.findSound(std::format("{}/{}", def->voiceFiles, c.voiceId))) entry.voice = *file;
-    if (!voiced && entry.voice.empty() && def && def->madeUpVoice > 0.0f && ctx_.settings.madeUpVoices) entry.madeUpVoice = def->madeUpVoice, entry.madeUpVoiceSpeed = def->madeUpVoiceSpeed;
-    if (!voiced && !fast) {
-        if (!entry.voice.empty()) ctx_.sound.playVoice(entry.voice), voiced = true;
+    if (entry.voice.empty() && def && def->madeUpVoice > 0.0f && ctx_.settings.madeUpVoices) entry.madeUpVoice = def->madeUpVoice, entry.madeUpVoiceSpeed = def->madeUpVoiceSpeed;
+    bool voiced = false;
+    if (!fast) {
+        if (!entry.voice.empty()) ctx_.sound.playVoice(entry.voice, voiceVolume), voiced = true;
         else if (entry.madeUpVoice > 0.0f && !ctx_.settings.readAloud) // (Read aloud: it says the words in its place)
             voiced = madeUpVoice_ = ctx_.sound.playMadeUpVoice(text_, entry.madeUpVoice, entry.madeUpVoiceSpeed);
     }
+    if (!voiced) ctx_.sound.stopVoice();
     voiced_ = voiced;
-    textFollowsVoice_ = voiced && follows.value_or(gameSettings().textFollowsVoices);
+    textFollowsVoice_ = voiced && gameSettings().textFollowsVoices;
     menuPrompt_ = false;
     saidAt_ = here;
     lineRead_ = !ctx_.read.insert(c.id).second;
@@ -210,7 +211,6 @@ void Game::sayAgain(std::size_t page) {
     reveal_ = static_cast<float>(length_);
     passedStops_ = stops_.size();
     noWait_ = false;
-    lineVoice_ = {};
     menuPrompt_ = false;
     saidAt_ = here;
     page_.resize(std::min(page_.size(), page));
@@ -287,7 +287,7 @@ void Game::updateLine(float dt, bool fast) {
     reveal_ = next;
     typing_ = reveal_ < limit;
     if (reveal_ < length || pendingStop() || othersTyping()) return; // (lines said together with it still typing too)
-    // {no_wait} and auto-forward wait for the voice line to end; reading time per letter is only
+    // {no_wait} and auto-forward wait for the line's voice to end; reading time per letter is only
     // added to lines without a voice (the voice gave the player that time).
     const bool talking = voiced_ && ctx_.sound.voicePlaying();
     if (noWait_) {

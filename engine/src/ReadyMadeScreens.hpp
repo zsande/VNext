@@ -37,6 +37,7 @@ inline const std::array kScreenStarts{
     ScreenStart{"phone", "Phone"},
     ScreenStart{"credits", "Credits"},
     ScreenStart{"calendar", "Calendar"},
+    ScreenStart{"relationships", "Relationships"},
     ScreenStart{"input", "Input"},
     ScreenStart{"extras", "Extras"},
     ScreenStart{"gallery", "Gallery"},
@@ -67,6 +68,16 @@ std::string replaced(std::string text, std::string_view from, std::string_view t
 // `controls` with its key and its controller button to change (click it, then press the new one), at the end of the
 // shorter column. Longer than the room down to the buttons at the bottom, the groups scroll under the title.
 std::vector<std::string> settingsScreen(const std::function<bool(std::string_view)>& uses, bool phone, bool timed, std::span<const std::string> controls);
+
+// The buttons of the menus that open other screens (the title screen's, the pause menu's, the extras'), in their
+// order: their words, what they do, their other settings, and the screen they open (none: always there). A menu
+// made has the ones for the screens the game has; one added later gets its button in the menus that have one for it
+// (Developer::addReadyMadeScreen). menuButton: one's line, as the ready-made menus have it.
+struct MenuItem {
+    std::string_view label, action, more, needs;
+};
+std::span<const MenuItem> menuItems(std::string_view menu);
+std::string menuButton(const MenuItem& item);
 
 // A screen to start from, for a 1280 x 720 game, called `as`; `has`: the screens there will be (the
 // title's and the pause menu's buttons open those); `uses`: whether the scripts have these words; `timed`: whether

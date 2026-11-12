@@ -83,6 +83,7 @@ void ScreenView::reset() {
     ringAt_ = Ring::None;
     pageTurns_ = 0.0f;
     typing_.reset();
+    caretBox_.reset();
     keyboardShut_ = false;
     dragging_.reset();
     playing_.reset();
@@ -91,6 +92,7 @@ void ScreenView::reset() {
     scrollDrag_.reset();
     tapping_.reset();
     mouse_ = {-1.0f, -1.0f};
+    laidOutOpen_ = false; // (its words from the last time it was open: not said until it's laid out again)
     opened();
 }
 

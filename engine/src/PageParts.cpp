@@ -1,9 +1,9 @@
 // The pages' page parts: each where its page puts it, or where it was moved (kept as shares of the room over the tools'
 // own part, so it keeps its place in any window), drawn bottom to top, each with an edge in the tools' colours, never
-// over another. With Layout on their edges light up (what a press would move, brighter), and a page part is moved by
-// dragging it and resized by dragging its edges (two that touch: the middle of their border moves both), each side
-// going to the sides near it (what's in the page parts takes no pointer then). The layout is kept in the tools' own
-// folder (layout.txt); Reset puts a page's back.
+// over another. While they're moved (View, Move and resize page parts) their edges light up (what a press would move,
+// brighter), and a page part is moved by dragging it and resized by dragging its edges (two that touch: the middle of
+// their border moves both), each side going to the sides near it (what's in the page parts takes no pointer then). The
+// layout is kept in the tools' own folder (layout.txt); Reset this page's layout puts a page's back.
 #include "DeveloperUi.hpp"
 
 #include <algorithm>
@@ -156,7 +156,7 @@ bool Developer::drawPageParts(DeveloperUi& ui, std::string_view page, std::span<
         }
     }
 
-    // What a press where the pointer is takes (with Layout on): the page part it's in (two side by side: the one it's
+    // What a press where the pointer is takes (while page parts are moved): the page part it's in (two side by side: the one it's
     // on; else the one it's near), whole, or the sides it's near; on the border it shares with another (they touch
     // there), in the middle of their two edges, that one's side too (a little into either: only its own).
     struct Target {
@@ -190,7 +190,7 @@ bool Developer::drawPageParts(DeveloperUi& ui, std::string_view page, std::span<
         }
         return t;
     };
-    // The sides lit (bright) with Layout on: what the pointer would take, or is moving.
+    // The sides lit (bright) while page parts are moved: what the pointer would take, or is moving.
     std::vector<int> lit(shown.size(), 0);
     // A page part caught (by the pointer's press, or the keys): the page's layout kept as it is then (as shares: its
     // page parts keep their places together, as they're shown), and the one caught on top (the one sharing its border under it).
@@ -208,9 +208,9 @@ bool Developer::drawPageParts(DeveloperUi& ui, std::string_view page, std::span<
         d.pagePartOrder[name] = std::move(order);
     };
 
-    // Layout on, by the keys: Tab and Shift+Tab (a controller's shoulders) go to each page part's whole, its right side, its
+    // Moved by the keys: Tab and Shift+Tab (a controller's shoulders) go to each page part's whole, its right side, its
     // bottom, in turn; the arrows (the d-pad) take it as the pointer would, 16 points a step (Shift: 4), across a side; Enter
-    // keeps it there, and so does Esc (B), which leaves Layout when nothing's caught. The pointer stays where it is.
+    // keeps it there, and so does Esc (B), which stops moving them when nothing's caught. The pointer stays where it is.
     DeveloperTools::LayoutKeys& lk = d.layoutKeys;
     const bool heldBefore = d.held;
     const float mouseBefore[]{d.mouseX, d.mouseY};
@@ -387,7 +387,7 @@ bool Developer::drawPageParts(DeveloperUi& ui, std::string_view page, std::span<
         lk.ringBox = lk.handle % 3 == 0 ? at : lk.handle % 3 == 1 ? SDL_FRect{at.x + at.w - t, at.y, t, at.h} : SDL_FRect{at.x, at.y + at.h - t, at.w, t};
     }
 
-    // Layout on: a press moves what it takes (targetAt), and the page part comes to the top.
+    // While page parts are moved: a press moves what it takes (targetAt), and the page part comes to the top.
     if (d.editLayout && !d.pagePartDrag)
         if (const auto t = targetAt(d.mouseX, d.mouseY)) {
             lit[t->part] = t->sides;
@@ -396,7 +396,7 @@ bool Developer::drawPageParts(DeveloperUi& ui, std::string_view page, std::span<
             if (std::exchange(d.clicked, false)) catchAt(*t, {d.mouseX, d.mouseY});
         }
 
-    // The page parts, bottom to top, each over what's under it, with its edge (lit while Layout is on: what's in
+    // The page parts, bottom to top, each over what's under it, with its edge (lit while page parts are moved: what's in
     // them takes no pointer then). Else a press (or the pointer, while nothing's held) goes only to the one it's on,
     // the one on top; while something's dragged, every page part sees the pointer.
     const bool onlyTop = !d.held || d.clicked;
@@ -484,12 +484,13 @@ SDL_FPoint Developer::pagePartChrome(float k) const {
 
 Developer::PagePart Developer::listPagePart(DeveloperUi& ui, std::string_view id, std::string heading, const SDL_FRect& at, std::size_t rows,
                                       std::function<bool(const ListRoom&)> draw) {
-    const float k = ui.k, rowsH = static_cast<float>(rows) * (layout::gap + layout::buttonH) * k; // (a few of its rows, and its buttons)
+    const float k = ui.k, rowsH = static_cast<float>(rows) * (layout::gap + layout::buttonH) * k; // (one of its rows, and its buttons: shorter, its
+                                                                                                    // list scrolls, not the part by a few pixels)
     return {.id = id,
             .heading = std::move(heading),
             .at = at,
             .draw = [&ui, rows, draw = std::move(draw)](const SDL_FRect& box) { return draw(ui.listRoom(box, rows)); },
-            .least = {layout::pagePartListW * k, layout::pagePartListRows * layout::listItemH * k + rowsH}};
+            .least = {layout::pagePartListW * k, layout::listItemH * k + rowsH}};
 }
 
 Developer::PagePart Developer::formPagePart(DeveloperUi& ui, std::string_view id, std::string heading, const SDL_FRect& at, bool filled,
@@ -521,7 +522,7 @@ void Developer::readLayout() {
 
 void Developer::saveLayout() {
     const DeveloperTools& d = tools;
-    std::string out = "# Where the developer tools' page parts are: VNext writes this as they're moved (the Layout button).\n";
+    std::string out = "# Where the developer tools' page parts are: VNext writes this as they're moved (View, Move and resize page parts).\n";
     for (const auto& [key, at] : d.pageParts) out += std::format("part {} {:.4f} {:.4f} {:.4f} {:.4f}\n", key, at.x, at.y, at.w, at.h);
     for (const auto& [page, order] : d.pagePartOrder)
         if (!order.empty()) {

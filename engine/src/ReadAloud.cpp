@@ -72,13 +72,13 @@ std::string ScreenView::pointedText(bool mouse) {
             if (def_->elements[j].kind == ElementKind::Text && inside(j, at)) texts.push_back(words(j));
         return sayAll(texts);
     }
-    if (el.kind != ElementKind::Button && el.kind != ElementKind::Slider && el.kind != ElementKind::Input && el.kind != ElementKind::Control) {
+    if (!el.pressedAsButton() && el.kind != ElementKind::Slider && el.kind != ElementKind::Input && el.kind != ElementKind::Control) {
         const ElementState& st = state_[at]; // (what the part draws itself: the flowchart's points: its item's words)
         if (i < st.items.size()) sayAfter(out, st.items[i].text());
         if (i < st.extra.size()) sayAfter(out, st.extra[i].text());
         return out;
     }
-    // A button, a slider, a box: the texts beside it in the part it's in. Its row: the ones it's level with (a label at
+    // A button (a visual too, an icon), a slider, a box: the texts beside it in the part it's in. Its row: the ones it's level with (a label at
     // their left); in a part, a label over it, close by, when there's none at its left.
     auto boxOf = [&](std::size_t j) {
         SDL_FRect b = rectOf(j);
@@ -94,7 +94,7 @@ std::string ScreenView::pointedText(bool mouse) {
     float overGap = me.h, underGap = me.h * 0.5f;
     for (std::size_t j = 0; j < def_->elements.size(); ++j) {
         const ElementKind kind = def_->elements[j].kind;
-        const bool text = kind == ElementKind::Text, part = kind == ElementKind::Button || kind == ElementKind::Slider || kind == ElementKind::Input || kind == ElementKind::Control;
+        const bool text = kind == ElementKind::Text, part = def_->elements[j].pressedAsButton() || kind == ElementKind::Slider || kind == ElementKind::Input || kind == ElementKind::Control;
         if (def_->elements[j].parent != el.parent || !(text || part) || !live(j) || (text && (words(j).empty() || loneLetter(words(j))))) continue;
         const SDL_FRect b = boxOf(j);
         if (std::min(b.y + b.h, me.y + me.h) - std::max(b.y, me.y) > 0.5f * std::min(b.h, me.h)) {
@@ -121,10 +121,19 @@ std::string ScreenView::pointedText(bool mouse) {
     std::optional<std::size_t> label = !row.empty() && row.front().first < me.x ? std::optional(row.front().second) : over;
     std::string own = words(at);
     if (const std::string letter = keyLetter(el); el.text.empty() && !letter.empty()) { // (an on-screen keyboard's key: its letter, or a sign's name)
-        static constexpr std::pair<std::string_view, std::string_view> kSigns[]{{"'", "Apostrophe"}, {",", "Comma"}, {".", "Full stop"}, {"-", "Hyphen"}};
+        static constexpr std::pair<std::string_view, std::string_view> kSigns[]{
+            {"'", "Apostrophe"},    {",", "Comma"},          {".", "Full stop"},         {"-", "Hyphen"},          {"`", "Backtick"},
+            {"=", "Equals"},        {"[", "Left square bracket"}, {"]", "Right square bracket"},     {"\\", "Backslash"},     {";", "Semicolon"},
+            {"/", "Slash"},         {"~", "Tilde"},          {"!", "Exclamation mark"},  {"@", "At sign"},         {"#", "Hash"},
+            {"$", "Dollar"},        {"%", "Percent"},        {"^", "Caret"},             {"&", "Ampersand"},       {"*", "Asterisk"},
+            {"(", "Left parenthesis"}, {")", "Right parenthesis"},  {"_", "Underscore"},        {"+", "Plus"},            {"{", "Left brace"},
+            {"}", "Right brace"},   {"|", "Vertical bar"},   {":", "Colon"},             {"\"", "Quotation mark"}, {"<", "Less than"},
+            {">", "Greater than"},  {"?", "Question mark"}};
         const auto sign = std::ranges::find(kSigns, std::string_view(letter), &std::pair<std::string_view, std::string_view>::first);
         return sign != std::end(kSigns) ? engine_.script().translated(sign->second) : letter;
     }
+    if (const auto* u = el.actions.size() == 1 ? std::get_if<cmd::Ui>(&el.actions.front()) : nullptr; u && u->verb == "type" && (u->arg == "left" || u->arg == "right"))
+        return engine_.script().translated(u->arg == "left" ? "Left" : "Right"); // (the caret's keys: their arrows aren't words)
     if (const auto* u = el.actions.size() == 1 ? std::get_if<cmd::Ui>(&el.actions.front()) : nullptr; u && u->verb == "type" && u->arg == "done")
         if (const std::string typed = engine_.keyboardText(); !typed.empty()) own += ". " + typed; // (Done: with what the box holds, to hear it)
     if (!label && (!hasWords(own) || loneLetter(own)) && under) { // (an icon: the caption under it names it, not its letter)
@@ -151,6 +160,7 @@ std::string ScreenView::pointedText(bool mouse) {
 }
 
 std::string ScreenView::openingText() {
+    if (!laidOutOpen_) return {}; // (opened again, not drawn yet: what it held the last time, not now)
     const bool phone = std::ranges::any_of(source_->elements, [](const Element& el) { return el.kind == ElementKind::Container && !el.option("app").empty(); });
     const std::string app = phone ? engine_.phoneApp(*source_) : std::string{};
     std::vector<std::string> texts;

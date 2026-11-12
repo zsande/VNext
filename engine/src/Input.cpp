@@ -45,7 +45,7 @@ std::vector<ScreenView*> Engine::keyViews() {
     return out;
 }
 
-// The move actions: a slider pointed at changes (left and right), else the nearest part that way on the screens the
+// The move actions: a slider pointed at changes (left and right; a vertical one up and down), else the nearest part that way on the screens the
 // keys work on is pointed at (none pointed at yet: the first one); with none that way, what scrolls there scrolls.
 void Engine::moveKeys(int dx, int dy) {
     const std::vector<ScreenView*> views = keyViews();
@@ -56,7 +56,7 @@ void Engine::moveKeys(int dx, int dy) {
             from = v;
             break;
         }
-    if (from && dx != 0 && from->adjustPointed(dx)) return;
+    if (from && from->adjustPointed(dx, dy)) return;
     if (!from) {
         for (ScreenView* v : views)
             if (v->pointFirst()) return;
@@ -246,7 +246,9 @@ SDL_AppResult Engine::event(SDL_Event& e) {
     case SDL_EVENT_FINGER_DOWN:
     case SDL_EVENT_FINGER_MOTION:
     case SDL_EVENT_FINGER_UP:
-    case SDL_EVENT_FINGER_CANCELED:
+    case SDL_EVENT_FINGER_CANCELED: // (a touchscreen's fingers; a trackpad's come as the pointer, its clicks and the wheel already: its
+                                    // fingers' own places are on the pad, not the window, so they'd click and scroll elsewhere)
+        if (SDL_GetTouchDeviceType(e.tfinger.touchID) != SDL_TOUCH_DEVICE_DIRECT) return SDL_APP_CONTINUE;
         return touch(e);
     case SDL_EVENT_GAMEPAD_ADDED:
         if (SDL_Gamepad* pad = SDL_OpenGamepad(e.gdevice.which)) pads_.emplace_back(pad);
@@ -264,10 +266,9 @@ SDL_AppResult Engine::event(SDL_Event& e) {
     if (e.type == SDL_EVENT_MOUSE_MOTION) ++pointerMoves_;
     if (isPress(e) || e.type == SDL_EVENT_MOUSE_WHEEL) padInUse_ = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN; // (what the player plays with now)
     // Who's in charge: the pointer once it moves or clicks, the keys once one's pressed (a controller's too); the wheel
-    // changes neither. A real keyboard's key: there's one (the on-screen one isn't wanted then).
+    // changes neither.
     if (e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) keysInCharge_ = false;
     else if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) keysInCharge_ = true;
-    if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_TEXT_INPUT) keyboardUsed_ = true;
     if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP && padRepeat_ && padRepeat_->button == e.gbutton.button) padRepeat_.reset(); // (let go: it stops going again)
     switch (e.type) {
     case SDL_EVENT_QUIT:
@@ -314,7 +315,7 @@ SDL_AppResult Engine::event(SDL_Event& e) {
         return done();
     }
 
-    if (rebinding_ && captureKey(e)) return done(); // a control part is waiting for a key
+    if (rebinding_ && captureKey(e)) return done(); // an input for a control's key is waiting for a key
 
     // The on-screen keyboard is for playing without a keyboard: a real one's key puts it away (Esc only that: another does
     // what it does too), and so does a controller's B on top of it; one of its own buttons with that key presses that.

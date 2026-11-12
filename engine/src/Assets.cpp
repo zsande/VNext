@@ -110,6 +110,8 @@ std::optional<std::string> Assets::find(std::string_view folder, std::string_vie
 }
 
 std::string Assets::ownName(const std::string& folder, std::string_view name, std::span<const std::string_view> types) const {
+    if (const auto slash = name.rfind('/'); slash != std::string_view::npos) // (one in a folder in it, gallery/beach: as that folder has it)
+        return std::string(name.substr(0, slash + 1)) + ownName(folder + std::string(name.substr(0, slash + 1)), name.substr(slash + 1), types);
     for (const std::string_view ext : types) // (as written: no need to look further)
         if (exists(path(std::format("{}{}{}", folder, name, ext)))) return std::string(name);
     auto [names, fresh] = ownNames_.try_emplace(folder);
@@ -256,6 +258,7 @@ void Assets::trim() {
 }
 
 bool Assets::preload(std::string_view name, unsigned looks) {
+    if (!hasImage(name) && findMovie(name)) return false; // (a movie: it plays where an image goes)
     if (const auto sub = subImages_.find(lower(name)); sub != subImages_.end()) name = sub->second.image;
     const auto atlas = frames_.find(lower(name));
     std::vector<std::string> files{atlas == frames_.end() ? std::string(name) : atlases_[atlas->second.first].image};

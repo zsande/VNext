@@ -12,22 +12,50 @@ namespace vn {
 
 ScreenView::Grid ScreenView::grid(const Element& el, Grid d) const {
     Grid g{.columns = std::max(1, static_cast<int>(el.number("columns", static_cast<float>(d.columns))))};
-    const float gap = el.number("spacing", std::numeric_limits<float>::quiet_NaN());
-    const SDL_FRect box = boxOf(static_cast<std::size_t>(&el - def_->elements.data()));
-    g.gapX = share(el, "spacing_across", true, std::isnan(gap) ? d.gapX : gap * box.w);
-    g.gapY = share(el, "spacing_down", false, std::isnan(gap) ? d.gapY : gap * box.h);
+    const SDL_FRect box = boxOf(indexOf(el));
+    g.gapX = amount(el, "spacing_across", box.w).value_or(amount(el, "spacing", box.w).value_or(d.gapX));
+    g.gapY = amount(el, "spacing_down", box.h).value_or(amount(el, "spacing", box.h).value_or(d.gapY));
     const auto columns = static_cast<float>(g.columns);
     const float room = el.kind == ElementKind::Container ? 0.0f : barRoom(indexOf(el)); // (a list's items clear of its scrollbar; a container's parts are where they're put)
-    g.itemW = share(el, "item_width", true, d.itemW > 0 ? d.itemW : (rectOf(indexOf(el)).w - room - g.gapX * (columns - 1)) / columns);
+    const float wide = rectOf(indexOf(el)).w - room;
+    g.itemW = share(el, "item_width", true, d.itemW > 0 ? d.itemW : (wide - g.gapX * (columns - 1)) / columns);
     g.itemH = share(el, "item_height", false, d.itemH);
+    // (a list with item_width= and no columns=: as many as come nearest to it in its width, at least one, each as wide as
+    // that leaves, its shape kept: three across a screen, one in a phone)
+    if (el.kind == ElementKind::Container && !el.props.contains("columns") && el.props.contains("item_width") && g.itemW > 0.0f) {
+        g.columns = std::max(1, static_cast<int>(std::lround((wide + g.gapX) / (g.itemW + g.gapX))));
+        const float w = std::max(1.0f, (wide - g.gapX * static_cast<float>(g.columns - 1)) / static_cast<float>(g.columns));
+        if (g.itemH > 0.0f) g.itemH *= w / g.itemW;
+        g.itemW = w;
+    }
     return g;
 }
 
 float ScreenView::share(const Element& el, std::string_view key, bool across, float fallback) const {
-    const float v = el.number(key, std::numeric_limits<float>::quiet_NaN());
-    if (std::isnan(v)) return fallback;
-    const SDL_FRect box = boxOf(static_cast<std::size_t>(&el - def_->elements.data()));
-    return v * (across ? box.w : box.h);
+    const SDL_FRect box = boxOf(indexOf(el));
+    return amount(el, key, across ? box.w : box.h).value_or(fallback);
+}
+
+std::optional<float> ScreenView::amount(const Element& el, std::string_view key, float whole) {
+    const std::string v = el.option(key);
+    if (v.empty()) return std::nullopt;
+    if (lower(v).ends_with("px")) return parseNumber(std::string_view(v).substr(0, v.size() - 2));
+    if (const auto n = parseNumber(v)) return *n * whole;
+    return std::nullopt;
+}
+
+float ScreenView::sized(std::size_t index, bool across) const {
+    const Element& el = def_->elements[index];
+    const std::optional<float>& v = across ? el.shareWidth : el.shareHeight;
+    if (!v) return 0.0f;
+    const float of = shareOf(index, across);
+    if (!(across ? el.pixelWidth : el.pixelHeight)) return *v * of;
+    return across ? std::min(*v, of) : *v; // (pixels: a width no wider than the box)
+}
+
+bool ScreenView::fillsRest(std::size_t index, bool down) const {
+    const Element& el = def_->elements[index];
+    return isBox(el.kind) && !el.fitsParts() && !isItemBox(index) && !(down ? el.shareHeight : el.shareWidth).has_value();
 }
 
 SDL_FRect ScreenView::boxOf(std::size_t index) const {
@@ -63,28 +91,44 @@ void ScreenView::layout() {
             ++f.column;
             return;
         }
-        // (a container without a size: all of its box; with fit=parts, as big as its parts, once they're placed)
+        // (a container without a size: all of its box, or in a box whose parts go one after another, the room the
+        // others leave that way, shared by the ones like it; with fit=parts, as big as its parts, once they're placed)
         const bool container = isBox(el.kind), parts = container && el.fitsParts();
-        const float w = el.shareWidth ? *el.shareWidth * shareOf(i, true) : parts && st.ownW >= 0.0f ? st.ownW : container ? box.w : 0.0f;
-        const float h = el.shareHeight ? *el.shareHeight * shareOf(i, false) : parts && st.ownH >= 0.0f ? st.ownH : container ? box.h : 0.0f;
+        bool down = true;
+        const bool stacked = el.parent >= 0 && stacks(p, &down);
+        const float rest = stacked && fillsRest(i, down) ? state_[p].rest : -1.0f;
+        Flow& f = flows[el.parent >= 0 ? p : i];
+        const float w = el.shareWidth ? sized(i, true) : parts && st.ownW >= 0.0f ? st.ownW : container ? (!down && rest >= 0.0f ? rest : box.w) : 0.0f;
+        const float h = el.shareHeight ? sized(i, false) : parts && st.ownH >= 0.0f ? st.ownH : container ? (down && rest >= 0.0f ? rest : box.h) : 0.0f;
         rectOf(i) = {std::round(box.x + placeEdge(el.placeX.value_or(-1.0f), w, box.w)), std::round(box.y + placeEdge(-el.placeY.value_or(1.0f), h, box.h)),
                    std::round(w), std::round(h)}; // (on whole pixels: sharp)
         sizeOwn(i);
-        if (bool down = true; el.parent >= 0 && stacks(p, &down)) { // one after the one before it (its place the other way)
+        if (stacked) { // one after the one before it (its place the other way)
             if (left[i] || !shows(i)) {
                 left[i] = 1;
                 return;
             }
             const Element& in = elements[p];
             const SDL_FRect outer = boxOf(p);
-            const float all = in.number("spacing", std::numeric_limits<float>::quiet_NaN());
-            const float gap = share(in, down ? "spacing_down" : "spacing_across", !down, std::isnan(all) ? 0.0f : all * (down ? outer.h : outer.w));
-            Flow& f = flows[p]; // (one that takes no room, an empty list, takes no gap either)
+            const float gap = down ? amount(in, "spacing_down", outer.h).value_or(amount(in, "spacing", outer.h).value_or(0.0f))
+                                   : amount(in, "spacing_across", outer.w).value_or(amount(in, "spacing", outer.w).value_or(0.0f));
+            // (one that takes no room, an empty list, takes no gap either)
             if (down) rectOf(i).y = std::round(box.y + f.y), f.y += rectOf(i).h > 0.0f ? rectOf(i).h + gap : 0.0f;
-            else rectOf(i).x = std::round(box.x + f.x), f.x += rectOf(i).w > 0.0f ? rectOf(i).w + gap : 0.0f;
+            else {
+                // (onto the next row when it doesn't fit what's left of this one: in a box with a width of its own that
+                // doesn't scroll; its rows one under another, as far apart as its parts going down would be)
+                if (f.x > 0.0f && f.x + rectOf(i).w > box.w + 0.5f && !(in.fitsParts() && !in.shareWidth) && !in.scrolls()) {
+                    f.y += f.rowH + amount(in, "spacing_down", outer.h).value_or(amount(in, "spacing", outer.h).value_or(0.0f));
+                    f.x = f.rowH = 0.0f;
+                }
+                rectOf(i).x = std::round(box.x + f.x);
+                rectOf(i).y += f.y;
+                f.rowH = std::max(f.rowH, rectOf(i).h);
+                f.x += rectOf(i).w > 0.0f ? rectOf(i).w + gap : 0.0f;
+            }
         }
     };
-    for (int pass = 0; pass < 4; ++pass) {
+    for (int pass = 0; pass < 6; ++pass) {
         flows.assign(n, {});
         left.assign(n, 0);
         for (std::size_t i = 0; i < n; ++i) place(i);
@@ -112,9 +156,9 @@ void ScreenView::layout() {
                 if (flow && down) {
                     h = std::max(h, b.y + b.h - rectOf(i).y);
                     w = std::max(w, b.w);
-                } else if (flow) {
+                } else if (flow) { // (its rows, when they go onto more than one: down to the last)
                     w = std::max(w, b.x + b.w - rectOf(i).x);
-                    h = std::max(h, b.h);
+                    h = std::max(h, b.y + b.h - rectOf(i).y);
                 } else {
                     w = std::max(w, b.w);
                     h = std::max(h, b.h);
@@ -122,6 +166,30 @@ void ScreenView::layout() {
             }
             ElementState& st = state_[i];
             if (std::abs(w - st.ownW) > 0.5f || std::abs(h - st.ownH) > 0.5f) st.ownW = w, st.ownH = h, changed = true;
+        }
+        // A box whose parts go one after another: the room the parts filling it have that way (what its others and the
+        // gaps leave, shared; one as big as its parts that way has none to fill).
+        for (std::size_t i = 0; i < n; ++i) {
+            bool down = true;
+            if (!stacks(i, &down)) continue;
+            const Element& el = elements[i];
+            float rest = -1.0f;
+            if (!el.fitsParts() || (down ? el.shareHeight : el.shareWidth)) {
+                const SDL_FRect outer = boxOf(i);
+                const float gap = down ? amount(el, "spacing_down", outer.h).value_or(amount(el, "spacing", outer.h).value_or(0.0f))
+                                       : amount(el, "spacing_across", outer.w).value_or(amount(el, "spacing", outer.w).value_or(0.0f));
+                float used = 0.0f;
+                int fillers = 0, placed = 0;
+                for (std::size_t j = i + 1; j < n && within(j, i); ++j) {
+                    if (elements[j].parent != static_cast<int>(i) || left[j]) continue;
+                    const float size = down ? rectOf(j).h : rectOf(j).w;
+                    if (fillsRest(j, down)) ++fillers, ++placed;
+                    else if (size > 0.0f) used += size, ++placed;
+                }
+                const float room = down ? rectOf(i).h : rectOf(i).w;
+                if (fillers > 0) rest = std::max(0.0f, (room - used - gap * static_cast<float>(std::max(0, placed - 1))) / static_cast<float>(fillers));
+            }
+            if (std::abs(rest - state_[i].rest) > 0.5f) state_[i].rest = rest, changed = true;
         }
         if (!changed) break;
     }
@@ -283,17 +351,17 @@ void ScreenView::sizeOwn(std::size_t index) {
     if ((el.shareWidth && el.shareHeight) || (el.kind != ElementKind::Image && el.kind != ElementKind::Text)) return;
     SDL_FPoint size{0.0f, 0.0f};
     if (el.kind == ElementKind::Image) { // (as big as its image; with a width but no height, or the other way, its shape kept)
-        const std::string name = el.text.contains('{') ? interpolate(el.text) : el.text;
+        const std::string name = engine_.script().visualOf(el.text.contains('{') ? interpolate(el.text) : el.text, el.option("expression"));
         if (!name.empty() && !parseColour(name, &engine_.palette()) && !parseGradient(name, &engine_.palette()))
             if (const Image pic = engine_.image(name)) {
                 size = {pic.w(), pic.h()};
-                if (el.shareWidth && pic.w() > 0.0f) size.y = *el.shareWidth * shareOf(index, true) * pic.h() / pic.w();
-                else if (el.shareHeight && pic.h() > 0.0f) size.x = *el.shareHeight * shareOf(index, false) * pic.w() / pic.h();
+                if (el.shareWidth && pic.w() > 0.0f) size.y = sized(index, true) * pic.h() / pic.w();
+                else if (el.shareHeight && pic.h() > 0.0f) size.x = sized(index, false) * pic.w() / pic.h();
             }
     } else { // (its words wrapped to its width=, or to width_at_most= and as wide as their lines then; else as they come)
         const Style& s = styleOf(index);
         const float most = el.shareWidth ? 0.0f : widest(index);
-        const float wrap = el.shareWidth ? std::max(1.0f, *el.shareWidth * shareOf(index, true) - 2 * s.padding) : most > 0.0f ? std::max(1.0f, most - 2 * s.padding) : 0.0f;
+        const float wrap = el.shareWidth ? std::max(1.0f, sized(index, true) - 2 * s.padding) : most > 0.0f ? std::max(1.0f, most - 2 * s.padding) : 0.0f;
         st.text.set(styleFont(s), textOf(index, wrap).text, wrap, s.lineSpacing);
         st.ownWords = !el.shareWidth && most <= 0.0f;
         const SDL_FPoint words = st.text.size();
@@ -305,9 +373,9 @@ void ScreenView::sizeOwn(std::size_t index) {
     if (!el.shareHeight) rectOf(index).h = std::round(size.y), rectOf(index).y = std::round(box.y + placeEdge(-el.placeY.value_or(1.0f), rectOf(index).h, box.h));
 }
 
-// A button without a width (or a height) is as big as the image it shows now, or (with none) its
-// words and its padding, and placed by that size. It's clicked within its usual size as well, so a
-// smaller pointed-at or pressed image can't let the pointer slip out of it.
+// A text that's clicked (a button) without a width (or a height) is as big as the image it shows now, or (with none) its
+// words and its padding as a text's are (wrapped to width_at_most=, lines= at most), and placed by that size. It's
+// clicked within its usual size as well, so a smaller pointed-at or pressed image can't let the pointer slip out of it.
 void ScreenView::sizeButton(std::size_t index) {
     const Element& el = def_->elements[index];
     ElementState& st = state_[index];
@@ -323,10 +391,13 @@ void ScreenView::sizeButton(std::size_t index) {
                 st.ownWords = false;
                 return {pic.w(), pic.h()};
             }
-        st.text.set(styleFont(styleOf(index)), rich(el.text).text, 0.0f, styleOf(index).lineSpacing);
-        st.ownWords = !el.shareWidth;
+        const Style& s = styleOf(index);
+        const float most = el.shareWidth ? 0.0f : widest(index);
+        const float wrap = el.shareWidth ? std::max(1.0f, sized(index, true) - 2 * s.padding) : most > 0.0f ? std::max(1.0f, most - 2 * s.padding) : 0.0f;
+        st.text.set(styleFont(s), textOf(index, wrap).text, wrap, s.lineSpacing);
+        st.ownWords = !el.shareWidth && most <= 0.0f;
         const SDL_FPoint words = st.text.size();
-        return {words.x + 2 * styleOf(index).padding, words.y + 2 * styleOf(index).padding};
+        return {(most > 0.0f ? std::ceil(words.x) + 1.0f : words.x) + 2 * s.padding, words.y + 2 * s.padding};
     };
     const SDL_FRect box = boxOf(index);
     auto placed = [&](SDL_FPoint size) {
@@ -358,7 +429,7 @@ SDL_FRect ScreenView::bounds(std::size_t index) {
     if (box.w > 0.0f && box.h > 0.0f) return box;
     SDL_FPoint own = state_[index].text.size();
     if (el.kind == ElementKind::Image)
-        if (const Image pic = engine_.image(el.text.contains('{') ? interpolate(el.text) : el.text)) own = {pic.w(), pic.h()};
+        if (const Image pic = engine_.image(engine_.script().visualOf(el.text.contains('{') ? interpolate(el.text) : el.text, el.option("expression")))) own = {pic.w(), pic.h()};
     if (box.w <= 0.0f) box.w = own.x > 0.0f ? own.x : 120.0f;
     if (box.h <= 0.0f) box.h = own.y > 0.0f ? own.y : 40.0f;
     return box;

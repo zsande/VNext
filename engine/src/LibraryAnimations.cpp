@@ -49,10 +49,6 @@ std::vector<std::string> startLines(const AnimationStart& start) {
     return out;
 }
 
-constexpr std::pair<std::string_view, Ease> kEaseNames[]{{"linear", Ease::Linear}, {"in", Ease::In},         {"out", Ease::Out},
-                                                         {"inout", Ease::InOut},   {"bounce", Ease::Bounce}, {"spring", Ease::Spring},
-                                                         {"overshoot", Ease::Overshoot}};
-
 bool byAmount(std::string_view key) { return key == "left" || key == "right" || key == "up" || key == "down"; }
 
 // A new change's easing on the timeline's row `row`: as the scripts have it for the row's first key.
@@ -94,8 +90,8 @@ Animation animationOf(const StoryEditor::Timeline& t, int times, const Palette& 
 
 // What a change goes to as its box shows it: an amount with its way (5% left), a percent as one.
 std::string barShown(const StoryEditor::Bar& b) {
-    if (byAmount(b.key)) return percentText(b.value) + " " + b.key;
-    if (b.key == "opacity" || b.key == "zoom" || b.key == "wipe") return percentText(b.value);
+    if (byAmount(b.key)) return percentRead(b.value) + " " + b.key;
+    if (b.key == "opacity" || b.key == "zoom" || b.key == "wipe") return percentRead(b.value);
     return b.value;
 }
 
@@ -246,7 +242,17 @@ void Developer::drawAnimation(DeveloperUi& ui, const StoryEditor::Definition& gi
     if (b.key == "wipe") // (where it shows first: the image's darkest parts)
         change.insert(change.begin() + 1, {.name = "Shape"_text, .value = b.shape, .box = StoryEditor::Box::Shape, .hint = "None"_hint});
     const std::string changeId = std::format("{}:change", id);
-    if (const auto edit = drawForm(ui, changeId, change, room.x, room.w, labelColumn(ui, least, room.w, {change}), y)) {
+    const float changeLabelW = labelColumn(ui, least, room.w, {change});
+    const auto edit = drawForm(ui, changeId, change, room.x, room.w, changeLabelW, y);
+    // Its easing as a dot going across (the one pointed at, else its own), under its row.
+    const auto& pointed = d.choicePointed;
+    const std::string easeShown = pointed.id == changeId + ":Easing" && d.textFrame - pointed.frame <= 1 ? pointed.word : b.ease.empty() ? std::string(usualEase(b.key)) : lower(b.ease);
+    if (const auto ease = std::ranges::find(kEaseNames, std::string_view(easeShown), &std::pair<std::string_view, Ease>::first); ease != std::end(kEaseNames)) {
+        if (d.pickShown != "ease:" + easeShown) d.pickShown = "ease:" + easeShown, d.pickShownAt = engine.toolsTime();
+        drawEasingSample(ui, ease->second, d.pickShownAt, {room.x + changeLabelW, y, room.w - changeLabelW, std::round(48.0f * k)});
+        y += std::round(48.0f * k) + rowGap;
+    }
+    if (edit) {
         StoryEditor::Bar changed = b;
         if (edit->name == "To") changed = barWritten(changed, row, edit->value);
         else if (edit->name == "Shape") changed.shape = std::string(trim(edit->value));
@@ -469,6 +475,7 @@ float Developer::drawTimeline(DeveloperUi& ui, const StoryEditor::Definition& de
     }
     // The keys: Delete takes the chosen change away, Esc lets it go.
     if (v.bar && *v.bar < bars.size() && d.focus.empty() && timeline.ok) {
+        d.acts.remove = true;
         bool removed = false;
         std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) {
             if (d.isKey(key, ToolKey::Back)) {
@@ -522,6 +529,20 @@ SDL_FRect Developer::drawAnimationSample(DeveloperUi& ui, const Animation& a, fl
     return box;
 }
 
+// An easing's sample: a dot going across a track to its end as that easing has it (a bounce landing, a spring past its end
+// and back: the room after it), then a moment at its end, and again (since `since`).
+void Developer::drawEasingSample(DeveloperUi& ui, Ease ease, float since, const SDL_FRect& box) {
+    SDL_Renderer* r = ui.r;
+    const float k = ui.k, pad = std::round(box.h * 0.5f), dot = std::round(box.h * 0.18f);
+    const float t = std::fmod(std::max(0.0f, engine.toolsTime() - since), 1.6f); // (a second across, then a moment)
+    const float across = (box.w - 2 * pad) / 1.4f, mid = std::round(box.y + box.h / 2); // (room past its end: a spring's first swing goes 1.37 of the way)
+    draw::rect(r, box, kBox);
+    draw::rect(r, {box.x + pad, mid - std::round(1 * k), across, std::round(2 * k)}, kEdge); // (the track: from its start to its end)
+    draw::rect(r, {box.x + pad + across - std::round(1 * k), mid - dot, std::round(2 * k), 2 * dot}, kEdge);
+    draw::circle(r, box.x + pad + eased(ease, std::min(t, 1.0f)) * across, mid, dot, kAccent);
+    draw::outline(r, box, kEdge);
+}
+
 // + New animation: the animations to start from, as + New screen's screens are listed, with the one pointed
 // at (else the last one pointed at) playing over them. A click adds it, named as it is (fade_in_2 when there's
 // one already), and opens it.
@@ -546,7 +567,7 @@ void Developer::drawNewAnimationForm(DeveloperUi& ui, const SDL_FRect& right) {
     for (std::size_t i = 0; i < kAnimationStarts.size(); ++i) {
         const AnimationStart& start = kAnimationStarts[i];
         const SDL_FRect button{right.x, y, right.w, buttonH};
-        if (ui.over(button) && ui.over(list) && d.startShown != i) d.startShown = i, d.startShownAt = now;
+        const std::string stop = d.stopKey(d.keyCount); // (its button's: pointed at, by the pointer, the keys or a controller, it plays)
         if (ui.button(button, tr(start.label), false, true, layout::buttonText)) {
             const std::string name = uniqueName(start.name.empty() ? std::string("new_animation") : std::string(start.name), has);
             std::vector<std::string> lines{std::format("animation {}{}", name, start.loops ? " loop=yes" : "")};
@@ -556,6 +577,7 @@ void Developer::drawNewAnimationForm(DeveloperUi& ui, const SDL_FRect& right) {
             d.formScroll = 0.0f;
             return;
         }
+        if (d.keyAt == stop && d.startShown != i) d.startShown = i, d.startShownAt = now;
         y += buttonH + gap;
     }
     ui.formDrawn(list, y);

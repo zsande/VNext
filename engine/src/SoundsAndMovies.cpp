@@ -1,4 +1,4 @@
-// The story's music, sounds, voices and movies, and their captions and subtitles.
+// The story's music and sounds and their captions, and the background movie's subtitles.
 #include "Game.hpp"
 
 #include <SDL3/SDL.h>
@@ -10,49 +10,94 @@
 
 namespace vn {
 
-// Music, a voice or a sound played, or stopped (a voice keeps playing through the next line; a sound on a
-// channel of its own may loop).
+// A sound played as its type plays it (the line saying otherwise): music the song, the one before fading out; a type
+// played one at a time on its own channel, the one there fading out; one played many at once by its name when it has
+// one (a named sound, or one that loops: stopped by it), else as it comes. Or stopped: by its name, or all of a type.
 void Game::play(const cmd::Play& c, bool fast) {
-    const std::string file = c.file.contains('{') ? fillValues(c.file, lookup_) : c.file; // (a value's: sound {message.sound})
-    const std::string path = file.empty() ? std::string{} : ctx_.assets.sound(file);
-    if (!file.empty() && !fast && c.track != cmd::Play::Track::Voice) caption(file, c.track == cmd::Play::Track::Music);
-    switch (c.track) {
-    case cmd::Play::Track::Music:
-        music_ = file;
-        musicVolume_ = c.volume;
-        have(RecordKind::Song, file); // the music room
-        if (file.empty()) ctx_.sound.stopMusic(c.fade);
-        else ctx_.sound.playMusic(path, c.loop, c.fade, c.volume, c.fadeOut);
-        break;
-    case cmd::Play::Track::Voice:
-        if (file.empty()) return ctx_.sound.stopVoice();
-        if (!fast) ctx_.sound.playVoice(path, c.volume);
-        pendingVoice_ = LineVoice{file, c.volume, c.textFollows}; // keep playing through the next line
-        break;
-    case cmd::Play::Track::Sound:
-        if (file.empty()) { // stop sound [NAME]
-            ctx_.sound.stopChannel(c.channel, c.fade);
-            if (c.channel.empty()) loops_.clear();
-            else loops_.erase(c.channel);
-        } else if (c.channel.empty()) {
-            if (!fast) ctx_.sound.playSound(path, c.volume, c.fade, c.fadeOut);
-        } else {
-            ctx_.sound.playChannel(c.channel, path, c.loop, c.volume, c.fade, c.fadeOut.value_or(0.0f));
-            if (c.loop) loops_.insert_or_assign(c.channel, Loop{file, c.volume});
-            else loops_.erase(c.channel);
-        }
-        break;
+    const std::string name = c.name.contains('{') ? fillValues(c.name, lookup_) : c.name; // (a value's: play {message.sound})
+    if (c.stop) return stopSound(lower(trim(name)), c.fade.value_or(0.0f));
+    if (trim(name).empty()) return;
+    Script::SoundPlay s = script_.soundOf(name, c.type);
+    if (c.loop) s.loop = *c.loop;
+    if (c.volume) { // (the line's own, times its type's)
+        const auto t = script_.soundTypes.find(s.type);
+        s.volume = *c.volume * (t != script_.soundTypes.end() ? t->second.volume : 1.0f);
     }
+    if (c.fade) s.fade = *c.fade;
+    if (c.fadeOut) s.fadeOut = c.fadeOut;
+    const std::string path = ctx_.assets.sound(s.file), key = lower(trim(name));
+    if (!fast) caption(name, s.file, s.slider == SoundSlider::Music);
+    if (s.type == "music") { // the song (the music room's: unlocked)
+        music_ = name;
+        musicVolume_ = s.volume;
+        have(RecordKind::Song, s.file);
+        if (lower(s.file) != key) have(RecordKind::Song, name);
+        ctx_.sound.playMusic(path, s.loop, s.fade, s.volume, s.fadeOut);
+        return;
+    }
+    const std::string channel = s.oneAtATime ? "type:" + s.type : s.named || s.loop ? key : std::string{};
+    if (channel.empty()) {
+        if (!fast) ctx_.sound.playSound(path, s.volume, s.fade, s.fadeOut, s.slider, s.type);
+        return;
+    }
+    ctx_.sound.playChannel(channel, path, s.loop, s.volume, s.fade, s.fadeOut.value_or(s.oneAtATime ? 0.5f : 0.0f), s.slider, s.type);
+    if (s.oneAtATime) typePlaying_.insert_or_assign(s.type, key);
+    if (s.loop) loops_.insert_or_assign(channel, Loop{key, s.file, s.volume, s.type});
+    else loops_.erase(channel);
 }
 
-// What a sound (or song) that begins is, as its caption line says: a few seconds at the top (the newest three), on the
-// captions screen (which comes up with them while the player's Captions are on, and whenever the game opens it).
-void Game::caption(std::string_view sound, bool music) {
-    const auto it = script_.captions.find(lower(sound));
+// stop NAME|TYPE: the song (music, or the one playing as music by its name), a type's own (one at a time: what plays on
+// it; many at once: every one of it), or one by its name (its own channel, or its type's when that's what plays there).
+void Game::stopSound(const std::string& what, float fade) {
+    auto stopChannel = [&](const std::string& channel) {
+        ctx_.sound.stopChannel(channel, fade);
+        loops_.erase(channel);
+    };
+    if (script_.soundTypes.contains(what)) {
+        if (what == "music") {
+            music_.clear();
+            ctx_.sound.stopMusic(fade);
+            return;
+        }
+        ctx_.sound.stopType(what, fade);
+        if (what == "voice") ctx_.sound.stopVoice(); // (the line's too)
+        std::erase_if(loops_, [&](const auto& entry) { return entry.second.type == what; });
+        typePlaying_.erase(what);
+        return;
+    }
+    if (!music_.empty() && lower(music_) == what) {
+        music_.clear();
+        ctx_.sound.stopMusic(fade);
+    }
+    stopChannel(what);
+    for (auto it = typePlaying_.begin(); it != typePlaying_.end();)
+        if (it->second == what) {
+            stopChannel("type:" + it->first);
+            it = typePlaying_.erase(it);
+        } else {
+            ++it;
+        }
+}
+
+void Game::playNamed(std::string_view name, float volume) {
+    if (trim(name).empty()) return;
+    const Script::SoundPlay s = script_.soundOf(name);
+    ctx_.sound.playSound(ctx_.assets.sound(s.file), s.volume * volume, s.fade, std::nullopt, s.slider, s.type);
+}
+
+// What a sound (or song) that begins is, as its caption line says (a named sound's, else its file's): a few seconds at
+// the top (the newest three), on the captions screen (which comes up with them while the player's Captions are on, and
+// whenever the game opens it).
+void Game::caption(std::string_view name, std::string_view file, bool music) {
+    auto it = script_.captions.find(lower(trim(name)));
+    if (it == script_.captions.end()) it = script_.captions.find(lower(file));
     if (it == script_.captions.end()) return;
-    std::string text = (music ? "\u266a " : "") + richText(it->second, lookup_, &script_.palette).text;
+    RichText words = richText(it->second, lookup_, &script_.palette);
+    if (music)
+        for (TextSpan& s : words.spans) s.begin += 2, s.end += 2; // (after the note and its space)
+    std::string text = (music ? "\u266a " : "") + words.text;
     std::erase_if(captions_, [&](const Caption& c) { return c.text == text; }); // (again: anew)
-    captions_.push_back({.text = std::move(text), .music = music, .left = music ? 4.0f : 3.0f});
+    captions_.push_back({.text = std::move(text), .spans = std::move(words.spans), .music = music, .left = music ? 4.0f : 3.0f});
     if (captions_.size() > 3) captions_.erase(captions_.begin());
 }
 
@@ -105,51 +150,13 @@ std::vector<Game::Subtitle> Game::subtitlesOf(const Assets& assets, std::string_
     return out;
 }
 
-// The movie's subtitle now (with Captions on): its .srt's line for this moment, if any.
+// The background movie's subtitle now (with Captions on): its .srt's line for this moment, if any, while it plays.
 std::string Game::subtitle() const {
-    if (!movie_ || subtitles_.empty() || !ctx_.settings.captions) return {};
-    const double t = movie_->time();
+    const Movie* movie = stage_.backgroundMovie();
+    if (!movie || movie->ended() || subtitles_.empty() || !ctx_.settings.captions) return {};
+    const double t = movie->time();
     const auto it = std::ranges::find_if(subtitles_, [&](const Subtitle& s) { return s.from <= t && t < s.to; });
     return it != subtitles_.end() ? it->text : std::string{};
-}
-
-// A movie, full screen: past it when skipping (if it can be skipped); one that can't play is said, and in
-// developer mode a card with its name shows for a moment instead.
-void Game::playMovie(const cmd::Movie& c, std::size_t here, bool fast) {
-    have(RecordKind::Gallery, c.file); // a movie in the gallery
-    const bool skippable = c.skippable && ctx_.settings.skipMovies; // (the player can say no too)
-    const bool stopsHere = watchThere_ && (*watchThere_)(here); // (playTo() stops at one there: its first image)
-    if ((fast && skippable) || (watch_ != SIZE_MAX && !stopsHere)) return; // skipping goes past movies, and so does playTo()
-    const auto file = ctx_.assets.findMovie(c.file);
-    movie_ = file ? std::make_unique<Movie>(ctx_.renderer, ctx_.sound, *file, c.loop, c.volume) : nullptr;
-    subtitles_ = subtitlesOf(ctx_.assets, c.file);
-    if (!movie_ || !*movie_) {
-        movie_.reset();
-        logWarn("{}: {}", script_.where(script_.code[here]),
-                file ? std::format("Can't play '{}'.", *file) : std::format("There's no movie called '{}'.", c.file));
-        if (!gameSettings().developer) return; // players: the story goes on
-        movieStandIn_ = c.file;    // a labelled card for a moment instead
-        timer_ = 3.0f;
-    }
-    movieSkippable_ = skippable;
-    ctx_.sound.stopVoice();
-    waitFor(Wait::Movie, here);
-}
-
-void Game::playMovieRound(float dt) {
-    if (!movie_) return;
-    const bool loop = movie_->looping();
-    movie_->setLoop(true);
-    movie_->update(dt);
-    movie_->setLoop(loop);
-}
-
-void Game::endMovie() {
-    movie_.reset();
-    subtitles_.clear();
-    movieStandIn_.clear();
-    wait_ = Wait::None;
-    run();
 }
 
 } // namespace vn

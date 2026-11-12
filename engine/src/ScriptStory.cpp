@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <format>
 #include <optional>
 #include <span>
 #include <string>
@@ -14,6 +15,13 @@
 namespace vn {
 
 namespace parse {
+
+namespace {
+
+// A colour as the stage has it: "#rrggbbaa" (one fading down to another: two, "#top-#bottom").
+std::string colourKey(SDL_Color c) { return std::format("#{:02x}{:02x}{:02x}{:02x}", c.r, c.g, c.b, c.a); }
+
+} // namespace
 
 // -- Walking blocks ----------------------------------------------------------
 
@@ -26,21 +34,34 @@ void Parser::block(std::span<const Line> lines) {
         const std::string second = lower(firstWord(afterWords(line.text, 1)));
         const bool exact = !startsWithCapital(line.text);
         const bool hasBlock = !line.children.empty();
+        // (the lines in a choice, an if, a chat...: a jump there leaves the scene before its end)
         if (const auto phone = head == "scene" && hasBlock && phase_ == Phase::Story ? phoneSceneFor(line) : std::nullopt) {
             phoneScene(line, *phone->first, phone->second);
         } else if (head == "if" && (exact || hasBlock)) {
+            ++branches_;
             i = ifChain(lines, i);
+            --branches_;
         } else if (head == "else" && (exact || hasBlock)) {
             if (phase_ == Phase::Story) error(line, "This 'else' has no 'if' right above it at the same indentation."_tr());
+            ++branches_;
             block(line.children);
+            --branches_;
         } else if (head == "choice" && (exact || hasBlock)) {
+            ++branches_;
             menu(line);
+            --branches_;
         } else if (head == "chat" && hasBlock) {
+            ++branches_;
             chatBlock(line);
+            --branches_;
         } else if (head == "phone" && second == "call" && (exact || hasBlock)) {
+            ++branches_;
             callBlock(line);
+            --branches_;
         } else if (head == "together" && (exact || hasBlock) && afterWords(line.text, 1).empty()) {
+            ++branches_;
             together(line);
+            --branches_;
         } else if (std::ranges::contains(kDefinitions, head) && !asText_.contains(&line)) {
             if (phase_ == Phase::Definitions) defs_.push_back(&line);
         } else {
@@ -182,6 +203,9 @@ void Parser::together(const Line& line) {
         if (auto* say = std::get_if<cmd::Say>(&s_.code[pc].command)) says.push_back(say);
     if (says.size() < 2) return error(line, "Together needs two lines or more under it."_tr());
     for (std::size_t k = 0; k + 1 < says.size(); ++k) says[k]->together = true;
+    for (std::size_t pc = first; pc < s_.code.size(); ++pc) // (the lines before the last show without a voice)
+        if (const auto* say = std::get_if<cmd::Say>(&s_.code[pc].command); say && say->together && !say->voice.empty())
+            error(Line{.file = s_.code[pc].file, .number = s_.code[pc].line}, "Only the last line said together can have a voice."_tr());
 }
 
 Parser::Who Parser::whoOf(std::string_view written, bool expression) const {
@@ -329,9 +353,11 @@ Parser::Parsed Parser::phoneLine(const Line& line, std::string_view text, cmd::M
         }
         m.file = unquote(what);
         m.text = unquote(caption);
-        if (m.file.empty()) return error(line, m.kind == Kind::Voice ? "Which voice file to send is missing."_tr() : "Which image to send is missing."_tr()), Parsed::Bad;
+        if (m.file.empty()) return error(line, m.kind == Kind::Voice ? "Which voice to send is missing."_tr() : "Which visual to send is missing."_tr()), Parsed::Bad;
+        if (m.kind == Kind::Voice && nothingToRead(m.text)) // (heard: its words read too)
+            return error(line, "A voice message needs what it says after a colon: sends voice {}: ..."_tr(m.file)), Parsed::Bad;
         if (m.file.find(' ') != std::string::npos)
-            return error(line, "'sends' needs an image's name after it, or sticker or voice and a name."_tr()), Parsed::Bad;
+            return error(line, "'sends' needs a visual's name after it, or sticker or voice and a name."_tr()), Parsed::Bad;
         if (m.kind != Kind::Voice) m.file = imageName(m.file);
         break;
     }
@@ -391,6 +417,8 @@ void Parser::phoneScene(const Line& line, const CharacterDef& def, bool chat) {
     block(line.children);
     chat_.reset();
     callWith_.clear();
+    sceneEnds(line);
+    endsDue_.clear(); // (ended: the next scene line has none of its own to reach)
     emit(cmd::Return{}, line, true);
     jumpAt(past).target = s_.code.size();
 }
@@ -494,25 +522,39 @@ void Parser::statement(const Line& line) {
     if (verb.empty() || isBlockWord(verb)) return say(line); // real blocks were handled by block()
     std::optional<Command> c;
     if (!attempt(lenient, [&] { c = command(line, verb, true); })) return say(line);
-    if (c) emit(std::move(*c), line);
+    if (!c) return;
+    if (verb == "jump" && branches_ == 0) sceneEnds(line); // (one of the scene's own lines, in no choice or if: the scene ends with it)
+    emit(std::move(*c), line);
 }
 
 void Parser::scene(const Line& line) {
     std::string name = lower(afterWords(line.text, 1));
     if (name.ends_with(':')) name.pop_back();
     if (!isName(name)) return error(line, "'{}' can't be a scene name (one word of letters, numbers, _ and -)."_tr(name));
+    sceneEnds(line);
     emit(cmd::End{}, line, true); // (the scene before ends here: it never runs on into this one)
     if (auto [it, fresh] = s_.scenes.emplace(name, s_.code.size()); !fresh)
         error(line, "There are two scenes called '{}'."_tr(name));
     else if (name == "start" && line.file != builtinFiles_)
         error(line, "'scene start' belongs in main.vnscript, where the story begins."_tr());
-    currentScene_ = name;
+    currentScene_ = endsDue_ = name;
+    endsLine_ = Line{.file = line.file, .number = line.number};
     lineCounts_.clear();
 }
 
-// "Name: text", "Name expression: text" or narration.
+// The endings the scene being read reaches (ending NAME scene=SCENE): kept as reached as it ends, as a set line of their
+// own would (persistent.ending.NAME), but none of its lines. It ends past its last line (back to what started it, or
+// the story's over), or with a jump of its own (one in no choice or if: there it leaves before its end).
+void Parser::sceneEnds(const Line& line) {
+    if (endsDue_.empty()) return;
+    for (const Script::Record& ending : s_.records(RecordKind::Ending))
+        if (ending.scene == endsDue_) emit(cmd::Set{.variable = "persistent.ending." + lower(ending.name), .value = formula(line, "yes")}, line, true);
+}
+
+// "Name: text", "Name expression: text" or narration, then voice=NAME if it plays a voice of its own.
 void Parser::say(const Line& line) {
-    const std::string_view t = line.text;
+    std::optional<std::string> voice;
+    const std::string_view t = withoutVoice(line.text, &voice);
     // A screen's part written where the story is (not indented under a screen line): a mistake, not narration.
     if (!isQuoted(t)) {
         const std::string head = lower(t.substr(0, t.find(' ')));
@@ -524,7 +566,7 @@ void Parser::say(const Line& line) {
     // A line that starts as commands do, in lower case, without being one: a mistake too (a capital: text).
     if (const std::string word = unknownCommand(t); !word.empty()) {
         if (const std::string verb = commandOf(t, false); !verb.empty())
-            return error(line, "'{}' is something a button can do, not a line of the story."_tr(verb));
+            return error(line, "'{}' is an action, not a line of the story."_tr(verb));
         return error(line, "'{}' isn't a command: text that starts with a lower-case letter goes in quotes."_tr(word));
     }
     cmd::Say say;
@@ -549,8 +591,13 @@ void Parser::say(const Line& line) {
         } else {
             say.speaker = prefix; // someone who isn't a defined character
         }
-        if (say.text.empty()) error(line, "{} doesn't say anything."_tr(prefix));
         if (!say.character.empty()) say.voiceId = std::format("{}_{}", currentScene_, ++lineCounts_[say.character]);
+    }
+    if (nothingToRead(say.text)) error(line, prefix.empty() ? "This line doesn't say anything."_tr() : "{} doesn't say anything."_tr(prefix));
+    if (voice) {
+        if (voice->empty()) error(line, "Which voice to play is missing."_tr());
+        say.voice = std::move(*voice);
+        readValues(line, say.voice);
     }
     checkTextOf(line, say.text);
     say.id = fnv1a(say.text, fnv1a(say.character.empty() ? say.speaker : say.character));
@@ -576,41 +623,77 @@ std::optional<Command> Parser::command(const Line& line, const std::string& verb
         if (!screenLines_.contains(lower(*name)) && line.file >= builtinFiles_) return fail(line, "There's no screen called '{}'."_tr(*name));
         return lower(*name);
     };
+    auto asBackground = [&] { // (as background, anywhere in it: the stage's back)
+        for (std::size_t k = 0; k + 1 < c.left(); ++k)
+            if (lower(c.peek(k).text) == "as" && lower(c.peek(k + 1).text) == "background") return true;
+        return false;
+    };
+    auto saysAs = [&] { // (as TYPE, anywhere in it)
+        for (std::size_t k = 0; k < c.left(); ++k)
+            if (lower(c.peek(k).text) == "as") return true;
+        return false;
+    };
 
-    if (verb == "background") { // background IMAGE | background COLOUR [bottom=COLOUR] [animation=NAME] [with ANIMATION]
-        const auto name = c.next();
-        if (!name) return fail(line, "Which image to show is missing."_tr());
-        cmd::Background background{.image = *name};
-        auto hex = [](SDL_Color col) { return std::format("#{:02x}{:02x}{:02x}{:02x}", col.r, col.g, col.b, col.a); };
-        const auto col = parseColour(*name, &s_.palette);
-        if (col) background.image = hex(*col);
-        if (const auto grad = parseGradient(*name, &s_.palette)) background.image = hex(grad->first) + "-" + hex(grad->second); // (navy-black: fading down to another)
-        while (!c.done()) {
-            if (c.atOption("bottom")) { // (bottom=: the same, as two words)
-                const auto opt = c.option();
-                if (!col) return fail(line, "A background that fades to a colour needs a colour to start from."_tr());
-                const auto bottom = colour(line, opt->second);
-                if (!bottom) return std::nullopt;
-                background.image = hex(*col) + "-" + hex(*bottom);
-            } else if (c.atOption("animation")) { // (what it plays while it's shown; none: nothing)
-                const auto named = animationNamed(line, c.option()->second);
-                if (!named) return std::nullopt;
-                background.animation = *named;
-            } else if (const Took t = withAnimation(line, c, background.with); t != Took::No) {
-                if (t == Took::Bad) return std::nullopt;
-            } else {
-                return fail(line, "'{}' doesn't belong in this {} line."_tr(c.peek().text, verb));
-            }
-        }
-        return background;
-    }
     if ((verb == "show" || verb == "hide") && c.take("screen")) { // show screen NAME / hide screen NAME
         const auto name = screenName(verb + " screen");
         if (!name) return std::nullopt;
         return finished(cmd::Screen{.name = *name, .show = verb == "show"});
     }
+    // (a visual with a name of its own: of its type, unless the line says another; a background's, the background)
+    const auto namedVisual = verb == "show" && !c.done() ? s_.visuals.find(lower(c.peek().text)) : s_.visuals.end();
+    if (verb == "show" && (asBackground() || (namedVisual != s_.visuals.end() && namedVisual->second.type == "background" && !saysAs()))) {
+        // show IMAGE as background | show COLOUR as background [bottom=COLOUR] [at PLACE] [y=N] [animation=NAME] [with ANIMATION]; a movie: [loop=no] [volume=50%]
+        const auto name = c.at("as") ? std::nullopt : c.next();
+        if (!name) return fail(line, "Which visual to show is missing."_tr());
+        const std::string shows = namedVisual != s_.visuals.end() ? namedVisual->second.shows : *name;
+        cmd::Background background{.image = shows};
+        const auto col = parseColour(shows, &s_.palette);
+        if (col) background.image = colourKey(*col);
+        if (const auto grad = parseGradient(shows, &s_.palette)) background.image = colourKey(grad->first) + "-" + colourKey(grad->second); // (navy-black: fading down to another)
+        if (namedVisual != s_.visuals.end()) { // (unless the line says: a visual named as one, its own part that shows, animation and movie's playing)
+            const Script::NamedVisual& own = namedVisual->second;
+            background.part = {own.comes.x.value_or(0.5f), own.comes.y.value_or(0.5f)};
+            background.animation = own.animation;
+            background.with = own.animationOnShow;
+            background.loop = own.loop.value_or(true), background.volume = own.volume.value_or(1.0f);
+        }
+        while (!c.done()) {
+            if (c.at("as") && c.left() > 1 && lower(c.peek(1).text) == "background") { // (what it is: the background)
+                c.skip(2);
+            } else if (c.take("at")) { // (the part of a picture bigger than the stage that shows: across, and down)
+                StageProps at;
+                if (!place(line, c, at)) return std::nullopt;
+                background.part.x = *at.x;
+            } else if (c.atOption("y")) {
+                const auto n = down(line, c.option()->second);
+                if (!n) return std::nullopt;
+                background.part.y = *n;
+            } else if (c.atOption("bottom")) { // (bottom=: the same, as two words)
+                const auto opt = c.option();
+                if (!col) return fail(line, "A background that fades to a colour needs a colour to start from."_tr());
+                const auto bottom = colour(line, opt->second);
+                if (!bottom) return std::nullopt;
+                background.image = colourKey(*col) + "-" + colourKey(*bottom);
+            } else if (c.atOption("animation")) { // (what it plays while it's shown; none: nothing)
+                const auto named = animationNamed(line, c.option()->second);
+                if (!named) return std::nullopt;
+                background.animation = *named;
+            } else if (c.atOption("loop")) {
+                const auto b = boolean(line, c.option()->second, "loop");
+                if (!b) return std::nullopt;
+                background.loop = *b;
+            } else if (const Took v = amount(line, c, "volume", background.volume); v != Took::No) {
+                if (v == Took::Bad) return std::nullopt;
+            } else if (const Took t = withAnimation(line, c, background.with); t != Took::No) {
+                if (t == Took::Bad) return std::nullopt;
+            } else {
+                return fail(line, "A background has no '{}'."_tr(c.peek().text));
+            }
+        }
+        return background;
+    }
     if (verb == "hide" && c.take("ui")) {
-        if (story) return fail(line, "'hide ui' only works in buttons and keys."_tr());
+        if (story) return fail(line, "'hide ui' is an action, not a line of the story."_tr());
         return finished(cmd::Ui{.verb = "hide ui"});
     }
     if (verb == "show") return show(line, c, story);
@@ -661,11 +744,10 @@ std::optional<Command> Parser::command(const Line& line, const std::string& verb
         return finished(cmd::Jump{.scene = lower(*scene)});
     }
     if (verb == "set") return change(line, rest);
-    if (verb == "music" || verb == "sound" || verb == "voice") return play(line, verb, c);
+    if (verb == "play") return play(line, c);
     if (verb == "chat") return fail(line, "This chat has no messages."_tr()); // (with its lines: block() reads them)
     if (verb == "phone") return phone(line, rest);
-    if (verb == "stop") { // stop music | stop sound [NAME] | stop voice | stop weather | stop effect, then [fade=2]: the one way to stop what goes on
-        cmd::Play stop;
+    if (verb == "stop") { // stop NAME | TYPE (a sound by its name, all of a sound type) | weather | effect, then [fade=2]: the one way to stop what goes on
         if (c.take("weather")) {
             cmd::Weather calm;
             if (amount(line, c, "fade", calm.fade) == Took::Bad) return std::nullopt;
@@ -676,11 +758,14 @@ std::optional<Command> Parser::command(const Line& line, const std::string& verb
             if (amount(line, c, "fade", none.fade) == Took::Bad) return std::nullopt;
             return finished(none);
         }
-        if (c.take("music")) stop.track = cmd::Play::Track::Music;
-        else if (c.take("voice")) stop.track = cmd::Play::Track::Voice;
-        else if (!c.take("sound")) return fail(line, "'stop' goes with music, sound, voice, weather or effect."_tr());
-        if (stop.track == cmd::Play::Track::Sound && !c.done() && !c.atOption("fade")) stop.channel = lower(*c.next());
-        if (amount(line, c, "fade", stop.fade) == Took::Bad) return std::nullopt;
+        const auto what = c.done() || c.atOption("fade") ? std::nullopt : c.next();
+        if (!what) return fail(line, "What to stop is missing: a sound, a sound type, the weather or the effects."_tr());
+        cmd::Play stop{.name = *what, .stop = true};
+        readValues(line, stop.name);
+        float fade = 0.0f;
+        const Took t = amount(line, c, "fade", fade);
+        if (t == Took::Bad) return std::nullopt;
+        if (t == Took::Yes) stop.fade = fade;
         return finished(stop);
     }
     if (verb == "wait") {
@@ -692,27 +777,6 @@ std::optional<Command> Parser::command(const Line& line, const std::string& verb
     if (verb == "time") return timeLine(line, c);
     if (verb == "weather") return weather(line, c);
     if (verb == "camera") return camera(line, c, story);
-    if (verb == "movie") { // movie NAME [loop=yes] [skip=no] [volume=80%]
-        cmd::Movie m{.file = c.next().value_or("")};
-        if (m.file.empty() || m.file.contains('=')) return fail(line, "Which movie to play is missing."_tr());
-        while (!c.done()) {
-            if (const Took t = amount(line, c, "volume", m.volume); t != Took::No) {
-                if (t == Took::Bad) return std::nullopt;
-            } else if (c.atOption("loop")) {
-                const auto b = boolean(line, c.option()->second, "loop");
-                if (!b) return std::nullopt;
-                m.loop = *b;
-            } else if (c.atOption("skip")) {
-                const auto b = boolean(line, c.option()->second, "skip");
-                if (!b) return std::nullopt;
-                m.skippable = *b;
-            } else {
-                return fail(line, "'{}' doesn't belong in a movie line."_tr(c.peek().text));
-            }
-        }
-        if (m.loop && !m.skippable) return fail(line, "A movie with 'loop=yes' and 'skip=no' would never end."_tr());
-        return m;
-    }
 
     // Menu and engine commands.
     cmd::Ui ui{.verb = verb};
@@ -775,7 +839,7 @@ std::optional<Command> Parser::command(const Line& line, const std::string& verb
         // open chat WHO, phone call WHO, open image NAME, play song NAME, open tip NAME, page NAME (in a list: {chat.name}, {song.name}...)
         ui.arg = unquote(rest, true);
         if (ui.arg.empty())
-            return fail(line, verb == "open image" ? "Which image to open is missing."_tr() : verb == "open chat" ? "Whose chat to open is missing."_tr()
+            return fail(line, verb == "open image" ? "Which visual to open is missing."_tr() : verb == "open chat" ? "Whose chat to open is missing."_tr()
                             : verb == "play song"  ? "Which song to play is missing."_tr()   : verb == "open tip"  ? "Which tip to open is missing."_tr()
                             : verb == "page"       ? "Which page to go to is missing: its number, auto or quick."_tr()
                                                    : "Who to call is missing."_tr());
@@ -796,13 +860,16 @@ std::optional<Command> Parser::command(const Line& line, const std::string& verb
         ui.arg = number ? std::format("{}", static_cast<int>(*number)) : n;
         return ui;
     }
-    if (verb == "type") { // type LETTER (one: a capital while Shift is on; apostrophe and quote: the marks, which an action can't hold), or type
-                          // shift, space, delete or done: the on-screen keyboard's keys
+    if (verb == "type") { // type LETTER (one: with Shift on, a capital or the sign over it; apostrophe, quote and semicolon: the marks, which
+                          // an action can't hold), or type shift, space, left, right (the caret), delete or done: the on-screen keyboard's keys
         const auto key = c.next();
         const std::string word = key ? lower(*key) : std::string{};
-        if (!key || !(utf8::length(*key) == 1 || word == "apostrophe" || word == "quote" || word == "shift" || word == "space" || word == "delete" || word == "done"))
-            return fail(line, "'type' needs one letter after it, or shift, space, delete or done."_tr());
-        ui.arg = utf8::length(*key) == 1 ? *key : word == "apostrophe" ? std::string("'") : word == "quote" ? std::string("\"") : word;
+        static constexpr std::pair<std::string_view, std::string_view> kMarks[]{{"apostrophe", "'"}, {"quote", "\""}, {"semicolon", ";"}};
+        const auto mark = std::ranges::find(kMarks, std::string_view(word), &std::pair<std::string_view, std::string_view>::first);
+        static constexpr std::array<std::string_view, 6> kKeys{"shift", "space", "left", "right", "delete", "done"};
+        if (!key || !(utf8::length(*key) == 1 || mark != std::end(kMarks) || std::ranges::contains(kKeys, word)))
+            return fail(line, "'type' needs one letter after it, or shift, space, left, right, delete or done."_tr());
+        ui.arg = utf8::length(*key) == 1 ? *key : mark != std::end(kMarks) ? std::string(mark->second) : word;
         return finished(ui);
     }
     if (verb == "keypad") { // keypad 0 to 9, or keypad back: the phone's lock screen's keypad
@@ -845,19 +912,46 @@ std::optional<int> Parser::settingNumber(const Line& line, const std::string& se
 // show NAME [expression] [at POSITION] [x= y= zoom= ...] [animation=NAME] [with ANIMATION] [and wait]
 std::optional<Command> Parser::show(const Line& line, Cursor& c, bool story) {
     cmd::Show show;
-    auto keyword = [&] { return c.at("at") || c.at("with") || c.at("and") || c.peek().text.find('=') != std::string::npos; };
+    const Script::VisualType* type = nullptr;      // (the one the line names, or a visual named of one's: its layer, what it takes)
+    const Script::NamedVisual* ownVisual = nullptr; // (a visual with a name of its own: where it comes, its size)
+    std::optional<float> width, height;             // (a colour's box's, the line's own)
+    bool typeSaid = false;                    // (as TYPE: its layer now, not only as it comes)
+    auto keyword = [&] { return c.at("at") || c.at("as") || c.at("with") || c.at("and") || c.peek().text.find('=') != std::string::npos; };
+    if (c.done() || keyword()) return fail(line, "Who or what to show is missing."_tr()); // (show as image: nothing picked yet)
     if (const CharacterDef* def = takeCharacter(c)) {
         show.character = show.tag = def->key;
+        show.comes = def->comes; // (how they come, as their character line says)
+        show.comesAnimation = def->animation, show.comesWith = def->animationOnShow;
         if (!c.done() && !keyword()) show.expression = *c.next();
     } else if (auto name = c.next()) {
         show.image = *name;
         show.tag = lower(*name);
+        if (const auto v = s_.visuals.find(show.tag); v != s_.visuals.end()) { // (a visual with a name of its own: what it shows and where it comes, as its type has it)
+            ownVisual = &v->second;
+            show.image = v->second.shows;
+            show.comes = v->second.comes;
+            show.comesAnimation = v->second.animation, show.comesWith = v->second.animationOnShow;
+            show.loop = v->second.loop.value_or(true), show.volume = v->second.volume.value_or(1.0f); // (a movie's, unless the line says)
+            if (const auto t = s_.visualTypes.find(v->second.type); t != s_.visualTypes.end()) type = &t->second;
+        }
     } else {
         return fail(line, "Who or what to show is missing."_tr());
     }
     while (!c.done()) {
         if (c.take("at")) {
             if (!place(line, c, show.props)) return std::nullopt;
+        } else if (c.take("as")) { // (a type every game has, or one of the game's own)
+            const auto name = c.next();
+            if (!name) return fail(line, "'as' needs a type after it."_tr());
+            const auto t = s_.visualTypes.find(lower(*name));
+            if (t == s_.visualTypes.end())
+                return fail(line, s_.soundTypes.contains(lower(*name)) ? "'{}' is a sound type, not a visual one."_tr(*name) : "There's no type called '{}'."_tr(*name));
+            // (what it accepts: a character, or not; an image, a movie or a colour is told apart by the files, the editor's)
+            const bool character = !show.character.empty(), takesCharacters = t->second.accepts.contains("character");
+            if (character && !takesCharacters) return fail(line, "'{}' doesn't take characters."_tr(*name));
+            if (!character && t->second.accepts == "character") return fail(line, "'{}' takes characters: there's no character called '{}'."_tr(*name, show.tag));
+            type = &t->second;
+            typeSaid = true;
         } else if (const Took t = withAnimation(line, c, show.with); t != Took::No) {
             if (t == Took::Bad) return std::nullopt;
         } else if (const Took w = andWait(line, c, show.wait, story); w != Took::No) {
@@ -866,11 +960,34 @@ std::optional<Command> Parser::show(const Line& line, Cursor& c, bool story) {
             const auto named = animationNamed(line, c.option()->second);
             if (!named) return std::nullopt;
             show.animation = *named;
+        } else if (c.atOption("loop")) { // (a movie's)
+            const auto b = boolean(line, c.option()->second, "loop");
+            if (!b) return std::nullopt;
+            show.loop = *b;
+        } else if (const Took v = amount(line, c, "volume", show.volume); v != Took::No) {
+            if (v == Took::Bad) return std::nullopt;
+        } else if (c.atOption("width") || c.atOption("height")) { // (a colour's box: its size, changed when needed)
+            const auto [key, value] = *c.option();
+            if (!((key == "width" ? width : height) = boxSize(line, key, value))) return std::nullopt;
         } else if (auto opt = c.option()) {
             if (!stageProp(line, show.props, opt->first, opt->second)) return std::nullopt;
         } else {
             return fail(line, "'{}' doesn't belong in a show line."_tr(c.peek().text));
         }
+    }
+    if ((width || height) && !(type && show.character.empty() && type->accepts.contains("colour") && (parseColour(show.image, &s_.palette) || parseGradient(show.image, &s_.palette))))
+        return fail(line, "'width' and 'height' are the size of a colour's box, and '{}' isn't one."_tr(show.tag)); // (a size is a colour's box's)
+    if (type) {
+        // A colour as a type that takes colours: a box of it (navy-black: one fading down to another), as big as its visual
+        // says (none, or no visual of its own: the whole stage).
+        if (show.character.empty() && type->accepts.contains("colour")) {
+            if (const auto grad = parseGradient(show.image, &s_.palette)) show.image = colourKey(grad->first) + "-" + colourKey(grad->second);
+            else if (const auto col = parseColour(show.image, &s_.palette)) show.image = colourKey(*col);
+            if (show.image.starts_with('#')) // (the line's, else its visual's own, else the whole stage)
+                show.box = SDL_FPoint{width.value_or(ownVisual ? ownVisual->width.value_or(1.0f) : 1.0f), height.value_or(ownVisual ? ownVisual->height.value_or(1.0f) : 1.0f)};
+        }
+        if (!show.comes.layer) show.comes.layer = type->layer;           // (as it comes: its own, else its type's)
+        if (typeSaid && !show.props.layer) show.props.layer = type->layer; // (its type named: its layer now; its own layer=, changing it for now, wins)
     }
     return show;
 }
@@ -892,10 +1009,39 @@ const CharacterDef* Parser::takeCharacter(Cursor& c) {
 bool Parser::place(const Line& line, Cursor& c, StageProps& props) {
     const auto word = c.next();
     if (!word) return error(line, "'at' needs a place on the stage."_tr()), false;
-    if (auto n = stageCoordinate(*word, false)) props.x = *n;
-    else if (auto it = places_.find(lower(*word)); it != places_.end()) props.x = it->second;
-    else return error(line, "There's no place called '{}'."_tr(*word)), false;
-    return true;
+    props.x = across(line, *word);
+    return props.x.has_value();
+}
+
+std::optional<float> Parser::across(const Line& line, std::string_view value) {
+    if (const auto n = stageCoordinate(value, false)) return n;
+    if (const auto it = places_.find(lower(value)); it != places_.end()) return it->second;
+    return error(line, "There's no place called '{}'."_tr(value)), std::nullopt;
+}
+
+std::optional<float> Parser::boxSize(const Line& line, const std::string& key, const std::string& value) {
+    const bool pixels = lower(value).ends_with("px");
+    const auto n = parseNumber(pixels ? std::string_view(value).substr(0, value.size() - 2) : std::string_view(value));
+    if (!n || *n <= 0.0f) return error(line, "'{}' needs a number above 0 (a part of the stage's, or pixels: 640px), not '{}'."_tr(key, value)), std::nullopt;
+    return pixels ? *n / static_cast<float>(key == "width" ? s_.gameSettings.width : s_.gameSettings.height) : *n;
+}
+
+Parser::Took Parser::comesSetting(const Line& line, const std::string& key, const std::string& value, StageProps& comes, std::optional<std::string>& animation,
+                                  std::optional<std::string>& onShow) {
+    if (key == "at") return (comes.x = across(line, value)) ? Took::Yes : Took::Bad;
+    if (key == "y" || key == "zoom" || key == "opacity" || key == "rotation" || key == "flip" || key == "tint" || key == "layer")
+        return stageProp(line, comes, key, value) ? Took::Yes : Took::Bad;
+    if (key != "animation" && key != "animation_on_show") return Took::No;
+    const auto named = animationNamed(line, value);
+    if (!named) return Took::Bad;
+    (key == "animation" ? animation : onShow) = *named;
+    return Took::Yes;
+}
+
+std::optional<float> Parser::down(const Line& line, std::string_view value) {
+    const auto n = stageCoordinate(value, true);
+    if (!n) error(line, "'y' needs a number from -1 (the bottom) to 1 (the top), not '{}'."_tr(value));
+    return n;
 }
 
 // An animation the scripts have, by the name a line gives it ("none": none, an empty name); a mistake
@@ -918,11 +1064,11 @@ Parser::Took Parser::withAnimation(const Line& line, Cursor& c, std::optional<st
     return Took::Yes;
 }
 
-// and wait: the story waits for what the line does to end (a button's action can't).
+// and wait: the story waits for what the line does to end (an action, a click's or a key's, can't).
 Parser::Took Parser::andWait(const Line& line, Cursor& c, bool& wait, bool story) {
     if (!c.at("and") || c.left() < 2 || lower(c.peek(1).text) != "wait") return Took::No;
     c.skip(2);
-    if (!story) return error(line, "A button can't wait for this to end."_tr()), Took::Bad;
+    if (!story) return error(line, "An action can't wait for this to end."_tr()), Took::Bad;
     wait = true;
     return Took::Yes;
 }
@@ -938,17 +1084,13 @@ bool Parser::stageProp(const Line& line, StageProps& p, const std::string& key, 
     static constexpr auto keys = std::to_array<std::string_view>({"y", "zoom", "opacity", "rotation", "layer"});
     if (!std::ranges::contains(keys, key))
         return error(line, "A show line has no setting '{}'."_tr(key)), false;
-    if (key == "y") {
-        const auto n = stageCoordinate(value, true);
-        if (!n) return error(line, "'y' needs a number from -1 (the bottom) to 1 (the top), not '{}'."_tr(value)), false;
-        p.y = *n;
-        return true;
-    }
+    if (key == "y") return (p.y = down(line, value)).has_value();
     const auto n = parseNumber(value);
     if (!n) return error(line, "'{}' needs a number, not '{}'."_tr(key, value)), false;
     if (key == "zoom") p.zoom = *n;
     else if (key == "opacity") p.opacity = *n;
     else if (key == "rotation") p.rotation = *n;
+    else if (*n != std::floor(*n)) return error(line, "'layer' needs a whole number (under 0: behind the background), not '{}'."_tr(value)), false;
     else p.layer = static_cast<int>(*n);
     return true;
 }
@@ -987,44 +1129,40 @@ std::optional<Command> Parser::change(const Line& line, std::string_view rest) {
     return set;
 }
 
-// music FILE | sound FILE [called=NAME] | voice FILE [text_follows=yes|no], then [fade=2] [volume=50%]; music and sound:
-// [loop=yes|no] (music: yes; sound: no) and [fade_out=1] (what played before fades out)
-std::optional<Command> Parser::play(const Line& line, std::string_view verb, Cursor& c) {
-    cmd::Play p{.track = verb == "music" ? cmd::Play::Track::Music : verb == "voice" ? cmd::Play::Track::Voice : cmd::Play::Track::Sound,
-                .loop = verb == "music"};
-    const auto file = c.next();
-    if (!file || file->contains('=')) // (the file left out, and what comes after it in its place)
-        return fail(line, verb == "music" ? "Which song to play is missing."_tr() : verb == "voice" ? "Which voice file to play is missing."_tr()
-                                                                                   : "Which sound to play is missing."_tr());
-    if (lower(*file) == "stop") return fail(line, "'stop' isn't a file to play."_tr());
-    p.file = *file;
-    readValues(line, p.file);
-    float fadeOut = 0.0f;
+// play NAME [as TYPE] [loop=yes|no] [volume=50%] [fade=2] [fade_out=1]: a sound named by a sound line or a file in
+// sounds/ (a {value}'s too), as its type plays it unless the line says (as TYPE: a sound type every game has, or the
+// game's own).
+std::optional<Command> Parser::play(const Line& line, Cursor& c) {
+    cmd::Play p;
+    const auto name = c.done() || c.at("as") ? std::nullopt : c.next();
+    if (!name || name->contains('=')) return fail(line, "Which sound to play is missing."_tr()); // (left out, and what comes after it in its place)
+    p.name = *name;
+    readValues(line, p.name);
     while (!c.done()) {
-        if (const Took t = amount(line, c, "fade", p.fade); t != Took::No) {
+        float n = 0.0f;
+        if (c.take("as")) { // (a sound type)
+            const auto type = c.next();
+            if (!type) return fail(line, "'as' needs a type after it."_tr());
+            p.type = lower(*type);
+            if (!s_.soundTypes.contains(p.type))
+                return fail(line, s_.visualTypes.contains(p.type) ? "'{}' is a visual type, not a sound one."_tr(*type) : "There's no sound type called '{}'."_tr(*type));
+        } else if (const Took t = amount(line, c, "fade", n); t != Took::No) {
             if (t == Took::Bad) return std::nullopt;
-        } else if (const Took o = verb == "voice" ? Took::No : amount(line, c, "fade_out", fadeOut); o != Took::No) {
+            p.fade = n;
+        } else if (const Took o = amount(line, c, "fade_out", n); o != Took::No) {
             if (o == Took::Bad) return std::nullopt;
-            p.fadeOut = fadeOut;
-        } else if (const Took v = amount(line, c, "volume", p.volume); v != Took::No) {
+            p.fadeOut = n;
+        } else if (const Took v = amount(line, c, "volume", n); v != Took::No) {
             if (v == Took::Bad) return std::nullopt;
-        } else if (verb != "voice" && c.atOption("loop")) {
+            p.volume = n;
+        } else if (c.atOption("loop")) {
             const auto b = boolean(line, c.option()->second, "loop");
             if (!b) return std::nullopt;
             p.loop = *b;
-        } else if (verb == "sound" && c.atOption("called")) {
-            const auto opt = c.option();
-            if (opt->second.empty()) return fail(line, "'called' needs a name."_tr());
-            p.channel = lower(opt->second);
-        } else if (verb == "voice" && c.atOption("text_follows")) { // the next line types out with the voice (or doesn't)
-            const auto b = boolean(line, c.option()->second, "text_follows");
-            if (!b) return std::nullopt;
-            p.textFollows = *b;
         } else {
-            return fail(line, "'{}' doesn't belong in this {} line."_tr(c.peek().text, verb));
+            return fail(line, "'{}' doesn't belong in this play line."_tr(c.peek().text));
         }
     }
-    if (p.track == cmd::Play::Track::Sound && p.loop && p.channel.empty()) p.channel = lower(*file); // so it can be stopped
     return p;
 }
 
@@ -1032,6 +1170,7 @@ std::optional<Command> Parser::play(const Line& line, std::string_view verb, Cur
 std::optional<Command> Parser::weather(const Line& line, Cursor& c) {
     static constexpr auto kinds = std::to_array<std::string_view>({"rain", "snow", "petals", "leaves", "embers"});
     cmd::Weather w{.kind = lower(c.next().value_or(""))};
+    if (w.kind.empty()) return fail(line, "Which weather is missing."_tr());
     if (!std::ranges::contains(kinds, std::string_view(w.kind)))
         return fail(line, "'{}' isn't a kind of weather."_tr(w.kind));
     while (!c.done()) {
@@ -1042,8 +1181,8 @@ std::optional<Command> Parser::weather(const Line& line, Cursor& c) {
         const auto opt = c.option();
         if (!opt) return fail(line, "'{}' doesn't belong in a weather line."_tr(c.peek().text));
         const auto& [key, value] = *opt;
-        if (key == "image") {
-            w.image = imageName(value);
+        if (key == "image") { // (a visual named by a visual line or a character: what it shows)
+            w.image = imageName(s_.visualOf(value));
         } else if (key == "tint") {
             if (!(w.tint = colour(line, value))) return std::nullopt;
         } else if (key == "behind") {
@@ -1132,7 +1271,7 @@ std::optional<Command> Parser::timeLine(const Line& line, Cursor& c) {
     if (t.weekday < 0 && t.day == 0 && t.minutes < 0 && t.part.empty())
         return fail(line, "When it goes on to is missing: {}."_tr(when));
     if (t.weekday >= 0 && !weekdays)
-        return fail(line, "A weekday needs one to start from: Settings > Time > Starts at (a date or a weekday)."_tr());
+        return fail(line, "A weekday needs one to start from: Settings > Time > Start day (a date or a weekday)."_tr());
     return t;
 }
 
@@ -1154,7 +1293,7 @@ Commands Parser::actions(const Line& line, std::string_view text) {
             readValues(line, part); // (open chat {chat.name}...)
             const std::string verb = commandOf(part, false);
             if (verb.empty()) {
-                error(line, "'{}' isn't something a button can do."_tr(firstWord(part)));
+                error(line, "'{}' isn't an action."_tr(firstWord(part)));
                 continue;
             }
             auto c = command(line, verb, false, part);

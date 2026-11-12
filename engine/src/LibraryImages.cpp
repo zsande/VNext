@@ -21,7 +21,7 @@ void Developer::drawAtlas(DeveloperUi& ui, const StoryEditor::Definition& def, c
             if (each.name == lower(def.name)) a = &each;
     const Image sheet = a ? engine.assets().file(a->image) : Image{};
     if (!a || !sheet) {
-        if (a) ui.textAround("There's no image called '{}'."_tr(a->image), box.x + 10 * k, box.y + box.h / 2, layout::noteText, theme::dim, box.w - 20 * k);
+        if (a) ui.textAround("There's no visual called '{}'."_tr(a->image), box.x + 10 * k, box.y + box.h / 2, layout::noteText, theme::dim, box.w - 20 * k);
         draw::outline(r, box, kEdge);
         return;
     }
@@ -158,7 +158,7 @@ void Developer::drawSubImage(DeveloperUi& ui, const StoryEditor::Definition& def
             if (each.name == lower(def.name)) p = &each;
     const Image sheet = p ? engine.assets().file(p->image) : Image{};
     if (!p || !sheet) {
-        if (p) ui.textAround("There's no image called '{}'."_tr(p->image), box.x + 10 * k, box.y + box.h / 2, layout::noteText, theme::dim, box.w - 20 * k);
+        if (p) ui.textAround("There's no visual called '{}'."_tr(p->image), box.x + 10 * k, box.y + box.h / 2, layout::noteText, theme::dim, box.w - 20 * k);
         draw::outline(r, box, kEdge);
         return;
     }

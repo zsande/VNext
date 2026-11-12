@@ -136,8 +136,8 @@ void Developer::padMoves() {
         case ToolKey::Down: return screenKeysMove(0, 1);
         case ToolKey::Left: return screenKeysMove(-1, 0);
         case ToolKey::Right: return screenKeysMove(1, 0);
-        case ToolKey::Previous: return screenKeysPress(4, 2);
-        case ToolKey::Next: return screenKeysPress(4, 3);
+        case ToolKey::Previous: return screenKeysPress("left");
+        case ToolKey::Next: return screenKeysPress("right");
         default: return;
         }
     };
@@ -191,7 +191,7 @@ void Developer::keyMoves() {
     DeveloperTools& d = tools;
     using Stop = DeveloperTools::KeyStop;
     if (d.clicked) d.keyRing = false;
-    if (d.editLayout) return; // (Layout has the keys: drawPageParts)
+    if (d.editLayout) return; // (moving page parts has the keys: drawPageParts)
     if (auto& p = d.popup; !p.id.empty()) { // (a list open: the arrows move in it, and Enter picks what they're on)
         std::erase_if(d.keys, [&](const SDL_KeyboardEvent& key) { // (typing in its box: the box has left and right, and Space)
             const int dx = d.isKey(key, ToolKey::Left, true) ? -1 : d.isKey(key, ToolKey::Right, true) ? 1 : 0;
@@ -241,6 +241,7 @@ void Developer::keyMoves() {
             if (at && (at->own & arrow)) { // (its own)
                 if (at->kind == Stop::Kind::List) {
                     d.keyStep = dy;
+                    d.keyFold = dx;
                     d.keysTakeOver();
                     return true;
                 }
@@ -287,7 +288,7 @@ void Developer::keyRing(DeveloperUi& ui) {
     d.keyStopsNow.clear();
     d.keyStopsWhole = true;
     d.keyPress.clear();
-    d.keyStep = 0;
+    d.keyStep = d.keyFold = 0;
     d.pointerMoved = false;
     d.scrollers.clear();
     const auto at = std::ranges::find(d.keyStops, d.keyAt, &DeveloperTools::KeyStop::key);
@@ -303,7 +304,7 @@ void Developer::keyRing(DeveloperUi& ui) {
         }
         if (!words.empty()) announce(words);
     }
-    if (d.editLayout && d.layoutKeys.ringBox.w > 0.0f) { // (Layout's: what of a page part the keys are on)
+    if (d.editLayout && d.layoutKeys.ringBox.w > 0.0f) { // (while page parts are moved: what of one the keys are on)
         const SDL_FRect& b = d.layoutKeys.ringBox;
         const float t = 2.0f * std::max(1.0f, std::round(ui.k));
         SDL_SetRenderClipRect(ui.r, nullptr);

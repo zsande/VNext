@@ -44,34 +44,38 @@ public:
     // The song before it fades out over `fadeOut` seconds (none: the crossfade).
     void playMusic(const std::string& path, bool loop = true, float fadeIn = 0.0f, float volume = 1.0f, std::optional<float> fadeOut = std::nullopt);
     void stopMusic(float fadeOut = 0.0f);
-    // A one-shot effect; with `fadeOut`, the ones still playing fade out over that long (else they play on).
-    void playSound(const std::string& path, float volume = 1.0f, float fadeIn = 0.0f, std::optional<float> fadeOut = std::nullopt);
-    // Named channels (ambience, loops) can be stopped later; one sound per channel: the one there before
-    // fades out over `fadeOut` seconds (0: stops at once).
-    void playChannel(const std::string& channel, const std::string& path, bool loop, float volume, float fadeIn, float fadeOut = 0.0f);
+    // A one-shot sound of a sound type (`type`, following one of the player's volumes, `slider`); with `fadeOut`, the
+    // others of its type still playing fade out over that long (else they play on).
+    void playSound(const std::string& path, float volume = 1.0f, float fadeIn = 0.0f, std::optional<float> fadeOut = std::nullopt,
+                   SoundSlider slider = SoundSlider::Sound, const std::string& type = "sound");
+    // Named channels (a sound type's one at a time, a named sound's, a loop) can be stopped later; one sound per channel:
+    // the one there before fades out over `fadeOut` seconds (0: stops at once).
+    void playChannel(const std::string& channel, const std::string& path, bool loop, float volume, float fadeIn, float fadeOut = 0.0f,
+                     SoundSlider slider = SoundSlider::Sound, const std::string& type = "sound");
     void stopChannel(const std::string& channel, float fadeOut); // empty name: every channel
+    void stopType(const std::string& type, float fadeOut);       // every channel and one-shot sound of a sound type
     void playVoice(const std::string& path, float volume = 1.0f);
-    // Plays made-up speech for `text` as the voice line (see "Made-up voices" below); false if it has nothing to say.
+    // Plays made-up speech for `text` as the line's voice (see "Made-up voices" below); false if it has nothing to say.
     bool playMadeUpVoice(std::string_view text, float pitch, float speed = 1.0f);
     void stopVoice();
-    // While a menu covers the game its voice line waits, and goes on when the menu closes. (A voice
-    // started in the meantime, say by a button, plays.) holdVoice(): the same while its text waits
-    // for a click at a {pause}; it goes on when neither holds it.
+    // While a menu covers the game the line's voice waits, and goes on when the menu closes (one started
+    // in the meantime plays). holdVoice(): the same while its text waits for a click at a {pause}; it goes
+    // on when neither holds it.
     void pauseVoice(bool paused);
     void holdVoice(bool held);
-    // The voice line playing now: whether there is one (a waiting one isn't playing), how loud it
+    // The line's voice playing now: whether there is one (a waiting one isn't playing), how loud it
     // is (0..1, its loudest moment is 1) and how much of its speech is done (0..1, it doesn't move
     // during pauses, or while it waits).
     [[nodiscard]] bool voicePlaying() const;
     [[nodiscard]] float voiceLevel() const;
     [[nodiscard]] std::optional<float> voiceProgress() const;
-    // Where the voice line could wait for a {pause} that comes after `share` of its text: the
+    // Where the line's voice could wait for a {pause} that comes after `share` of its text: the
     // silence in it closest to that much of its speech (as the share said by then), if one is near.
     [[nodiscard]] std::optional<float> voiceSilenceNear(float share) const;
     [[nodiscard]] bool voiceSilent() const; // it's between words (or waiting) now
     // The history's "hear it again": a line's voice file, or its made-up speech, on a track of its
-    // own, so the voice line waiting under the menu stays as it was. stopReplay() when the menu goes.
-    void replayVoice(const std::string& path, float volume = 1.0f);
+    // own, so the line's voice waiting under the menu stays as it was. stopReplay() when the menu goes.
+    void replayVoice(const std::string& path);
     bool replayMadeUpVoice(std::string_view text, float pitch, float speed = 1.0f);
     void stopReplay();
     [[nodiscard]] bool replaying() const;
@@ -80,6 +84,8 @@ public:
     // sound plays from `movie` (openStream's; null when it has none), until stopListening().
     void listen(const std::string& path);
     void listen(const std::string& name, SDL_AudioStream* movie);
+    // ...a made-up voice saying a few words in this pitch (Hz) at this speed, as `name` (what listening() says).
+    void listenMadeUpVoice(const std::string& name, float pitch, float speed);
     void stopListening();
     [[nodiscard]] const std::string& listening() const { return listened_; }
     // While the developer tools are open over a game: every sound of the game waits where it is (and
@@ -110,9 +116,12 @@ private:
         int current = 0;
         std::string path;
         float volume = 1.0f;
+        SoundSlider slider = SoundSlider::Sound; // (which of the player's volumes it follows: its sound type's)
+        std::string type = "sound";
     };
+    [[nodiscard]] float sliderGain(SoundSlider slider) const; // (the player's volume it follows; music's under voices too)
 
-    // A voice line's loudness, measured once: one value per kWindow seconds.
+    // A voice file's loudness, measured once: one value per kWindow seconds.
     struct Envelope {
         std::vector<float> level;  // 0..1
         std::vector<float> spoken; // share of the speech (windows with sound) up to here, 0..1
@@ -125,7 +134,7 @@ private:
     enum class Kind : std::uint8_t { Music, Sound };
     MIX_Audio* load(const std::string& path, Kind kind);
     MIX_Audio* placeholder(const std::string& key, Kind kind, std::uint64_t seed);
-    void play(MIX_Audio* clip, float volume, float fadeIn = 0.0f);
+    void play(MIX_Audio* clip, float volume, float fadeIn = 0.0f, SoundSlider slider = SoundSlider::Sound, const std::string& type = "sound");
     bool start(MIX_Track* track, MIX_Audio* clip, bool loop, float fadeIn);
     [[nodiscard]] Sint64 frames(MIX_Track* track, float seconds) const;
 
@@ -136,17 +145,19 @@ private:
     std::array<MIX_Track*, kSoundTracks> sounds_{}; // owned by the mixer
     std::array<float, 2> musicGain_{1.0f, 1.0f};    // each track's own volume
     std::array<float, kSoundTracks> soundGain_{};
+    std::array<SoundSlider, kSoundTracks> soundSlider_{}; // (each one-shot's sound type's volume, and its type)
+    std::array<std::string, kSoundTracks> soundType_{};
     std::map<std::string, Channel, std::less<>> channels_;
-    // A track that speaks: the voice line, and a voice heard again from the history.
+    // A track that speaks: the line's voice, and a voice heard again from the history.
     struct Voice {
         MIX_Track* track = nullptr; // owned by the mixer
-        float gain = 1.0f;
+        float volume = 1.0f;        // (its own: a named sound's, under the voice volume)
         const Envelope* envelope = nullptr; // how loud it is when (null: unknown)
         MixSoundPtr madeUpVoice;                 // made-up speech playing
         Envelope madeUpVoiceEnvelope;
     };
     Voice voice_, replay_;
-    void say(Voice& v, MIX_Audio* clip, float volume, const Envelope* envelope);
+    void say(Voice& v, MIX_Audio* clip, const Envelope* envelope);
     bool sayMadeUpVoice(Voice& v, std::string_view text, float pitch, float speed);
     std::unordered_map<std::string, Envelope, StringHash, std::equal_to<>> envelopes_;
     std::size_t current_ = 0;                       // index of the active music track
@@ -173,6 +184,7 @@ private:
     void applyMusicGain();
     MIX_Track* listen_ = nullptr; // owned by the mixer
     std::string listened_;
+    MixSoundPtr listenedVoice_; // (a made-up voice listened to: kept while it plays)
     bool listenedMovie_ = false;
     MIX_Track* movieTrack_ = nullptr; // (its sound's)
     std::vector<MIX_Track*> held_; // what waits for it (or for the developer tools)

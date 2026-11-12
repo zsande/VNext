@@ -326,6 +326,19 @@ std::vector<ScreenView::ListItem> ScreenView::listItems(const Element& list, std
             someone(v, "person", def->name, def->key, {}, def->nameColour);
             out.push_back({def->key, std::move(v)});
         }
+    } else if (name == "loves") { // the love interests (love=), in their order: their love now, and as hearts (a heart a point, five at most)
+        const std::string most = toString(lookup_("most_loved"));
+        for (const std::string& key : engine_.script().loves) {
+            const CharacterDef* def = engine_.script().character(key);
+            if (!def) continue;
+            const Value love = game.variable(def->love);
+            const int full = std::clamp(static_cast<int>(std::lround(toNumber(love))), 0, 5);
+            std::string hearts;
+            for (int i = 0; i < full; ++i) hearts += "\u2665"; // (one sign, in every font: five dim ones under them show the rest)
+            Variables v{{"love.name", def->name}, {"love.value", love}, {"love.hearts", hearts}, {"love.most", def->name == most ? 1 : 0}};
+            someone(v, "love", def->name, def->key, {}, def->nameColour);
+            out.push_back({"love:" + def->key, std::move(v)});
+        }
     } else if (name == "notices") { // what's new: chats with messages not seen yet (by their newest), and missed calls
         const auto& messages = game.messages();
         for (const Game::Chat& c : game.chats())
@@ -339,11 +352,12 @@ std::vector<ScreenView::ListItem> ScreenView::listItems(const Element& list, std
                 out.push_back({std::format("call:{}", k), {{"notice.who", phone.calls[k].who}, {"notice.chat", std::string{}},
                                                            {"notice.text", std::string{}}, {"notice.call", 1}, {"notice.time", phone.calls[k].time}}});
     } else if (name == "captions") { // (the player's Captions: what the sounds and songs that just began are; the editor's preview: one)
-        for (const Game::Caption& c : game.captions()) out.push_back({"caption:" + c.text, {{"caption.text", c.text}, {"caption.music", flag(c.music)}}});
+        for (const Game::Caption& c : game.captions()) // (their words' look kept: a part showing {caption.text})
+            out.push_back({"caption:" + c.text, {{"caption.text", c.text}, {"caption.music", flag(c.music)}}, {{"caption.text", c.spans}}});
         if (tools_ && out.empty()) out.push_back({"caption", {{"caption.text", std::string("A sound's caption"_tr)}, {"caption.music", 0}}});
     } else if (name == "subtitles") { // (...and the movie's line now)
         if (std::string line = game.subtitle(); !line.empty()) out.push_back({"subtitle", {{"subtitle.text", std::move(line)}}});
-        else if (tools_) out.push_back({"subtitle", {{"subtitle.text", std::string("A movie's subtitle"_tr)}}});
+        else if (tools_) out.push_back({"subtitle", {{"subtitle.text", std::string("A visual's subtitle"_tr)}}});
     } else if (name == "options") { // the story's choice (the phone's own are in the phone's lists, above)
         if (game.showingChoices() && !game.choiceOnPhone()) {
             const auto& items = game.choices();
@@ -407,7 +421,8 @@ std::vector<ScreenView::ListItem> ScreenView::listItems(const Element& list, std
             Variables v{{value("number"), static_cast<int>(k + 1)}, {value("name"), rec.name}, {value("title"), rec.title}, {value("locked"), flag(!have)}};
             if (kind == RecordKind::Ending || kind == RecordKind::Achievement || kind == RecordKind::Tip) v.insert_or_assign(value("text"), rec.text); // (a locked ending's: its hint)
             if (kind == RecordKind::Achievement) v.insert_or_assign(value("secret"), flag(rec.secret));
-            if (kind == RecordKind::Song) v.insert_or_assign(value("playing"), flag(have && !playing.empty() && playing == engine_.assets().sound(rec.name)));
+            if (kind == RecordKind::Song) // (a named sound's: what it plays)
+                v.insert_or_assign(value("playing"), flag(have && !playing.empty() && playing == engine_.assets().sound(engine_.script().soundOf(rec.name, "music").file)));
             if (kind == RecordKind::Tip) {
                 v.insert_or_assign(value("open"), flag(have && engine_.tip() == k));
                 v.insert_or_assign(value("new"), flag(engine_.newTip(k)));

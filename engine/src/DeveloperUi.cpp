@@ -323,7 +323,7 @@ void DeveloperUi::unclip() {
 DeveloperUi::KeyStopNow DeveloperUi::keyStop(DeveloperTools::KeyStop::Kind kind, const SDL_FRect& box, std::string words, const std::string& id, const std::string& value,
                                              std::uint8_t own) {
     if (d.keyStopsOff) return {};
-    DeveloperTools::KeyStop s{.kind = kind, .key = std::format("{}#{}", d.keyGroup, d.keyCount++), .order = d.keyOrder, .box = box,
+    DeveloperTools::KeyStop s{.kind = kind, .key = d.stopKey(d.keyCount++), .order = d.keyOrder, .box = box,
                            .clip = clips_.empty() ? SDL_Rect{0, 0, static_cast<int>(d.size.x), static_cast<int>(d.size.y)} : clips_.back(),
                            .words = std::move(words), .id = id, .value = value, .own = own};
     if (!d.scrollers.empty()) s.scroll = d.scrollers.back().scroll, s.view = d.scrollers.back().view;
@@ -332,6 +332,7 @@ DeveloperUi::KeyStopNow DeveloperUi::keyStop(DeveloperTools::KeyStop::Kind kind,
     if (now.on) {
         now.pressed = std::exchange(d.keyPress, {}) == s.key;
         now.step = std::exchange(d.keyStep, 0);
+        now.fold = std::exchange(d.keyFold, 0);
     }
     if (d.clicked && over(box)) { // (the pointer puts the keys there: Tab and the arrows go on from it)
         d.keyAt = s.key;
@@ -349,8 +350,9 @@ bool DeveloperUi::click(const SDL_FRect& box) {
     return true;
 }
 
-bool DeveloperUi::button(const SDL_FRect& box, std::string_view label, bool chosen, bool enabled, float size) {
-    std::string words = d.keyLabel.empty() ? std::string(label) : std::format("{}: {}", d.keyLabel, label);
+bool DeveloperUi::button(const SDL_FRect& box, std::string_view label, bool chosen, bool enabled, float size, std::string_view said) {
+    const std::string_view heard = said.empty() ? label : said;
+    std::string words = d.keyLabel.empty() ? std::string(heard) : std::format("{}: {}", d.keyLabel, heard);
     if (chosen) words += ", " + std::string("chosen"_tr);
     if (!enabled) words += ", " + std::string("not now"_tr);
     const KeyStopNow keys = keyStop(DeveloperTools::KeyStop::Kind::Press, box, std::move(words));
@@ -365,7 +367,9 @@ bool DeveloperUi::button(const SDL_FRect& box, std::string_view label, bool chos
 std::optional<std::size_t> DeveloperUi::list(const SDL_FRect& box, float& scroll, std::size_t count, const std::function<std::string(std::size_t)>& label,
                                              const std::function<bool(std::size_t)>& chosen, const std::function<bool(std::size_t)>& wrong,
                                              const std::function<bool(std::size_t)>& faint) {
-    const float itemH = layout::listItemH * k, total = static_cast<float>(count) * itemH;
+    // (its rows end at the last one's foot: the gap each has under it isn't more to scroll to, the last one's that fits a box
+    // but for it, a couple of pixels)
+    const float itemH = layout::listItemH * k, total = count > 0 ? static_cast<float>(count) * itemH - 2 * k : 0.0f;
     // (a stop: up and down choose the one before or after, brought into sight)
     std::optional<std::size_t> now;
     for (std::size_t i = 0; i < count && !now; ++i)
@@ -378,7 +382,7 @@ std::optional<std::size_t> DeveloperUi::list(const SDL_FRect& box, float& scroll
         scroll = std::clamp(scroll, top + itemH - box.h, top);
     }
     draw::rect(r, box, kBox);
-    scroll = std::clamp(scroll - wheelOver(box) * itemH * 2, 0.0f, std::max(0.0f, total - box.h));
+    scroll = std::clamp(scroll - wheelScrolls(box, scroll, total - box.h, itemH * 2) * itemH * 2, 0.0f, std::max(0.0f, total - box.h)); // (nothing to scroll: its page part's)
     scrollbar(&scroll, barInside(box), box.h, total, scroll);
     const float w = box.w - (total > box.h ? layout::scrollbarRoom * k : 0.0f); // (its rows: beside its scrollbar)
     const Clip clipped(*this, box);
@@ -396,13 +400,23 @@ std::optional<std::size_t> DeveloperUi::list(const SDL_FRect& box, float& scroll
 
 DeveloperUi::ListEvent DeveloperUi::editList(const std::string& id, const SDL_FRect& box, float& scroll, const ListItems& items) {
     using Event = ListEvent::Kind;
-    const float itemH = items.itemH * k, total = static_cast<float>(items.count) * itemH;
+    const float itemH = items.itemH * k, total = items.count > 0 ? static_cast<float>(items.count) * itemH - 2 * k : 0.0f; // (to the last row's foot, as list's)
     ListEvent event;
     // (a stop: up and down choose the one before or after, brought into sight)
     std::optional<std::size_t> now;
     for (std::size_t i = 0; i < items.count && !now; ++i)
         if (items.chosen && items.chosen(i)) now = i;
-    const KeyStopNow keys = keyStop(DeveloperTools::KeyStop::Kind::List, box, listWords(now ? items.label(*now) : std::string{}), {}, {}, listOwn(now, items.count));
+    if (std::size_t& last = d.listChosen[id]; last != (now ? *now + 1 : 0)) { // (one newly chosen, as + New type or a paste makes one past its end: in sight)
+        last = now ? *now + 1 : 0;
+        if (now) {
+            const float top = static_cast<float>(*now) * itemH;
+            scroll = std::clamp(scroll, top + itemH - box.h, top);
+        }
+    }
+    const int fold = now && items.fold ? items.fold(*now) : 0; // (Right and Left: its own, when they open or close the one chosen)
+    const auto own = static_cast<std::uint8_t>(listOwn(now, items.count) | (fold > 0 ? DeveloperTools::kOwnRight : 0) | (fold < 0 ? DeveloperTools::kOwnLeft : 0));
+    const KeyStopNow keys = keyStop(DeveloperTools::KeyStop::Kind::List, box, listWords(now ? items.label(*now) : std::string{}), {}, {}, own);
+    if (keys.fold != 0 && now && keys.fold == fold) event = {.kind = fold > 0 ? ListEvent::Kind::Opened : ListEvent::Kind::Closed, .item = *now, .to = 0, .name = {}};
     if (keys.step != 0 && items.count > 0) {
         const std::size_t to = !now ? std::size_t{0} : keys.step < 0 ? (*now == 0 ? 0 : *now - 1) : std::min(*now + 1, items.count - 1);
         event = {.kind = ListEvent::Kind::Chosen, .item = to, .to = 0, .name = {}};
@@ -414,6 +428,7 @@ DeveloperUi::ListEvent DeveloperUi::editList(const std::string& id, const SDL_FR
     // key deletes it, as its x clicked twice does (the lines' and the parts' Delete key takes all their chosen ones: their
     // page parts do that).
     if (keys.on && now && d.focus.empty()) {
+        if (id != "lines" && id != "parts" && items.deletes && items.deletes(*now)) d.acts.remove = true;
         if (keys.pressed && items.renames && items.renames(*now))
             d.focusOn(std::format("{}:rename:{}", id, *now), items.name ? items.name(*now) : items.label(*now), true);
         else if (id != "lines" && id != "parts" && items.deletes && items.deletes(*now) &&
@@ -427,7 +442,7 @@ DeveloperUi::ListEvent DeveloperUi::editList(const std::string& id, const SDL_FR
             scroll = std::clamp(scroll, top + itemH - box.h, top);
         }
     draw::rect(r, box, kBox);
-    scroll = std::clamp(scroll - wheelOver(box) * itemH * 2, 0.0f, std::max(0.0f, total - box.h));
+    scroll = std::clamp(scroll - wheelScrolls(box, scroll, total - box.h, itemH * 2) * itemH * 2, 0.0f, std::max(0.0f, total - box.h)); // (nothing to scroll: its page part's)
     scrollbar(&scroll, barInside(box), box.h, total, scroll);
     const float w = box.w - (total > box.h ? layout::scrollbarRoom * k : 0.0f); // (its rows: beside its scrollbar)
     const bool dragging = d.listDrag && d.listDrag->list == id;
@@ -482,7 +497,7 @@ DeveloperUi::ListEvent DeveloperUi::editList(const std::string& id, const SDL_FR
             d.focusOn(renameId, items.name ? items.name(i) : items.label(i), true); // (all of it chosen, as Enter's)
             continue;
         }
-        event = {.kind = Event::Chosen, .item = i, .to = 0, .name = {}};
+        event = {.kind = Event::Chosen, .item = i, .to = 0, .name = {}, .depth = 0, .clicked = true};
         d.lastList = id; // (copy and paste act on it)
         if (items.moves && items.moves(i)) d.listDrag = DeveloperTools::ListDrag{.list = id, .item = i, .x = d.mouseX, .y = d.mouseY};
     }
@@ -560,8 +575,11 @@ std::vector<std::pair<std::string_view, std::string>> DeveloperUi::choiceLabels(
         if (labels.size() == 2) std::ranges::reverse(labels);
     }
     std::vector<std::pair<std::string_view, std::string>> out;
-    for (std::size_t i = 0; i < words.size(); ++i)
-        out.emplace_back(words[i], std::string(tr(upperFirst(spaced(i < labels.size() && !f.labels.empty() ? labels[i] : words[i])))));
+    const bool names = f.pick != StoryEditor::Pick::None; // (the game's own names, as a pick lists them: as written)
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        const std::string_view label = i < labels.size() && !f.labels.empty() ? labels[i] : words[i];
+        out.emplace_back(words[i], names ? std::string(label) : std::string(tr(upperFirst(spaced(label)))));
+    }
     return out;
 }
 
@@ -647,7 +665,10 @@ std::optional<std::string> DeveloperUi::choices(const std::string& id, const SDL
     }
     std::optional<std::string> clicked;
     for (std::size_t i = 0; i < n; ++i) {
-        if (!button(places[i], shown[i], chosen(words[i]), true, layout::buttonText)) continue;
+        const std::string stop = d.stopKey(d.keyCount); // (its button's: the pointer or the keys on it, what it does can be shown)
+        const bool pressed = button(places[i], shown[i], chosen(words[i]), true, layout::buttonText);
+        if (over(places[i]) || (d.keyAt == stop && d.keyRing)) d.choicePointed = {id, std::string(words[i]), d.textFrame};
+        if (!pressed) continue;
         if (f.multi) clicked = toggled(words[i]);
         else if (!chosen(words[i])) clicked = std::string(words[i]);
     }
@@ -681,10 +702,13 @@ std::optional<std::string> DeveloperUi::field(const std::string& id, const SDL_F
     const std::string_view shownNow = d.focus == id ? std::string_view(d.buffer) : value.empty() ? std::string_view(tr(hint)) : std::string_view(value);
     const KeyStopNow keys = keyStop(DeveloperTools::KeyStop::Kind::Type, box, d.keyLabel.empty() ? std::string(shownNow) : std::format("{}: {}", d.keyLabel, shownNow), id,
                                     value, d.focus == id ? DeveloperTools::kOwnLeft | DeveloperTools::kOwnRight : 0); // (typed in: its caret's)
-    if (keys.pressed) d.focusOn(id, value, true);
-    else if (keys.lit && d.focus.empty()) engine_.wantTextInput(); // (the keys on it: what's typed goes in, Developer::developerEvent)
+    if (keys.pressed) {
+        d.focusOn(id, value, true);
+        d.boxPressed = true;
+    } else if (keys.lit && d.focus.empty()) engine_.wantTextInput(); // (the keys on it: what's typed goes in, Developer::developerEvent)
     const bool wasFocused = d.focus == id;
     if (click(box)) {
+        d.boxPressed = true;
         const float shift = wasFocused ? shiftOf(d.buffer, d.caret) : 0.0f;
         if (!wasFocused) d.focusOn(id, value);
         const std::size_t at = letterAt(d.mouseX, d.buffer, shift);
@@ -705,6 +729,7 @@ std::optional<std::string> DeveloperUi::field(const std::string& id, const SDL_F
     std::optional<std::string> changed;
     if (focused) {
         engine_.wantTextInput();
+        d.acts.cut = d.acts.copy = d.acts.paste = d.acts.selectAll = d.acts.remove = true; // (its words, and its letters)
         d.caret = std::min(d.caret, d.buffer.size());
         if (d.anchorFocus != d.focusCount) { // (put in the box from elsewhere: nothing chosen)
             d.anchor = d.caret;
@@ -851,13 +876,13 @@ void DeveloperUi::openPopup(const std::string& id, const StoryEditor::Field& f, 
     d.popup = {.id = id, .field = f, .at = box, .box = {}, .typed = false, .shown = true, .scroll = 0.0f}; // (a gradient's wheel: on its top first)
 }
 
-std::optional<std::string> DeveloperUi::listButton(const std::string& id, const SDL_FRect& box, std::string_view label, const StoryEditor::Field& given) {
+std::optional<std::string> DeveloperUi::listButton(const std::string& id, const SDL_FRect& box, std::string_view label, const StoryEditor::Field& given, std::string_view said) {
     StoryEditor::Field f = given; // (as its kind has it: a kind with buttons elsewhere lists them, saying the same)
     applyBox(f);
     const std::optional<std::string> picked = takePicked(id);
     if (picked && d.popup.id == id) d.popup.field.value = *picked; // (still open, as a wheel stays: the code above it is the colour now)
     const bool open = d.popup.id == id;
-    if (button(box, label, open, true, layout::smallButtonText)) {
+    if (button(box, label, open, true, layout::smallButtonText, said)) {
         if (open) d.popup.id.clear();
         else openPopup(id, f, box);
     }
@@ -913,9 +938,12 @@ std::optional<std::string> DeveloperUi::colourField(const std::string& id, const
         others.erase(own->first);
         palette = &others;
     }
-    if (const auto colour = text.empty() ? std::nullopt : parseColour(text, palette)) {
-        const auto grad = parseGradient(text, palette);
-        said = std::string(tr(colourWords(text, palette))); // (its name, a code's likeness, "navy down to black"; None in the tools' language)
+    // (a visual's box: a visual named by a visual line showing a colour, its square too, by its own name)
+    std::string shows(text);
+    if (StoryEditor::kindOf(f.box).images && d.script && !text.empty()) shows = d.script->visualOf(text);
+    if (const auto colour = shows.empty() ? std::nullopt : parseColour(shows, palette)) {
+        const auto grad = parseGradient(shows, palette);
+        if (lower(shows) == lower(text)) said = std::string(tr(colourWords(text, palette))); // (its name, a code's likeness, "navy down to black"; None in the tools' language)
         tx = swatch(tx, box.y + box.h / 2, *colour, value.empty(), grad ? std::optional(grad->second) : std::nullopt); // (dimmed: its default's)
     }
     textFitted(said, tx, box.y + box.h / 2, size, value.empty() ? theme::dim : theme::text, std::max(0.0f, arrow.x - tx - 4 * k));
@@ -979,7 +1007,8 @@ std::optional<std::string> DeveloperUi::pickField(const std::string& id, const S
 void DeveloperUi::scrollForm(const SDL_FRect& box, float step) {
     d.scrollers.push_back({&d.formScroll, box}); // (its stops scroll by it: until its page part's drawn)
     const SDL_FRect bar = barBeside(box);
-    d.formScroll = std::clamp(d.formScroll - wheelOver({box.x, box.y, bar.x + bar.w - box.x, box.h}) * step, 0.0f, std::max(0.0f, d.formHeight - box.h));
+    d.formScroll = std::clamp(d.formScroll - wheelScrolls({box.x, box.y, bar.x + bar.w - box.x, box.h}, d.formScroll, d.formHeight - box.h, step) * step, 0.0f,
+                              std::max(0.0f, d.formHeight - box.h)); // (nothing to scroll: its page part's)
     scrollbar(&d.formScroll, bar, box.h, d.formHeight, d.formScroll);
 }
 
@@ -1019,6 +1048,7 @@ SDL_FRect DeveloperUi::barBeside(const SDL_FRect& box) const {
 
 void DeveloperUi::formDrawn(const SDL_FRect& box, float y) {
     d.formHeight = y + d.formScroll - box.y;
+    if (d.formHeight > box.h && d.formHeight <= box.h + layout::rowGap * k) d.formHeight = box.h; // (past it by the gap after its last row: it fits)
     d.formScroll = std::clamp(d.formScroll, 0.0f, std::max(0.0f, d.formHeight - box.h));
 }
 

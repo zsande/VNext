@@ -124,7 +124,7 @@ void Game::addMessage(MessageItem m) {
     MessageItem& added = phone_.messages.emplace_back(std::move(m));
     if (added.typing <= 0.0f) arrive(added);
     else if (!added.from.empty() && !skipping() && hasPhone() && !gameSettings().phoneTypingSound.empty())
-        ctx_.sound.playSound(ctx_.assets.sound(gameSettings().phoneTypingSound));
+        playNamed(gameSettings().phoneTypingSound);
 }
 
 // A message comes to the phone: its tips are learned, an image goes in the photos (and the gallery), its sound
@@ -143,7 +143,7 @@ void Game::arrive(MessageItem& m) {
         else addHistory({.speaker = m.from, .colour = m.colour, .text = words});
     }
     if (m.from.empty()) {
-        if (!fast && !gameSettings().phoneSendSound.empty()) ctx_.sound.playSound(ctx_.assets.sound(gameSettings().phoneSendSound));
+        if (!fast) playNamed(gameSettings().phoneSendSound);
         return;
     }
     ++arrivals_;
@@ -153,7 +153,7 @@ void Game::arrive(MessageItem& m) {
         std::ranges::replace(words, '_', ' ');
         news_.push_back(m.from + ": " + words);
     }
-    if (!fast && !gameSettings().phoneMessageSound.empty()) ctx_.sound.playSound(ctx_.assets.sound(gameSettings().phoneMessageSound));
+    if (!fast) playNamed(gameSettings().phoneMessageSound);
     if (m.with == chat_) return; // (a chat scene's: on the phone already)
     if (!fast) requests_.push_back(cmd::Ui{.verb = "buzz"}); // (controllers buzz, as a phone does)
     if (gameSettings().newMessages == NewMessages::Open && !fast) // (the engine opens the phone on it, unless it's up already; not while skipping past)
@@ -302,7 +302,10 @@ void Game::startCall(const cmd::Call& c, std::size_t here) {
     if (skipping()) skip_ = false; // (one to answer stops skipping, as a choice does)
     const CharacterDef* def = who.character.empty() ? nullptr : script_.character(who.character);
     const std::string& tone = def && !def->ringtone.empty() ? def->ringtone : gameSettings().phoneRingtone;
-    if (!tone.empty()) ctx_.sound.playChannel(std::string(kRinging), ctx_.assets.sound(tone), true, 1.0f, 0.0f);
+    if (!tone.empty()) { // (a named sound: what it plays, as loud, as its type follows)
+        const Script::SoundPlay s = script_.soundOf(tone);
+        ctx_.sound.playChannel(std::string(kRinging), ctx_.assets.sound(s.file), true, s.volume, 0.0f, 0.0f, s.slider, s.type);
+    }
     waitFor(Wait::Call, here); // (a save made meanwhile rings again)
 }
 
@@ -349,7 +352,10 @@ void Game::callPerson(std::string_view who) {
     if (call_ || !chat_.empty() || !hasPhone() || !hasSignal()) return;
     const Person p = personNamed(who); // (it rings a while, then it's answered if they have a call scene, else busy)
     call_ = CallNow{.who = p.name, .character = p.character, .colour = p.colour, .outgoing = true, .talks = phoneSceneOf(script_, p.name, true).has_value()};
-    if (!gameSettings().phoneCallingSound.empty()) ctx_.sound.playChannel(std::string(kRinging), ctx_.assets.sound(gameSettings().phoneCallingSound), true, 1.0f, 0.0f);
+    if (!gameSettings().phoneCallingSound.empty()) {
+        const Script::SoundPlay s = script_.soundOf(gameSettings().phoneCallingSound);
+        ctx_.sound.playChannel(std::string(kRinging), ctx_.assets.sound(s.file), true, s.volume, 0.0f, 0.0f, s.slider, s.type);
+    }
     requests_.push_back(cmd::Ui{.verb = "show phone", .arg = "call"}); // (on the call, from a key or a button outside it too)
 }
 

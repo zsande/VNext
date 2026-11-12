@@ -89,6 +89,10 @@ void Movie::showFirst() {
     for (int i = 0; i < 20 && !texture() && !ended(); ++i) update(0.02f); // (its first image may come a little after the start)
 }
 
+void Movie::showLast() {
+    if (plm_) plm_seek(plm_.get(), std::max(0.0, plm_get_duration(plm_.get()) - 0.05), 1); // (its image there comes through the callback)
+}
+
 void Movie::setLoop(bool loop) {
     loop_ = loop;
     if (plm_) plm_set_loop(plm_.get(), loop);

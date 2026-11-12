@@ -122,7 +122,6 @@ struct HistoryEntry {
     std::vector<TextSpan> spans;
     // The line's voice, to hear it again: a sound file, or made-up speech (made_up_voice=) of its text.
     std::string voice;
-    float voiceVolume = 1.0f;
     float madeUpVoice = 0.0f, madeUpVoiceSpeed = 1.0f;
     [[nodiscard]] bool voiced() const { return !voice.empty() || madeUpVoice > 0.0f; }
 };
@@ -150,6 +149,7 @@ public:
     void carry(Variables vars) { carried_ = std::move(vars); } // the variables the next start() begins with (else none)
     void update(float dt);
     void draw(const Font& labelFont);
+    [[nodiscard]] Stage& stage() { return stage_; } // (the developer tools' samples: an effect or the weather tried on it)
 
     // Player input.
     void nextLine();
@@ -159,15 +159,15 @@ public:
     void toggleAuto() { auto_ = !auto_; }
     // A command from a button, key or screen hook (anything that doesn't wait).
     void perform(const Command& command);
-    // The developer tools' Play from this line (and the Screens page's sample): plays on as fast as it goes
-    // (picking the options that lead to command `target`) to the first line, choice, movie or screen
-    // opened at a command where `there` is true, and shows it (a line whole, a movie's first image), with
-    // the stage settled. When the story would go past `target` without doing it (an `if` it's in isn't
-    // true, or the option it's under isn't picked), it goes on from `target` itself, with everything as
-    // it is then. False if the story never gets there (or not within a second). Other movies are gone past.
+    // The developer tools' Play from here (and the Screens page's sample): plays on as fast as it goes
+    // (picking the options that lead to command `target`) to the first line, choice or screen opened at a
+    // command where `there` is true, and shows it (a line whole), with the stage settled. When the story would
+    // go past `target` without doing it (an `if` it's in isn't true, or the option it's under isn't picked), it
+    // goes on from `target` itself, with everything as it is then. False if the story never gets there (or not
+    // within a second). Movies that play once are gone past.
     bool playTo(std::size_t target, const std::function<bool(std::size_t)>& there);
     // Set before start(): the story stops just before command `pc` (playTo() stops there, ready to do it,
-    // whatever it is: a movie, a scene...), so a save made then starts with it.
+    // whatever it is: a background, a scene...), so a save made then starts with it.
     void stopBefore(std::optional<std::size_t> pc) { stopAt_ = pc; }
     // The developer tools' Stop here and Next line: the story asks `where` before each command it runs,
     // and stops just before one it says yes to, until goOn() (a save made meanwhile starts with it).
@@ -176,21 +176,20 @@ public:
     void goOn();
     // The screen the story was waiting for closed, with an answer ("answer TEXT") or not.
     void screenClosed(std::optional<Value> answer);
-    // A menu covers the game (or no longer does): the voice line and movie wait meanwhile.
+    // A menu covers the game (or no longer does): the line's voice and the stage's movies wait meanwhile.
     void setCovered(bool covered);
-    [[nodiscard]] bool playingMovie() const { return wait_ == Wait::Movie; }
     [[nodiscard]] bool lineVoiced() const { return voiced_ && !madeUpVoice_; } // the line on screen has a voice of its own (made-up speech isn't one)
     // Captions (the player's setting): the sounds and songs that just began, by their caption lines (a song's after a
     // note), each for a few seconds; and the movie's subtitle now (its .srt's).
     struct Caption {
         std::string text;
+        std::vector<TextSpan> spans; // (its words' look, as its caption line's tags have it: bold, colours...)
         bool music = false;
         float left = 0.0f; // seconds
     };
     [[nodiscard]] const std::vector<Caption>& captions() const { return captions_; }
     [[nodiscard]] std::string subtitle() const;
     [[nodiscard]] bool captioned() const { return !captions_.empty() || !subtitle().empty(); }
-    void playMovieRound(float dt); // the developer tools' preview at a movie: it plays, round and round, and the story waits
 
     // Variables, then persistent ones, then what `variable` lines start them at, then the engine's built-in names.
     [[nodiscard]] Value variable(std::string_view name) const;
@@ -351,7 +350,7 @@ public:
 private:
     // (Chat: a chat scene waits for a message to come, or for a change to it; Call: a call rings; Clock: the player's
     // clock, setting time real)
-    enum class Wait : std::uint8_t { None, Say, Menu, Timer, Background, Pause, Move, Screen, Movie, Reached, Stopped, Finished, Chat, Call, Clock };
+    enum class Wait : std::uint8_t { None, Say, Menu, Timer, Background, Pause, Move, Screen, Reached, Stopped, Finished, Chat, Call, Clock };
 
     struct Stop {
         std::size_t at; // codepoint position in the text
@@ -362,8 +361,10 @@ private:
         int cps; // < 0: back to the player's setting
     };
     struct Loop {
-        std::string file;
-        float volume = 1.0f;
+        std::string name;          // what was played: a named sound's name, or a file's (what stops it)
+        std::string file;          // what it plays, as sounds/ names it
+        float volume = 1.0f;       // (its type's in it)
+        std::string type = "sound"; // its sound type (which of the player's volumes it follows)
     };
 
     void run();
@@ -377,8 +378,13 @@ private:
     void execute(const Command& command, std::size_t here);
     void sayLine(const cmd::Say& c, std::size_t here, bool fast);       // ...a line said
     void openMenu(const cmd::Menu& c, std::size_t here);                // ...a choice
-    void play(const cmd::Play& c, bool fast);                           // ...music, a voice or a sound
-    void playMovie(const cmd::Movie& c, std::size_t here, bool fast);   // ...a movie
+    void play(const cmd::Play& c, bool fast);                           // ...a sound, as its type plays it (or stopped)
+    void stopSound(const std::string& what, float fade);                // ...by its name, or all of a type
+public:
+    // A sound by its name where the game plays one of its own (the phone's, typing): as Script::soundOf has it, once,
+    // `volume` times as loud.
+    void playNamed(std::string_view name, float volume = 1.0f);
+private:
     void sendMessage(const cmd::Message& c, std::size_t here);          // ...a message on the phone, or a change to one
     void startCall(const cmd::Call& c, std::size_t here);               // ...a call
     void passTime(const cmd::Time& c, std::size_t here);                // ...the story's time going on (or the player's waited for)
@@ -401,7 +407,6 @@ private:
     [[nodiscard]] std::shared_ptr<const Animation> animation(std::string_view name) const;
     void waitFor(Wait wait, std::size_t here);
     void fail(std::string message);
-    void endMovie(); // the story goes on after it
     void say(std::string speaker, SDL_Color colour, std::string_view text, const CharacterDef* def);
     void revealTo(std::size_t position);
     void updateLine(float dt, bool fast);
@@ -443,6 +448,7 @@ private:
     void passPoint(std::size_t here, Flowchart::Kind kind, std::vector<Flowchart::Option> options = {});
     float musicVolume_ = 1.0f;
     std::map<std::string, Loop, std::less<>> loops_; // looping sound channels (restored on load)
+    std::map<std::string, std::string, std::less<>> typePlaying_; // a sound type played one at a time: what plays on it (stopped by its name)
     std::map<std::string, std::string, std::less<>> expressions_; // each character's latest expression
     std::vector<std::string> screens_;                // screens shown with "show screen"
     std::vector<PageLine> page_;                      // the lines said (a page part shows the newest that fit)
@@ -532,14 +538,7 @@ private:
     bool noWait_ = false;
     std::size_t length_ = 0; // codepoints in text_
     bool lineRead_ = false;  // the line was seen before (in any playthrough)
-    struct LineVoice {
-        std::string file;        // as the script names it
-        float volume = 1.0f;
-        std::optional<bool> textFollows; // "voice x text_follows=yes" / "=no"
-    };
-    std::optional<LineVoice> pendingVoice_; // a voice line started for the next line
-    LineVoice lineVoice_;                   // the line on screen's own voice line (file empty: none)
-    bool voiced_ = false;                // the line on screen has its voice line
+    bool voiced_ = false;                // the line on screen plays a voice (its own, its speaker's voice file or made-up speech)
     bool madeUpVoice_ = false;           // ...made-up speech (it stands for the typing: shown at once by a click, it stops)
     bool textFollowsVoice_ = false;      // ...and its text shows as much as has been said
     bool typing_ = false;                // letters are appearing
@@ -554,18 +553,15 @@ private:
     float typingSoundTimer_ = 0.0f;
     float timer_ = 0.0f;
 
-    std::unique_ptr<Movie> movie_;  // "movie NAME" playing
     std::vector<Caption> captions_; // (see captions())
     struct Subtitle {
         double from = 0.0, to = 0.0; // seconds into the movie
         std::string text;
     };
-    std::vector<Subtitle> subtitles_; // the movie's, while it plays
+    std::vector<Subtitle> subtitles_; // the background movie's
     [[nodiscard]] static std::vector<Subtitle> subtitlesOf(const Assets& assets, std::string_view movie);
-    void caption(std::string_view sound, bool music);
-    std::string movieStandIn_;      // ...or the name of one that's missing (a card shows it for a moment)
-    TextBlock movieLabel_;
-    bool movieSkippable_ = true;
+    void caption(std::string_view name, std::string_view file, bool music);
+    [[nodiscard]] bool passesMovies(bool fast) const; // (skipping, the player letting it, or the developer tools playing to a line)
     std::vector<ChoiceItem> choiceItems_;
     [[nodiscard]] const cmd::Menu* menu() const; // the choice on screen (its command: a save made now repeats it)
     [[nodiscard]] std::optional<ChoiceItem> offer(const cmd::Choice& choice, int option) const; // shown now, if it is

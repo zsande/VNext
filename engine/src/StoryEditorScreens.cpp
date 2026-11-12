@@ -257,42 +257,116 @@ bool StoryEditor::renameScreen(std::size_t screen, const std::string& name, cons
     return true;
 }
 
+bool StoryEditor::addMenuButton(const Screen& menu, const std::vector<std::string>& order, std::size_t at, const std::string& label, const std::string& more) {
+    const auto& all = parts(menu);
+    std::vector<std::pair<std::size_t, std::size_t>> buttons; // (the menu's: their part, and where they are in `order`)
+    for (std::size_t i = 0; i < all.size(); ++i) {
+        if (all[i].kind != "text" || all[i].option("action").empty()) continue; // (a button: a text with an action)
+        const auto it = std::ranges::find(order, lower(all[i].option("action")));
+        if (it == order.end()) continue;
+        if (static_cast<std::size_t>(it - order.begin()) == at) return false; // (it has one)
+        buttons.emplace_back(i, static_cast<std::size_t>(it - order.begin()));
+    }
+    // The box they're in (all of them): one whose parts go one under another, as the ready-made menus' do.
+    auto boxOf = [&](std::size_t i) -> std::optional<std::size_t> {
+        for (std::size_t j = i; j-- > 0;)
+            if (all[j].depth < all[i].depth) return all[j].depth == all[i].depth - 1 ? std::optional(j) : std::nullopt;
+        return std::nullopt;
+    };
+    if (buttons.empty()) return false;
+    const auto box = boxOf(buttons.front().first);
+    if (!box || all[*box].kind != "container" || (all[*box].option("stack") != "down" && all[*box].option("stack") != "across") ||
+        std::ranges::any_of(buttons, [&](const auto& b) { return boxOf(b.first) != box; }))
+        return false;
+    // After the last one that comes before it (a copy of that one, as the user made it), else before the first.
+    std::optional<std::pair<std::size_t, std::size_t>> before, after;
+    for (const auto& b : buttons) {
+        if (b.second < at && (!before || b.second > before->second)) before = b;
+        if (b.second > at && (!after || b.second < after->second)) after = b;
+    }
+    const Part& like = all[(before ? before : after)->first];
+    Part made = like;
+    made.text = label;
+    made.quoted = true;
+    made.note.clear();
+    for (const std::string_view own : {"action", "clickable", "keys", "when", "chosen", "confirm", "drag", "drop", "click_animation"}) made.set(own, {});
+    made.set("action", order[at]);
+    for (const std::string& word : rawWords(more))
+        if (const auto eq = word.find('='); eq != npos) made.set(lower(word.substr(0, eq)), unquote(word.substr(eq + 1)));
+    auto& lines = files_[menu.file].lines;
+    const std::size_t line = before ? all[before->first].end : all[after->first].line;
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(line), leading(lines[like.line]) + lineOf(made));
+    write(menu.file);
+    rescan();
+    return true;
+}
+
+void StoryEditor::insertParts(const Screen& screen, std::size_t line, const Part& like, const std::vector<std::string>& text, const std::vector<std::string>& needs) {
+    auto& lines = files_[screen.file].lines;
+    const std::string indent = leading(lines[like.line]);
+    int least = INT_MAX; // (the lines' own indentation, under the first's)
+    for (const std::string& l : text)
+        if (!blank(l)) least = std::min(least, indentOf(l));
+    std::size_t n = 0;
+    for (const std::string& l : text)
+        if (!blank(l)) lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(line + n++), indent + l.substr(static_cast<std::size_t>(std::min(least, indentOf(l)))));
+    if (!needs.empty()) { // (the colours and styles they use that the game lacks: above its screen)
+        std::vector<std::string> block = needs;
+        block.emplace_back();
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(screen.line), block.begin(), block.end());
+    }
+    write(screen.file);
+    rescan();
+}
+
 void StoryEditor::removeScreen(std::size_t screen) {
     remember({});
     const Screen s = screens_[screen];
     auto& lines = files_[s.file].lines;
     const std::size_t from = s.line > 0 && blank(lines[s.line - 1]) ? s.line - 1 : s.line;
     lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(from), lines.begin() + static_cast<std::ptrdiff_t>(s.end));
-    // The keys and buttons that only opened it go too (a key opening a screen that isn't there is a mistake).
+    // The keys and buttons that only opened it go too (a key opening a screen that isn't there is a mistake), and the
+    // boxes that showed it (a phone's app: screen=), one with parts of its own keeping them.
     const std::string opens = "open " + lower(s.name);
     for (std::size_t f = 0; f < files_.size(); ++f) {
-        const auto before = files_[f].lines.size();
-        std::erase_if(files_[f].lines, [&](const std::string& line) {
-            const auto words = rawWords(splitNote(line).first);
-            if (words.empty()) return false;
+        auto& in = files_[f].lines;
+        bool changed = false;
+        for (std::size_t i = in.size(); i-- > 0;) {
+            const auto words = rawWords(splitNote(in[i]).first);
+            if (words.empty()) continue;
             const std::string kind = lower(words[0]);
-            if (!(indentOf(line) == 0 ? kind == "control" : kind == "button")) return false;
-            return std::ranges::any_of(words, [&](const std::string& w) { return lower(w).starts_with("action=") && lower(unquote(w.substr(7))) == opens; });
-        });
-        if (f == s.file || files_[f].lines.size() != before) write(f);
+            auto option = [&](std::string_view key, std::string_view value) {
+                return std::ranges::find_if(words, [&](const std::string& w) { return lower(w).starts_with(std::string(key) + "=") && lower(unquote(w.substr(key.size() + 1))) == value; });
+            };
+            if ((indentOf(in[i]) == 0 ? kind == "control" : kind == "text") && option("action", opens) != words.end()) { // (a control, or a button: a text with that action)
+                in.erase(in.begin() + static_cast<std::ptrdiff_t>(i));
+                changed = true;
+            } else if (const auto app = option("screen", lower(s.name)); indentOf(in[i]) > 0 && kind == "container" && app != words.end()) {
+                std::size_t next = i + 1; // (the next part's line: one in it, or not)
+                while (next < in.size() && blank(in[next])) ++next;
+                if (next >= in.size() || indentOf(in[next]) <= indentOf(in[i])) in.erase(in.begin() + static_cast<std::ptrdiff_t>(i));
+                else {
+                    std::string kept = leading(in[i]);
+                    for (const std::string& w : words)
+                        if (&w != &*app) kept += (&w == &words.front() ? "" : " ") + w;
+                    if (const std::string note(splitNote(in[i]).second); !note.empty()) kept += "   " + note;
+                    in[i] = std::move(kept);
+                }
+                changed = true;
+            }
+        }
+        if (f == s.file || changed) write(f);
     }
     rescan();
 }
 
-std::vector<std::string> StoryEditor::defined(std::string_view what) const {
+std::vector<std::string> StoryEditor::defined(std::string_view what) const { // (as definitions() has them: a sound type's under "sound type")
     std::vector<std::string> out;
-    for (const File& f : files_)
-        for (const std::string& line : f.lines)
-            if (indentOf(line) == 0 && lower(firstWord(line)) == what)
-                if (const std::string name(firstWord(afterFirst(line))); !name.empty() && !std::ranges::contains(out, name)) out.push_back(name);
+    for (const Definition& d : definitions(what))
+        if (!d.name.empty() && !std::ranges::contains(out, d.name)) out.push_back(d.name);
     return out;
 }
 
-bool StoryEditor::defines(std::string_view what, std::string_view name) const {
-    for (const File& f : files_)
-        for (const std::string& line : f.lines)
-            if (indentOf(line) == 0 && lower(firstWord(line)) == what && lower(firstWord(afterFirst(line))) == lower(name)) return true;
-    return false;
-}
+bool StoryEditor::defines(std::string_view what, std::string_view name) const { return hasNamed(definitions(what), name); }
 
 } // namespace vn

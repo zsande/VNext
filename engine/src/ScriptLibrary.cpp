@@ -1,5 +1,6 @@
 // Reading what the Library lists: characters, colours, places, fonts, variables, styles, atlases, animations,
 // sub-images, controls, the gallery, endings, songs, achievements, tips, captions, and the game's settings.
+#include "Files.hpp"
 #include "ScriptParser.hpp"
 
 #include <algorithm>
@@ -9,8 +10,10 @@
 #include <limits>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace vn {
@@ -19,22 +22,67 @@ namespace parse {
 
 // -- Definitions ----------------------------------------------------------------
 void Parser::definitions() {
-    // Colours first so everything else can use them, then the rest in a fixed order; within a
-    // group, lines take effect in the order they were written (so the last one wins).
-    static constexpr std::array<std::array<std::string_view, 2>, 13> order{{
-        {"colour", ""}, {"setting", ""}, {"place", ""}, {"font", ""}, {"atlas", "sub-image"}, {"character", ""}, {"style", ""},
-        {"control", ""}, {"gallery", "ending"}, {"song", "achievement"}, {"tip", "animation"}, {"screen", "caption"}, {"variable", ""},
+    // Colours first so everything else can use them, then the rest in a fixed order (animations before the characters and
+    // visuals that play them); within a group, lines take effect in the order they were written (so the last one wins).
+    static constexpr std::array<std::array<std::string_view, 2>, 14> order{{
+        {"colour", ""}, {"setting", ""}, {"place", "type"}, {"font", "animation"}, {"atlas", "sub-image"}, {"character", "visual"}, {"sound", ""}, {"style", ""},
+        {"control", ""}, {"gallery", "ending"}, {"song", "achievement"}, {"tip", ""}, {"screen", "caption"}, {"variable", ""},
     }};
+    for (std::size_t i = 0; i < kVisualTypes.size(); ++i) // (every game's types: their layers and what each takes)
+        s_.visualTypes.insert_or_assign(std::string(kVisualTypes[i]), Script::VisualType{.layer = kVisualTypeLayers[i], .accepts = std::string(kVisualTypeAccepts[i])});
+    // (every game's sound types: music one at a time and looping, sounds many at once and once, a voice one at a time, once)
+    s_.soundTypes.insert_or_assign("music", Script::SoundType{.follows = SoundSlider::Music, .oneAtATime = true, .loop = true});
+    s_.soundTypes.insert_or_assign("sound", Script::SoundType{.follows = SoundSlider::Sound});
+    s_.soundTypes.insert_or_assign("voice", Script::SoundType{.follows = SoundSlider::Voice, .oneAtATime = true});
     for (const auto& group : order)
         for (const Line* line : defs_)
             if (const std::string kind = headOf(line->text); kind == group[0] || kind == group[1]) {
                 const bool lenient = startsWithCapital(line->text) && line->children.empty();
                 if (!attempt(lenient, [&] { define(*line, kind); })) asText_.insert(line);
             }
+    folderRecords();
     startTime();
     for (const auto& [key, line] : animationSettings_) // (setting animation_on_show and animation_on_hide: animations the scripts have)
         if (const std::string& name = key == "animation_on_show" ? s_.gameSettings.animationOnShow : s_.gameSettings.animationOnHide; !name.empty() && !s_.animations.contains(name))
             error(*line, "There's no animation called '{}'."_tr(name));
+}
+
+} // namespace parse
+
+std::vector<Script::Record> folderRecords(RecordKind kind, const FolderLister& list) {
+    if (!list || (kind != RecordKind::Gallery && kind != RecordKind::Song)) return {};
+    // (the gallery's: pictures, still or moving, in images/gallery and movies/gallery; the music room's in sounds/music)
+    struct Folder {
+        std::string_view path;
+        std::span<const std::string_view> types;
+    };
+    const std::vector<Folder> folders = kind == RecordKind::Gallery ? std::vector<Folder>{{"images/gallery/", kImageTypes}, {"movies/gallery/", kMovieTypes}}
+                                                                    : std::vector<Folder>{{"sounds/music/", kSoundTypes}};
+    std::vector<Script::Record> out;
+    for (const auto& [folder, types] : folders)
+        for (const std::string& file : list(std::string(folder))) {
+            const auto dot = file.rfind('.');
+            if (dot == std::string::npos || file.contains('/') || !std::ranges::contains(types, lower(std::string_view(file).substr(dot)))) continue;
+            std::string title(trim(std::string_view(file).substr(0, dot))); // (as its file is called: beach_sunset, "Beach sunset")
+            std::ranges::replace(title, '_', ' ');
+            std::ranges::replace(title, '-', ' ');
+            if (!title.empty()) title[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(title[0])));
+            const std::string name = std::string(folder.substr(folder.find('/') + 1)) + scriptName(std::string_view(file).substr(0, dot)); // (as scripts call it)
+            if (std::ranges::none_of(out, [&](const Script::Record& r) { return sameName(r.name, name); })) out.push_back({.name = name, .title = std::move(title)});
+        }
+    return out;
+}
+
+namespace parse {
+
+// The pictures in images/gallery and the songs in sounds/music: in the gallery and the music room after the ones listed,
+// unless one's listed already (with a title of its own, in its place).
+void Parser::folderRecords() {
+    for (const RecordKind kind : {RecordKind::Gallery, RecordKind::Song}) {
+        auto& records = s_.lists[static_cast<std::size_t>(kind)];
+        for (Script::Record& r : vn::folderRecords(kind, list_))
+            if (std::ranges::none_of(records, [&](const Script::Record& listed) { return sameName(listed.name, r.name); })) records.push_back(std::move(r));
+    }
 }
 
 // setting time_start: a date (2025-07-14) or a weekday, then a time of day or a part of the day; none said: the first
@@ -68,7 +116,7 @@ void Parser::startTime() {
             g.timeStartMinutes = part->second;
             clock = true;
         } else {
-            return error(line, "Starts at is a date (2025-07-14) or a weekday, then a time of day (8:00) or a part of the day: not '{}'."_tr(w[i]));
+            return error(line, "Start day is a date (2025-07-14) or a weekday, and Start time a time of day (8:00) or a part of the day: not '{}'."_tr(w[i]));
         }
     }
 }
@@ -105,6 +153,148 @@ void Parser::define(const Line& line, std::string_view kind) {
         const auto n = value ? stageCoordinate(*value, false) : std::nullopt;
         if (!name || !n || !c.done()) return error(line, "A place line needs a name and a number from -1 to 1."_tr());
         places_.insert_or_assign(lower(*name), *n);
+    } else if (kind == "type") { // type NAME [layer=N] [accepts=KINDS]: a visual type of the game's own, its visuals drawn at that layer (higher: in front);
+                                  // type NAME follows=music|sound|voice [one_at_a_time=yes] [loop=yes] [volume=N%]: a sound type of the game's own
+        const auto name = c.next();
+        if (!name) return error(line, "A type line needs a name."_tr());
+        if (std::ranges::contains(kVisualTypes, lower(*name)) || std::ranges::contains(kBuiltInSoundTypes, lower(*name)))
+            return error(line, "Every game has the type '{}': a type of the game's own needs another name."_tr(*name));
+        Script::VisualType type;
+        const bool sound = std::ranges::any_of(rawWords(line.text), [](const std::string& w) { // (a sound's: it says which volume it follows, or how it plays)
+            const std::string k = lower(w.substr(0, w.find('=')));
+            return w.contains('=') && (k == "follows" || k == "one_at_a_time" || k == "loop" || k == "volume");
+        });
+        if (sound) { // (which of the player's volumes it follows, one at a time or many, looping, its own volume)
+            Script::SoundType st{.follows = SoundSlider::Sound};
+            std::optional<bool> one, loops;
+            while (!c.done()) {
+                const auto opt = c.option();
+                if (!opt) return error(line, "'{}' doesn't belong in a type line."_tr(c.peek().text));
+                const auto& [option, value] = *opt;
+                if (option == "follows") {
+                    const std::string v = lower(value);
+                    if (v != "music" && v != "sound" && v != "voice") return error(line, "'follows' can be music, sound or voice, not '{}'."_tr(value));
+                    st.follows = v == "music" ? SoundSlider::Music : v == "voice" ? SoundSlider::Voice : SoundSlider::Sound;
+                } else if (option == "one_at_a_time") {
+                    if (!(one = boolean(line, value, option))) return;
+                } else if (option == "loop") {
+                    if (!(loops = boolean(line, value, option))) return;
+                } else if (option == "volume") {
+                    const auto n = parseNumber(value);
+                    if (!n || *n < 0.0f) return error(line, "'volume' needs an amount (50%), not '{}'."_tr(value));
+                    st.volume = std::min(1.0f, *n);
+                } else if (option == "layer" || option == "accepts") {
+                    return error(line, "A sound type has no '{}': that's a visual type's."_tr(option));
+                } else {
+                    return error(line, "'{}' doesn't belong in a type line."_tr(option));
+                }
+            }
+            const Script::SoundType& like = s_.soundTypes.at(st.follows == SoundSlider::Music ? "music" : st.follows == SoundSlider::Voice ? "voice" : "sound");
+            st.oneAtATime = one.value_or(like.oneAtATime); // (as the one it follows, unless it says)
+            st.loop = loops.value_or(like.loop);
+            if (s_.visualTypes.contains(lower(*name))) return error(line, "'{}' is a visual type's name: a sound type needs another."_tr(*name));
+            if (lower(*name) == "weather") return error(line, "'stop weather' stops the weather: a sound type needs another name."_tr()); // (stop TYPE)
+            if (lower(*name) == "effect") return error(line, "'stop effect' stops the effects: a sound type needs another name."_tr());
+            s_.soundTypes.insert_or_assign(lower(*name), st);
+            return;
+        }
+        if (s_.soundTypes.contains(lower(*name))) return error(line, "'{}' is a sound type's name: a visual type needs another."_tr(*name));
+        while (!c.done()) {
+            const auto opt = c.option();
+            if (!opt) return error(line, "'{}' doesn't belong in a type line."_tr(c.peek().text));
+            const auto& [option, value] = *opt;
+            if (option == "layer") {
+                const auto n = parseNumber(value);
+                if (!n || *n != std::floor(*n)) return error(line, "'layer' needs a whole number (under 0: behind the background), not '{}'."_tr(value));
+                type.layer = static_cast<int>(*n);
+            } else if (option == "accepts") { // (characters, images, movies, colours: several with commas between them)
+                type.accepts.clear();
+                for (const auto part : std::views::split(std::string_view(value), ',')) {
+                    const std::string taken = lower(trim(std::string_view(part.begin(), part.end())));
+                    if (taken != "character" && taken != "image" && taken != "movie" && taken != "colour")
+                        return error(line, "'accepts' can be character, image, movie or colour (several with commas between them), not '{}'."_tr(value));
+                    type.accepts += (type.accepts.empty() ? "" : " ") + taken;
+                }
+            } else {
+                return error(line, "'{}' doesn't belong in a type line."_tr(option));
+            }
+        }
+        s_.visualTypes.insert_or_assign(lower(*name), std::move(type));
+    } else if (kind == "visual") { // visual NAME [type=TYPE] [shows=WHAT] [how it comes: at= y= zoom= opacity= rotation= flip= tint= layer= animation= animation_on_show=; a movie's loop= volume=] [width=N] [height=N]
+        const auto name = c.next();
+        if (!name) return error(line, "A visual line needs a name."_tr());
+        Script::NamedVisual v{.type = "image", .shows = std::string(*name)};
+        while (!c.done()) {
+            const auto opt = c.option();
+            if (!opt) return error(line, "'{}' doesn't belong in a visual line."_tr(c.peek().text));
+            const auto& [option, value] = *opt;
+            if (const Took t = comesSetting(line, option, value, v.comes, v.animation, v.animationOnShow); t != Took::No) { // (a background's place: the part of it that shows)
+                if (t == Took::Bad) return;
+            } else if (option == "loop") { // (a movie's: again and again)
+                if (!(v.loop = boolean(line, value, option))) return;
+            } else if (option == "volume") {
+                const auto n = parseNumber(value);
+                if (!n || *n < 0.0f) return error(line, "'volume' needs an amount (50%), not '{}'."_tr(value));
+                v.volume = std::min(1.0f, *n);
+            } else if (option == "width" || option == "height") { // (a colour's box: a part of the stage's, or pixels: 640px)
+                if (!((option == "width" ? v.width : v.height) = boxSize(line, option, value))) return;
+            } else if (option == "type") {
+                v.type = lower(value);
+                if (v.type == "character") return error(line, "A character is made by a character line, not a visual one."_tr());
+                const auto type = s_.visualTypes.find(v.type);
+                if (type == s_.visualTypes.end())
+                    return error(line, s_.soundTypes.contains(v.type) ? "'{}' is a sound type, not a visual one."_tr(v.type) : "There's no type called '{}'."_tr(v.type));
+                if (type->second.accepts == "character") // (a character is shown by its name)
+                    return error(line, "'{}' takes characters: a visual of it is one of them, shown by their name."_tr(v.type));
+            } else if (option == "shows") {
+                v.shows = value;
+            } else {
+                return error(line, "'{}' doesn't belong in a visual line."_tr(option));
+            }
+        }
+        if (s_.characters.contains(lower(*name))) return error(line, "'{}' is a character's name: a visual needs another."_tr(*name));
+        if (v.type == "background") // (the whole stage: no layer, nor a look of its own)
+            for (const auto& [set, key] : {std::pair{v.comes.layer.has_value(), "layer"}, {v.comes.zoom.has_value(), "zoom"}, {v.comes.opacity.has_value(), "opacity"},
+                                          {v.comes.rotation.has_value(), "rotation"}, {v.comes.flip.has_value(), "flip"}, {v.comes.tint.has_value(), "tint"}})
+                if (set) return error(line, "A background has no '{}'."_tr(key));
+        if ((v.width || v.height) && // (a size is a colour's box's: one of a type that takes colours, not the background, the whole stage)
+            (v.type == "background" || !s_.visualTypes.at(v.type).accepts.contains("colour") || (!parseColour(v.shows, &s_.palette) && !parseGradient(v.shows, &s_.palette))))
+            return error(line, "'width' and 'height' are the size of a colour's box, and '{}' doesn't show one."_tr(*name));
+        s_.visuals.insert_or_assign(lower(*name), std::move(v));
+    } else if (kind == "sound") { // sound NAME [type=TYPE] [plays=FILE] [how it plays: loop= volume= fade= fade_out=]
+        const auto name = c.next();
+        if (!name) return error(line, "A sound line needs a name."_tr());
+        Script::NamedSound s{.plays = std::string(*name)};
+        while (!c.done()) {
+            const auto opt = c.option();
+            if (!opt) return error(line, "'{}' doesn't belong in a sound line."_tr(c.peek().text));
+            const auto& [option, value] = *opt;
+            if (option == "type") {
+                s.type = lower(value);
+                if (!s_.soundTypes.contains(s.type))
+                    return error(line, s_.visualTypes.contains(s.type) ? "'{}' is a visual type, not a sound one."_tr(value) : "There's no sound type called '{}'."_tr(value));
+            } else if (option == "plays") {
+                s.plays = value;
+            } else if (option == "loop") {
+                if (!(s.loop = boolean(line, value, option))) return;
+            } else if (option == "volume") {
+                const auto n = parseNumber(value);
+                if (!n || *n < 0.0f) return error(line, "'volume' needs an amount (50%), not '{}'."_tr(value));
+                s.volume = std::min(1.0f, *n);
+            } else if (option == "fade" || option == "fade_out") {
+                const auto n = parseNumber(value);
+                if (!n || *n < 0.0f) return error(line, "'{}' needs a number of seconds, not '{}'."_tr(option, value));
+                (option == "fade" ? s.fade : s.fadeOut) = *n;
+            } else {
+                return error(line, "'{}' doesn't belong in a sound line."_tr(option));
+            }
+        }
+        const std::string key = lower(*name);
+        // (stop NAME: a sound's, a type's, the weather's or the effects')
+        if (s_.soundTypes.contains(key)) return error(line, "'{}' is a sound type's name: a sound needs another."_tr(*name));
+        if (key == "weather") return error(line, "'stop weather' stops the weather: a sound needs another name."_tr());
+        if (key == "effect") return error(line, "'stop effect' stops the effects: a sound needs another name."_tr());
+        s_.sounds.insert_or_assign(key, std::move(s));
     } else if (kind == "font") { // font [NAME] FILE [STYLE]
         const auto a = c.next(), b = c.next(), style = c.next();
         if (!a || !c.done())
@@ -212,7 +402,7 @@ void Parser::atlas(const Line& line, Cursor& c) {
         }
         if (!names.empty()) *list = std::move(names); // (same_names_as= may have given the names already)
         if (list->empty()) error(part, "'{}' needs a name for each frame."_tr(what));
-        if (layer && layer->image.empty()) error(part, "Which image holds the {} is missing."_tr(what));
+        if (layer && layer->image.empty()) error(part, "Which visual holds the {} is missing."_tr(what));
         if (list == &a.eyes) a.eyesPart = layer;
         if (list == &a.mouth) a.mouthPart = layer;
     }
@@ -273,7 +463,7 @@ void Parser::animation(const Line& line, Cursor& c) {
                 if (!n) error(part, "'at' needs a number of seconds."_tr()), ok = false;
                 else start = std::max(0.0f, *n), seconds = 0.0f;
             } else if (w->atOption("ease")) {
-                const auto e = oneOf<Ease>(part, "ease", w->option()->second, kEases);
+                const auto e = oneOf<Ease>(part, "ease", w->option()->second, kEaseNames);
                 if (!e) ok = false;
                 else ease = *e, easeSaid = true;
             } else if (w->atOption("shape")) { // shape=IMAGE: where the wipe on this line shows it first
@@ -358,7 +548,7 @@ void Parser::subImage(const Line& line, Cursor& c) {
         else return;
     }
     if (p.image.empty() || p.rect.w <= 0.0f || p.rect.h <= 0.0f)
-        return error(line, "A sub-image line needs the image it's cut from and the part of it."_tr());
+        return error(line, "A sub-image line needs the visual it's cut from and the part of it."_tr());
     if (lower(p.image) == p.name) return error(line, "A sub-image can't be cut from itself: give it a name of its own."_tr());
     std::erase_if(s_.subImages, [&](const SubImage& other) { return other.name == p.name; }); // the last one wins
     s_.subImages.push_back(std::move(p));
@@ -453,6 +643,16 @@ void Parser::character(const Line& line, Cursor& c) {
             else if (col) def.textColour = *col;
         }
         else if (key == "image") def.image = imageName(value);
+        else if (const Took t = comesSetting(line, key, value, def.comes, def.animation, def.animationOnShow); t != Took::No) ok = t == Took::Yes; // (how they come when a line doesn't say)
+        else if (key == "love") { // a love interest: their love, a variable of its own (mika.love), starts at this
+            const auto n = number(line, value, key);
+            ok = n.has_value();
+            if (n) {
+                def.love = loveVariable(*name);
+                s_.startValues.insert_or_assign(def.love, std::abs(*n - std::round(*n)) < 1e-6f ? Value(static_cast<int>(std::lround(*n))) : Value(static_cast<double>(*n)));
+                if (!std::ranges::contains(s_.loves, def.key)) s_.loves.push_back(def.key);
+            }
+        }
         else if (key == "text_appears") ok = (def.textAppears = oneOf<TextAppears>(line, key, value, kTextAppears)).has_value();
         else if (key == "textbox") def.textbox = lower(value);
         else if (key == "typing_sound") def.typingSound = value;
@@ -461,11 +661,8 @@ void Parser::character(const Line& line, Cursor& c) {
             def.voiceFiles = b == false ? "" : std::format("voices/{}", b ? characterImageName(*name) : imageName(value));
         }
         else if (key == "made_up_voice") { // high, medium, low, deep, no, or a pitch in Hz
-            static constexpr std::pair<std::string_view, float> heights[]{{"high", 250.0f}, {"medium", 190.0f}, {"low", 135.0f}, {"deep", 105.0f}};
-            const auto height = std::ranges::find(heights, lower(value), &std::pair<std::string_view, float>::first);
-            if (height != std::end(heights)) def.madeUpVoice = height->second;
+            if (const auto pitch = madeUpVoicePitch(value)) def.madeUpVoice = *pitch;
             else if (parseBool(value) == false) def.madeUpVoice = 0.0f;
-            else if (const auto hz = parseNumber(value); hz && *hz >= 50.0f && *hz <= 600.0f) def.madeUpVoice = *hz;
             else return error(line, "'made_up_voice' can be high, medium, low, deep, no or a pitch, not '{}'."_tr(value));
         }
         else if (key == "made_up_voice_speed") ok = within(def.madeUpVoiceSpeed, 0.25f, 4.0f);
@@ -489,7 +686,7 @@ void Parser::character(const Line& line, Cursor& c) {
         else if (key == "chat" || key == "call") { // the scene played when the player opens their chat, or calls them
             if (!isName(lower(value))) return error(line, "'{}' needs a scene's name, not '{}'."_tr(key, value));
             (key == "chat" ? def.chatScene : def.callScene) = lower(value);
-            phoneSceneNames_.push_back({.file = line.file, .number = line.number, .scene = lower(value)});
+            sceneNames_.push_back({.file = line.file, .number = line.number, .scene = lower(value)});
         }
         else if (key == "face_flip") ok = flag(def.faceFlip);
         else if (key == "face_blink") ok = (faceBlink = boolean(line, value, key)).has_value();
@@ -505,7 +702,7 @@ void Parser::character(const Line& line, Cursor& c) {
     s_.characters.insert_or_assign(def.key, std::move(def));
 }
 
-// gallery IMAGE "Title" | ending NAME "Title" [hint="..."] | song NAME "Title" | achievement NAME "Title" "Description" [secret=yes]
+// gallery IMAGE "Title" | ending NAME "Title" [hint="..."] [scene=SCENE] | song NAME "Title" | achievement NAME "Title" "Description" [secret=yes]
 // | tip NAME "Title" "Description"
 void Parser::record(const Line& line, RecordKind kind, Cursor& c) {
     const auto name = c.next();
@@ -521,6 +718,10 @@ void Parser::record(const Line& line, RecordKind kind, Cursor& c) {
             r.secret = *b;
         }
         else if (kind == RecordKind::Ending && c.atOption("hint")) r.text = c.option()->second;
+        else if (kind == RecordKind::Ending && c.atOption("scene")) { // (reached as it ends: Parser::sceneEnds)
+            r.scene = lower(c.option()->second);
+            sceneNames_.push_back({.file = line.file, .number = line.number, .scene = r.scene});
+        }
         else if ((kind == RecordKind::Achievement || kind == RecordKind::Tip) && r.text.empty() && (c.peek().quoted || !c.peek().text.contains('=')))
             r.text = *c.next();
         else return error(line, "'{}' doesn't belong in this {} line."_tr(c.peek().text, kRecordKinds[static_cast<std::size_t>(kind)]));
@@ -652,10 +853,10 @@ void Parser::gameSettings(const Line& line, const std::string& key, const std::v
             const auto said = piecesOf(part);
             const auto starts = said.size() >= 2 ? clockMinutes(part.substr(said.front().size())) : std::nullopt;
             if (!starts || !isName(said.front()) || std::ranges::contains(parts, lower(said.front()), &std::pair<std::string, int>::first))
-                return error(line, "time_parts lists each part of the day with when it starts, commas between them: morning 6:00, evening 18:00."_tr());
+                return error(line, "Parts of the day lists each part with when it starts, commas between them: morning 6:00, evening 18:00."_tr());
             parts.emplace_back(lower(said.front()), *starts);
         }
-        if (parts.empty()) return error(line, "time_parts lists each part of the day with when it starts, commas between them: morning 6:00, evening 18:00."_tr());
+        if (parts.empty()) return error(line, "Parts of the day lists each part with when it starts, commas between them: morning 6:00, evening 18:00."_tr());
         std::ranges::sort(parts, {}, &std::pair<std::string, int>::second);
         c.dayParts = std::move(parts);
     } else if (key == "clock") { // 24 or 12: how times show (18:30, or 6:30 PM)

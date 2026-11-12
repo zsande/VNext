@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -29,6 +30,10 @@ struct StageProps {
 enum class Ease : std::uint8_t { Linear, In, Out, InOut, Bounce, Spring, Overshoot };
 // t (0..1) with that speeding up and slowing down. Spring and Overshoot go past 1 on the way.
 [[nodiscard]] float eased(Ease e, float t);
+// ...each by the word the scripts write it as (ease=).
+inline constexpr std::pair<std::string_view, Ease> kEaseNames[]{{"linear", Ease::Linear}, {"in", Ease::In},         {"out", Ease::Out},
+                                                                {"inout", Ease::InOut},   {"bounce", Ease::Bounce}, {"spring", Ease::Spring},
+                                                                {"overshoot", Ease::Overshoot}};
 
 // Things the player collects, each listed once in the scripts ("gallery", "ending", "song",
 // "achievement" and "tip" lines) and remembered for good once reached: persistent.<kind>.<name>,
@@ -44,25 +49,36 @@ struct Say {
     std::string speaker;    // a one-off speaker name, or empty for narration
     std::string expression; // optional new expression for the character
     std::string text;       // may contain {expressions} and text tags
+    std::string voice;      // the sound it plays as its voice (voice=NAME), else its speaker's own voice file or made-up voice
     std::string voiceId;    // "<scene>_<n>": the character's n-th line in the scene (for voice_files=)
     std::uint64_t id = 0;   // the line as written, who says it included (the same in every language)
     bool together = false;  // in a "together" block, before its last line: it shows with the next one, without waiting
 };
 // A line's animations are the scripts' (by name): "" for none. "with NAME" plays one now: as a new
 // background, character or image comes (over what was there), on one already there, or as one goes.
+// A movie's name in the place of an image's (movies/NAME): it plays as the image, again and again, or once (loop=no: the
+// story waits for a background that plays once, as for one coming in; then it stays at its last image).
 struct Background {
-    std::string image; // image name or "#rrggbbaa"
+    std::string image; // image (or movie) name or "#rrggbbaa"
+    SDL_FPoint part{0.5f, 0.5f}; // the part of a picture bigger than the stage that shows (at PLACE and y=, else a named visual's): 0 to 1 from the top left
     std::optional<std::string> animation; // animation=NAME: what the background plays while it's shown
     std::optional<std::string> with;      // with NAME: as it comes in, over the one before (which goes when it ends); on the one already there
+    bool loop = true;                     // a movie's: again and again
+    float volume = 1.0f;                  // a movie's sound, on top of the music volume
 };
 struct Show {
-    std::string character, image; // one of them
+    std::string character, image; // one of them (a colour's box: its colour, "#rrggbbaa", or "#top-#bottom" fading down to another)
     std::string tag;               // name used by hide
     std::string expression;
-    StageProps props;
+    StageProps props;                // what the line says (as TYPE: that type's layer too)
+    StageProps comes;                // how it comes (its character's or visual's own place, look and layer, else its type's layer), as it comes (one there stays as it is)
+    std::optional<std::string> comesAnimation, comesWith; // (its character's or visual's own animation= and animation_on_show=, as it comes)
+    std::optional<SDL_FPoint> box;   // a colour's box: its size, a part of the stage's (its type's width= and height=)
     std::optional<std::string> animation; // animation=NAME: what it plays while it's shown (animation=none: nothing)
     std::optional<std::string> with;      // with NAME: as it comes, or on the one already there (none said: setting animation_on_show, as one comes)
-    bool wait = false;                    // and wait: the story waits for it to end (and for it to reach a new place)
+    bool wait = false;                    // and wait: the story waits for it to end (and for it to reach a new place; a movie that plays once, to its end)
+    bool loop = true;                     // a movie's: again and again
+    float volume = 1.0f;                  // a movie's sound, on top of the music volume
 };
 struct Hide {
     std::string tag;
@@ -102,17 +118,18 @@ struct Set { // set X to V
     std::string variable;
     std::optional<Expr> value;
 };
+// play NAME [as TYPE] [loop=] [volume=] [fade=] [fade_out=]: a sound named by a sound line, or a file in sounds/ (a
+// {value}'s too), as its type plays it (Script::soundOf); stop NAME|TYPE [fade=]: one by its name, or all of a type.
 struct Play {
-    enum class Track : std::uint8_t { Music, Sound, Voice };
-    Track track = Track::Sound;
-    std::string file;    // empty: stop
-    std::string channel; // sounds: a named channel that can loop and be stopped
-    bool loop = false;
-    float volume = 1.0f;
-    float fade = 0.0f;               // in (stopping: out)
-    std::optional<float> fadeOut;    // music: the song before's (else setting music_crossfade); a sound: the one before by its name
-                                     // (else at once), or for one without a name the others playing (else they play on)
-    std::optional<bool> textFollows; // voice: the next line types out with it (else setting text_follows_voices)
+    std::string name;  // what plays or stops, as written: a named sound's name, a file's, a type's (stopping all of it)
+    std::string type;  // as TYPE (empty: its own)
+    bool stop = false;
+    std::optional<bool> loop;
+    std::optional<float> volume;
+    std::optional<float> fade;    // in (stopping: out)
+    std::optional<float> fadeOut; // what it replaces fades out: the song before (else the game's crossfade), one of its type
+                                  // playing one at a time, the one by its name before; one played many at once: the others
+                                  // of its type playing (else they play on)
 };
 struct Wait { float seconds = -1.0f; }; // < 0: until a click
 struct Screen { std::string name; bool show = true; }; // "show screen" / "hide screen": up while playing
@@ -131,14 +148,6 @@ struct Weather {
 struct Camera {
     std::optional<std::string> animation, with;
     bool wait = false;
-};
-// A movie (movies/NAME.mpg) over everything; the story goes on when it ends, or when the player
-// clicks past it.
-struct Movie {
-    std::string file;
-    bool loop = false;      // plays again and again, until clicked past
-    bool skippable = true;  // clicks, keys and skipping go past it
-    float volume = 1.0f;    // its sound, on top of the music volume
 };
 // Menu commands: open (from the story it waits for the screen to close), close, answer, quick
 // save...
@@ -207,7 +216,7 @@ struct Call {
 
 using Command = std::variant<cmd::Say, cmd::Background, cmd::Show, cmd::Hide, cmd::Menu, cmd::Jump,
                              cmd::Return, cmd::End, cmd::Set, cmd::Play, cmd::Wait, cmd::Screen, cmd::Ui,
-                             cmd::Weather, cmd::Camera, cmd::Movie,
+                             cmd::Weather, cmd::Camera,
                              cmd::Message, cmd::Effect, cmd::Chat, cmd::Call, cmd::Time>;
 using Commands = std::vector<Command>;
 

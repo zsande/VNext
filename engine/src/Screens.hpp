@@ -113,6 +113,7 @@ public:
     // away, Enter (what the box does: its action=), and what it holds.
     void typeIntoBox(std::size_t index, std::string_view typed) { typeInto(index, typed); }
     void eraseInBox(std::size_t index) { eraseLast(index); }
+    void moveCaret(std::size_t index, int by); // (the on-screen keyboard's left and right: a letter back or on)
     void enterBox(std::size_t index);
     [[nodiscard]] std::string boxText(std::size_t index) const;
     [[nodiscard]] std::optional<std::size_t> boxTypedInto() { return typedInto(); } // (the box typing goes to, if it has one)
@@ -121,7 +122,7 @@ public:
     [[nodiscard]] std::optional<float> toward(const SDL_FRect& from, int dx, int dy) const;
     void pointToward(const SDL_FRect& from, int dx, int dy); // ...pointed at by the keys (scrolled into view)
     bool pointFirst();                   // nothing pointed at yet: the first part (false: it has none)
-    bool adjustPointed(int dx);          // a slider pointed at: left and right change it (false: no slider is)
+    bool adjustPointed(int dx, int dy);  // a slider pointed at: left and right change it, up and down a vertical one (false: no slider is)
     void letGo();                        // the keys point at nothing here any more (another screen's part took them)
     void keysRest() { keyFocus_ = false; } // ...the part they pressed stays pointed at, for them to move on from, but press goes on (the story's screens)
     void pressPointed();                 // the part the keys point at, clicked
@@ -199,6 +200,13 @@ private:
     // What part `index`'s width= (`across`) or height= is a share of: the box it's in, or for one in a box that's as
     // big as its parts that way (fit=parts without a size, an item's box without item_height=) the box that one's in.
     [[nodiscard]] float shareOf(std::size_t index, bool across) const;
+    // ...and that width (height) in pixels: the share of that, or its pixels (a width at most that box's).
+    [[nodiscard]] float sized(std::size_t index, bool across) const;
+    // A size or gap in a part's setting (item_width=, spacing_across=...): a share of `whole`, or pixels (370px).
+    [[nodiscard]] static std::optional<float> amount(const Element& el, std::string_view key, float whole);
+    // A part filling the room the others leave in a box whose parts go one after another: a container without a
+    // size that way (nor fit=parts), not a list's item.
+    [[nodiscard]] bool fillsRest(std::size_t index, bool down) const;
 
     enum class Look : std::uint8_t { Idle, Hover, Selected, Disabled };
     // What can be clicked: a part, or one of its items (the flowchart's points: which one).
@@ -223,7 +231,8 @@ private:
         [[nodiscard]] SDL_FRect cell(const SDL_FRect& area, std::size_t i, float scroll = 0.0f) const;
         [[nodiscard]] float height(std::size_t items) const; // of all the rows
     };
-    // (item_width=, spacing=... are shares of the box the part is in; without them, these pixels)
+    // (item_width=, spacing=... are shares of the box the part is in, or pixels; without them, these pixels. A list with
+    // item_width= and no columns=: as many columns as come nearest, its items as wide as that leaves, their shape kept)
     [[nodiscard]] Grid grid(const Element& el, Grid defaults) const;
     [[nodiscard]] float share(const Element& el, std::string_view key, bool across, float fallback) const; // (item_width=, spacing_across=...)
     void layout(); // where each part is now (its place and size in its box)
@@ -248,6 +257,7 @@ private:
         float scrollX = 0.0f;              // ...and how far it's scrolled across
         float glideX = 0.0f, glideY = 0.0f, glideAt = 0.0f; // ...gliding on after a drag: how fast (the game's pixels a second), and when it last moved
         float ownW = -1.0f, ownH = -1.0f;  // a container with fit=parts: as wide and as high as its parts, measured where they are (-1: not yet; 0: none show)
+        float rest = -1.0f;                // one whose parts go one after another: the room each part filling it has (-1: not measured yet)
         std::optional<SDL_FRect> hit;   // a button without a size: where it's clicked (its usual and its current image's size together)
         bool ownWords = false;          // ...one without an image: as big as its words (drawn as they are, not wrapped)
         bool chosen = false;            // a button with chosen=: chosen when it was last drawn (see takeChosen)
@@ -302,6 +312,8 @@ private:
     // it's in (or its screen) moves it by now (its places are where it's written, and it moves with that)
     // and wipes it by; and then how the parts in it are wiped (its own wipe, when it shows less).
     Animation::Look drawAnimated(SDL_Renderer* r, std::size_t index, float alpha, Shift& by, const SDL_FRect& box);
+    [[nodiscard]] static Animation::Look ownLook(const Element& el); // (a visual's own zoom, opacity, rotation and tint)
+    [[nodiscard]] static bool hasOwnLook(const Element& el);
     // Whether a part is pointed at: the one with the focus (the pointer's, or the keys' and a controller's),
     // or any under the pointer (a box with buttons in it too). pointedOnward(): its pointed animation goes on
     // meanwhile (round and round, if it plays again and again), and back to its start after.
@@ -326,11 +338,16 @@ private:
     bool handleInput(const SDL_Event& e);
     // The input box that takes typing: the one the keys are on, else the one pressed last (typing_), else the first shown.
     [[nodiscard]] std::optional<std::size_t> typedInto();
-    void typeInto(std::size_t index, std::string_view typed); // letters added to what it holds (up to its most_letters=)
-    void eraseLast(std::size_t index);                        // ...its last letter taken away
+    void typeInto(std::size_t index, std::string_view typed); // letters added to what it holds at its caret (up to its most_letters=)
+    void eraseLast(std::size_t index);                        // ...the letter before its caret taken away
+    // The caret in the box typed into: so many letters from the end of what it holds (0: at its end, where typing goes on),
+    // as the on-screen keyboard's left and right move it; in another box, at its end. caretAt: in letters from its start.
+    std::optional<std::size_t> caretBox_;
+    std::size_t caretBack_ = 0;
+    [[nodiscard]] std::size_t caretAt(std::size_t index, std::string_view value) const;
     bool keyboardShut_ = false; // the on-screen keyboard put away: it doesn't come up by itself again until a box is pressed, or the screen opens again
-    // What a button types (an on-screen keyboard's key: its one action, type LETTER), a capital while Shift is on; else
-    // nothing. Without words of its own, it shows that.
+    // What a button types (an on-screen keyboard's key: its one action, type LETTER), while Shift is on a capital or the
+    // sign over it; else nothing. Without words of its own, it shows that.
     [[nodiscard]] std::string keyLetter(const Element& el) const;
     void adjustSlider(std::size_t element, int delta);
     [[nodiscard]] SDL_FRect sliderBox(std::size_t element) const;
@@ -372,7 +389,7 @@ private:
     [[nodiscard]] const Target* placeTarget() const; // the part pointed at, else the one the keys go on from (place_)
 
     void setFocus(const Target& t);
-    void activate(const Target& t, std::optional<float> mouseX);
+    void activate(const Target& t, std::optional<SDL_FPoint> mouse);
     void clicked(const Element& el); // its click_sound
     // The move actions: what they can point at, and the nearest of those that way from the part at `from`
     // (`score`: how far; see toward()).
@@ -382,7 +399,7 @@ private:
     // What scrolls when the keys scroll: its history, else the container that scrolls with the part pointed at in
     // it, else the first one shown.
     [[nodiscard]] std::optional<std::size_t> scroller();
-    void slide(std::size_t element, float x);
+    void slide(std::size_t element, SDL_FPoint at);
     void run(const Element& el);
 
     const ScreenDef* def_;
@@ -399,6 +416,7 @@ private:
     std::vector<ElementState> state_;
     std::vector<bool> drawn_;
     std::uint64_t drawnFrame_ = 0; // the frame it was last drawn in
+    bool laidOutOpen_ = false;      // laid out since it last opened (its words are this time's: Read aloud says them then)
     std::vector<Target> targets_; // from the last draw, topmost last
     std::optional<Spot> focus_;
     std::optional<Spot> place_;           // the part pointed at or clicked last: the keys go on from it while nothing's pointed at

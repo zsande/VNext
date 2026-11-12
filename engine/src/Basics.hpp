@@ -38,6 +38,14 @@ struct Canvas {
     float h = 720.0f;
 };
 
+// Which of the player's volumes a sound follows (its type's: music, sounds or voices).
+enum class SoundSlider : std::uint8_t { Sound, Music, Voice };
+
+// The ready-made look's scale: its screens and styles are written for a 1280 x 720 game, and their pixels (sizes, text
+// sizes, padding) are scaled by the stage's shorter side over 720: a wide stage's height, a tall one's width (a 1920 x
+// 1080 game's 1.5, a 1080 x 1920 one's too).
+[[nodiscard]] inline float lookScale(float w, float h) { return (w < h ? w : h) / 720.0f; }
+
 // unique_ptr deleters for SDL handles (and others one call frees: CFRelease, SDL_free).
 template <auto Fn>
 struct SdlDeleter {
@@ -274,7 +282,11 @@ std::string saveFolderNameOf(std::string_view saveFolder, std::string_view title
 std::string imageName(std::string_view file);
 // The name a character's images start with, unless its image= says another: "Mr. Tanaka" -> mr_tanaka (mr_tanaka_happy).
 std::string characterImageName(std::string_view name);
+// A love interest's love, the variable a character's love= starts: "Mr. Tanaka" -> mr_tanaka.love.
+std::string loveVariable(std::string_view character);
 std::string upper(std::string_view s);
+// What an on-screen keyboard's key types with Shift on, as a US keyboard has it: a capital, or the sign over it (1: !, [: {).
+std::string shiftedKey(std::string_view key);
 std::string upperFirst(std::string_view s);        // its first letter a capital
 bool startsWithCapital(std::string_view s);        // its first letter is one
 std::string_view trim(std::string_view s);

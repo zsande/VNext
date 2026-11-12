@@ -10,7 +10,10 @@ namespace vn {
 // a moment's "Saved", the captions and the on-screen keyboard), and its keys: the next line, skipping and auto-forward, quick saving and loading, and on
 // screens, pointing at what's there (the arrow keys, a controller's d-pad or stick) and pressing it; then the developer
 // tools' own (tools WHAT: the keys of their buttons, which do nothing in the game). A game's own screens and controls
-// replace these, and add the rest (a title screen, menus...).
+// replace these, and add the rest (a title screen, menus...). Written for a 1280 x 720 game and fitting a stage of any
+// shape (a tall one too): their pixels scaled by its shorter side (lookScale), what keeps its shape in pixels (the
+// textbox's box at the bottom, its name and buttons on the panel's top edge, y=1.5; the options' room above it; the
+// keyboard; Saved), what spans the stage in shares of it.
 
 std::string_view defaultUi() {
     return R"vnext(
@@ -63,30 +66,35 @@ style textbox_button size=20 align=centre align_vertically=centre background=#2b
 style textbox_unread size=15 colour=#0c0a22 align=centre align_vertically=centre shadow=no
 
 screen textbox story=goes_on
-    image #141230fa x=0 y=-0.8642 width=0.9375 height=0.2639 style=textbox_panel
-    container x=-0.9 y=-0.3947 height=0.0639 fit=parts style=namebox when=speaker
-        text "{speaker}" x=0 y=0 height=1 style=namebox
-    dialogue x=0 y=-0.4667 width=0.8875
-    text "▼" x=0.8938 y=-0.8305 style=indicator animation=go_on when=text_complete
-    container x=0 y=-0.3947 width=0.9 height=0.0639
-        container x=1 y=0 height=1 fit=parts stack=across spacing_across=0.0069
-            container width=0.1111 height=1 when=phone_button
-                button "Phone" x=0 y=0 width=1 height=1 style=textbox_button action="open phone"
-                image #ada2ff x=1.358 y=1.4302 width=0.219 height=0.6088 when="phone_unread is more than 0"
-                text "{phone_unread}" x=1.358 y=1.4302 width=0.219 height=0.6088 style=textbox_unread when="phone_unread is more than 0"
-            button "Menu" width=0.1111 height=1 style=textbox_button action="open pause" when=menu_button
-            button "Skip" width=0.1111 height=1 style=textbox_button action=skip chosen=skip
-            button "Auto" width=0.1111 height=1 style=textbox_button action=auto chosen=auto
-            button "Q.Save" width=0.1111 height=1 style=textbox_button action="quick save; open saved" clickable=can_save
-            button "Q.Load" width=0.1111 height=1 style=textbox_button action="quick load" clickable=has_quick_save
+    container x=0 y=-1 width=0.9375 height=226px
+        container x=0 y=1 width=1 height=190px
+            image #141230fa x=0 y=0 width=1 height=1 style=textbox_panel
+            text "{dialogue}" x=0 y=0.6421 width=0.9467
+            text "▼" x=0.9541 y=-0.726 style=indicator animation=go_on when=text_complete
+            container x=0 y=1.5 width=0.96 height=46px
+                container x=-1 y=0 height=1 fit=parts style=namebox when=speaker
+                    text "{speaker}" x=0 y=0 height=1 style=namebox
+                container x=1 y=0 height=1 fit=parts stack=across spacing_across=0.0069
+                    container width=0.1111 height=1 when=phone_button
+                        text "Phone" x=0 y=0 width=1 height=1 style=textbox_button action="open phone"
+                        image #ada2ff x=1.358 y=1.4302 width=28px height=28px when="phone_unread is more than 0"
+                        text "{phone_unread}" x=1.358 y=1.4302 width=28px height=28px style=textbox_unread when="phone_unread is more than 0"
+                    text "Menu" width=0.1111 height=1 style=textbox_button action="open pause" when=menu_button
+                    text "Skip" width=0.1111 height=1 style=textbox_button action=skip chosen=skip
+                    text "Auto" width=0.1111 height=1 style=textbox_button action=auto chosen=auto
+                    text "Q.Save" width=0.1111 height=1 style=textbox_button action="quick save; open saved" clickable=can_save
+                    text "Q.Load" width=0.1111 height=1 style=textbox_button action="quick load" clickable=has_quick_save
 
 screen choice story=goes_on
-    container list=options x=0 y=0.7333 width=0.5625 height=0.5833 item_height=0.075 spacing_down=0.0194 position=bottom
-        button "{option.text}" width=1 height=1 style=choice action=choose when="not option.locked"
-        button "{option.text}  ({option.note})" width=1 height=1 style=choice clickable=no when=option.locked
+    container x=0 y=0 width=0.9 height=1 stack=down
+        container height=40px
+        container list=options x=0 width=720px item_height=54px spacing_down=14px position=bottom
+            text "{option.text}" width=1 height=1 style=choice action=choose when="not option.locked"
+            text "{option.text}  ({option.note})" width=1 height=1 style=choice clickable=no when=option.locked
+        container height=260px
 
 screen saved story=goes_on close_after=1.5
-    container x=0.95 y=0.92 width=0.14 height=0.0639 style=textbox_button
+    container x=0.95 y=0.92 width=179px height=46px style=textbox_button
         text "Saved" x=0 y=0 width=1 height=1 style=textbox_button
 
 style caption size=24 align=centre background=#141230e6 padding=10 text_size_follows=yes shadow=no
@@ -94,7 +102,7 @@ style keyboard background=#141230fa border=#5b51b8 shadow=no
 style keyboard_key size=22 align=centre align_vertically=centre background=#0c0a22 border=#5b51b8 pointed_background=#3b3392 chosen_background=#4d41c4 shadow=no
 
 screen captions story=goes_on
-    container list=captions x=0 y=0.9 width=0.8 fit=parts stack=down spacing=0.0111
+    container list=captions x=0 y=0.9 width=0.8 fit=parts stack=down spacing=8px
         container x=0 fit=parts style=caption
             text "{caption.text}" width_at_most=1 style=caption
     container list=subtitles x=0 y=-0.88 width=0.9 fit=parts stack=down
@@ -102,57 +110,66 @@ screen captions story=goes_on
             text "{subtitle.text}" width_at_most=1 style=caption
 
 screen keyboard story=goes_on
-    container x=0 y=-0.944 width=0.4391 height=0.4056 style=keyboard
-        container x=0 y=0 fit=parts stack=down spacing_down=0.0205
-            container fit=parts stack=across spacing_across=0.0107
-                button action="type 1" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type 2" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type 3" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type 4" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type 5" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type 6" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type 7" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type 8" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type 9" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type 0" width=0.0854 height=0.1644 style=keyboard_key
-            container fit=parts stack=across spacing_across=0.0107
-                button action="type q" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type w" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type e" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type r" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type t" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type y" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type u" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type i" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type o" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type p" width=0.0854 height=0.1644 style=keyboard_key
-            container fit=parts stack=across spacing_across=0.0107
-                button action="type a" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type s" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type d" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type f" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type g" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type h" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type j" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type k" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type l" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type apostrophe" width=0.0854 height=0.1644 style=keyboard_key
-            container fit=parts stack=across spacing_across=0.0107
-                button action="type z" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type x" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type c" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type v" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type b" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type n" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type m" width=0.0854 height=0.1644 style=keyboard_key
-                button action="type ," width=0.0854 height=0.1644 style=keyboard_key
-                button action="type ." width=0.0854 height=0.1644 style=keyboard_key
-                button action="type -" width=0.0854 height=0.1644 style=keyboard_key
-            container fit=parts stack=across spacing_across=0.0107
-                button "Shift" action="type shift" width=0.1815 height=0.1644 style=keyboard_key keys="pad_lt" chosen=keyboard_shift
-                button "Space" action="type space" width=0.3737 height=0.1644 style=keyboard_key keys="pad_y"
-                button "Delete" action="type delete" width=0.1815 height=0.1644 style=keyboard_key keys="pad_x"
-                button "Done" action="type done" width=0.1815 height=0.1644 style=keyboard_key keys="pad_start"
+    container x=0 y=-0.944 width=690px height=239px style=keyboard
+        container x=0 y=0 fit=parts stack=down spacing_down=0.0251
+            container x=0 fit=parts stack=across spacing_across=0.0087
+                text action="type `" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type 1" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type 2" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type 3" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type 4" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type 5" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type 6" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type 7" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type 8" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type 9" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type 0" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type -" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type =" width=0.0667 height=0.1632 style=keyboard_key
+            container x=0 fit=parts stack=across spacing_across=0.0087
+                text action="type q" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type w" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type e" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type r" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type t" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type y" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type u" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type i" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type o" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type p" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type [" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type ]" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type \" width=0.0667 height=0.1632 style=keyboard_key
+            container x=-0.75 fit=parts stack=across spacing_across=0.0087
+                text action="type a" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type s" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type d" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type f" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type g" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type h" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type j" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type k" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type l" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type semicolon" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type apostrophe" width=0.0667 height=0.1632 style=keyboard_key
+            container x=-0.6667 fit=parts stack=across spacing_across=0.0087
+                text action="type z" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type x" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type c" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type v" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type b" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type n" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type m" width=0.0667 height=0.1632 style=keyboard_key
+                text action="type ," width=0.0667 height=0.1632 style=keyboard_key
+                text action="type ." width=0.0667 height=0.1632 style=keyboard_key
+                text action="type /" width=0.0667 height=0.1632 style=keyboard_key
+            container x=0 fit=parts stack=across spacing_across=0.0087
+                text "Shift" action="type shift" width=0.142 height=0.1632 style=keyboard_key keys="pad_lt" chosen=keyboard_shift
+                text "Space" action="type space" width=0.3681 height=0.1632 style=keyboard_key keys="pad_y"
+                text "←" action="type left" width=0.0667 height=0.1632 style=keyboard_key keys="pad_lb"
+                text "→" action="type right" width=0.0667 height=0.1632 style=keyboard_key keys="pad_rb"
+                text "Delete" action="type delete" width=0.142 height=0.1632 style=keyboard_key keys="pad_x"
+                text "Done" action="type done" width=0.142 height=0.1632 style=keyboard_key keys="pad_start"
 )vnext";
 }
 

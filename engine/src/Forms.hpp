@@ -64,9 +64,55 @@ inline const Slot kColourSlots[]{{.type = Type::Word, .name = "Name", .box = Box
 
 inline const Slot kPlaceSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}, {.type = Type::Word, .name = "Place", .box = Box::Across}};
 
+// A visual type of the game's own: its name, the layer its visuals are drawn at (higher: in front) and what it takes.
+inline const Slot kTypeSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
+                            {.type = Type::Option, .name = "Layer", .key = "layer", .box = Box::Layer, .hint = "0"},
+                            {.type = Type::Option, .name = "Takes", .key = "accepts", .box = Box::Accepts, .choices = "character image movie colour", .commas = true}};
+
+// A visual with a name of its own: its type (else an image), what it shows (a picture, a sub-image, a movie or a colour;
+// else the one named as it), how it comes when its line doesn't say (where: a background's, the part of a picture bigger
+// than the stage that shows; its layer and look, its animations, a movie's playing) and, a colour's box, its size (a part
+// of the stage's; none: all of it).
+inline const Slot kVisualSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
+                              {.type = Type::Option, .name = "Type", .key = "type", .box = Box::VisualType, .hint = "image"},
+                              {.type = Type::Option, .name = "Shows", .key = "shows", .box = Box::Image, .label = "Visual"},
+                              {.type = Type::Option, .name = "Place", .key = "at", .box = Box::Place, .hint = "centre", .group = "Where", .label = "Across"},
+                              {.type = Type::Option, .name = "Y", .key = "y", .box = Box::Down, .hint = "0", .label = "Up and down"},
+                              {.type = Type::Option, .name = "Layer", .key = "layer", .box = Box::Layer},
+                              {.type = Type::Option, .name = "Zoom", .key = "zoom", .box = Box::Zoom, .hint = "100%", .group = "Look"},
+                              {.type = Type::Option, .name = "Opacity", .key = "opacity", .box = Box::Opacity, .hint = "100%"},
+                              {.type = Type::Option, .name = "Rotation", .key = "rotation", .box = Box::Rotation, .hint = "0", .label = "Rotation (degrees)"},
+                              {.type = Type::Option, .name = "Flip", .key = "flip", .box = Box::YesNo, .choices = "no yes", .label = "Mirrored"},
+                              {.type = Type::Option, .name = "Tint", .key = "tint", .box = Box::Colour, .hint = "None", .label = "Tint colour"},
+                              {.type = Type::Option, .name = "Animation", .key = "animation", .box = Box::Animation, .hint = "None", .suggest = "none", .group = "Animations", .label = "Animation while shown"},
+                              {.type = Type::Option, .name = "Animation on show", .key = "animation_on_show", .box = Box::Animation, .hint = "From Settings", .suggest = "none"},
+                              {.type = Type::Option, .name = "Loop", .key = "loop", .box = Box::YesNo, .choices = "yes no", .group = "Playing", .label = "Loops"},
+                              {.type = Type::Option, .name = "Volume", .key = "volume", .box = Box::Volume, .hint = "100%"},
+                              {.type = Type::Option, .name = "Width", .key = "width", .box = Box::Number, .hint = "1", .group = "Size"},
+                              {.type = Type::Option, .name = "Height", .key = "height", .box = Box::Number, .hint = "1"}};
+
+// A sound type of the game's own: its name, the player's volume it follows, whether one of it stops the one before (one
+// at a time), whether its sounds loop unless they say, and a volume of its own (its sounds' times it). (Its form's rows:
+// StoryEditor::fields, as its defaults come from the volume it follows.)
+inline const Slot kSoundTypeSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
+                                 {.type = Type::Option, .name = "Follows", .key = "follows", .box = Box::Follows, .label = "Volume it follows"},
+                                 {.type = Type::Option, .name = "One at a time", .key = "one_at_a_time", .box = Box::YesNo},
+                                 {.type = Type::Option, .name = "Loop", .key = "loop", .box = Box::YesNo, .label = "Loops"},
+                                 {.type = Type::Option, .name = "Volume", .key = "volume", .box = Box::Volume, .hint = "100%"}};
+
+// A sound with a name of its own: its type (else sound), the file it plays (else the one named as it) and how it plays when
+// its line doesn't say (its form's rows: StoryEditor::fields, as its defaults come from its type).
+inline const Slot kNamedSoundSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
+                                  {.type = Type::Option, .name = "Type", .key = "type", .box = Box::SoundType},
+                                  {.type = Type::Option, .name = "Sound", .key = "plays", .box = Box::Sound},
+                                  {.type = Type::Option, .name = "Loop", .key = "loop", .box = Box::YesNo, .label = "Loops"},
+                                  {.type = Type::Option, .name = "Volume", .key = "volume", .box = Box::Volume},
+                                  {.type = Type::Option, .name = "Fade in", .key = "fade", .box = Box::Seconds},
+                                  {.type = Type::Option, .name = "Fade out", .key = "fade_out", .box = Box::Seconds}};
+
 inline const Slot kFontSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
                             {.type = Type::Word, .name = "File", .key = "quoted", .box = Box::FontFile},
-                            {.type = Type::Word, .name = "Style", .box = Box::FontStyle, .hint = "Default"}};
+                            {.type = Type::Word, .name = "Style", .box = Box::FontStyle, .hint = "Default", .label = "Font style"}};
 
 // A style's settings (and a screen part's look).
 inline const Slot kStyleSlots[]{
@@ -75,45 +121,45 @@ inline const Slot kStyleSlots[]{
     {.type = Type::Option, .name = "Font", .key = "font", .box = Box::Font, .hint = "From its base style", .group = "Text"},
     {.type = Type::Option, .name = "Size", .key = "size", .box = Box::Pixels, .hint = "From its base style", .label = "Font size"},
     {.type = Type::Option, .name = "Colour", .key = "colour", .box = Box::Colour, .hint = "From its base style", .suggest = "speaker", .label = "Text colour"},
-    {.type = Type::Option, .name = "Across", .key = "align", .box = Box::Align, .choices = "inherit left centre right", .label = "Align"},
-    {.type = Type::Option, .name = "Down", .key = "align_vertically", .box = Box::AlignVertically, .choices = "inherit top centre bottom", .label = "Align vertically"},
+    {.type = Type::Option, .name = "Across", .key = "align", .box = Box::Align, .choices = "inherit left centre right", .label = "Align across"},
+    {.type = Type::Option, .name = "Down", .key = "align_vertically", .box = Box::AlignVertically, .choices = "inherit top centre bottom", .label = "Align up and down"},
     {.type = Type::Option, .name = "Line spacing", .key = "line_spacing", .box = Box::LineSpacing, .hint = "From its base style"},
     {.type = Type::Option, .name = "Shadow", .key = "shadow", .box = Box::YesNoStyle, .choices = "inherit yes no"},
     {.type = Type::Option, .name = "Shadow's colour", .key = "shadow_colour", .box = Box::Colour, .hint = "From its base style", .label = "Shadow colour"},
-    {.type = Type::Option, .name = "Shadow's offset", .key = "shadow_offset", .box = Box::Pixels, .hint = "From its base style", .label = "Shadow offset"},
+    {.type = Type::Option, .name = "Shadow's offset", .key = "shadow_offset", .box = Box::Pixels, .hint = "From its base style", .label = "Shadow offset (pixels)"},
     {.type = Type::Option, .name = "Background", .key = "background", .box = Box::Colour, .hint = "From its base style", .group = "Box", .label = "Background colour"},
     {.type = Type::Option, .name = "Border", .key = "border", .box = Box::Colour, .hint = "From its base style", .label = "Border colour"},
-    {.type = Type::Option, .name = "Image", .key = "image", .box = Box::Image, .hint = "None"},
-    {.type = Type::Option, .name = "Padding", .key = "padding", .box = Box::Pixels, .hint = "From its base style"},
+    {.type = Type::Option, .name = "Image", .key = "image", .box = Box::Image, .hint = "None", .label = "Background visual"},
+    {.type = Type::Option, .name = "Padding", .key = "padding", .box = Box::Pixels, .hint = "From its base style", .label = "Padding (pixels)"},
     {.type = Type::Option, .name = "Opacity", .key = "opacity", .box = Box::Opacity, .hint = "From its base style"},
     {.type = Type::Option, .name = "Pointed at: colour", .key = "pointed_colour", .box = Box::Colour, .hint = "From its base style", .group = "Pointed at", .label = "Text colour"},
     {.type = Type::Option, .name = "Pointed at: background", .key = "pointed_background", .box = Box::Colour, .hint = "From its base style", .label = "Background colour"},
     {.type = Type::Option, .name = "Pointed at: border", .key = "pointed_border", .box = Box::Colour, .hint = "From its base style", .label = "Border colour"},
-    {.type = Type::Option, .name = "Pointed at: image", .key = "pointed_image", .box = Box::Image, .hint = "From its base style", .label = "Image"},
+    {.type = Type::Option, .name = "Pointed at: image", .key = "pointed_image", .box = Box::Image, .hint = "From its base style", .label = "Background visual"},
     {.type = Type::Option, .name = "Chosen: colour", .key = "chosen_colour", .box = Box::Colour, .hint = "From its base style", .group = "Chosen", .label = "Text colour"},
     {.type = Type::Option, .name = "Chosen: background", .key = "chosen_background", .box = Box::Colour, .hint = "From its base style", .label = "Background colour"},
     {.type = Type::Option, .name = "Chosen: border", .key = "chosen_border", .box = Box::Colour, .hint = "From its base style", .label = "Border colour"},
-    {.type = Type::Option, .name = "Chosen: image", .key = "chosen_image", .box = Box::Image, .hint = "From its base style", .label = "Image"},
+    {.type = Type::Option, .name = "Chosen: image", .key = "chosen_image", .box = Box::Image, .hint = "From its base style", .label = "Background visual"},
     {.type = Type::Option, .name = "Unclickable: colour", .key = "unclickable_colour", .box = Box::Colour, .hint = "From its base style", .group = "Unclickable", .label = "Text colour"},
     {.type = Type::Option, .name = "Unclickable: background", .key = "unclickable_background", .box = Box::Colour, .hint = "From its base style", .label = "Background colour"},
     {.type = Type::Option, .name = "Unclickable: border", .key = "unclickable_border", .box = Box::Colour, .hint = "From its base style", .label = "Border colour"},
-    {.type = Type::Option, .name = "Unclickable: image", .key = "unclickable_image", .box = Box::Image, .hint = "From its base style", .label = "Image"},
+    {.type = Type::Option, .name = "Unclickable: image", .key = "unclickable_image", .box = Box::Image, .hint = "From its base style", .label = "Background visual"},
     {.type = Type::Option, .name = "Text size follows Settings", .key = "text_size_follows", .box = Box::YesNoStyle, .choices = "inherit yes no", .group = "Follows Settings", .label = "Text size"},
     {.type = Type::Option, .name = "Opacity follows Settings", .key = "opacity_follows", .box = Box::YesNoStyle, .choices = "inherit yes no", .label = "Opacity"},
     {.type = Type::Option, .name = "Sound when pointed at", .key = "pointed_sound", .box = Box::Sound, .hint = "From its base style", .group = "Sounds"},
-    {.type = Type::Option, .name = "Sound when clicked", .key = "click_sound", .box = Box::Sound, .hint = "From its base style"}};
+    {.type = Type::Option, .name = "Sound on click", .key = "click_sound", .box = Box::Sound, .hint = "From its base style"}};
 
 inline const Slot kAtlasSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
-                             {.type = Type::Option, .name = "Image", .key = "image", .box = Box::Image},
+                             {.type = Type::Option, .name = "Image", .key = "image", .box = Box::Image, .label = "Sheet"},
                              {.type = Type::Option, .name = "Frames in a row", .key = "frames_in_a_row", .box = Box::Count, .hint = "None (a row each)"},
-                             {.type = Type::Option, .name = "Same names as", .key = "same_names_as", .box = Box::Record}};
+                             {.type = Type::Option, .name = "Same names as", .key = "same_names_as", .box = Box::Record, .label = "Same frame names as"}};
 
 inline const Slot kSubImageSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name},
                                   {.type = Type::Option, .name = "Cut from", .key = "cut_from", .box = Box::Image},
-                                  {.type = Type::Option, .name = "X", .key = "x", .box = Box::Pixels, .hint = "0"},
-                                  {.type = Type::Option, .name = "Y", .key = "y", .box = Box::Pixels, .hint = "0"},
-                                  {.type = Type::Option, .name = "Width", .key = "width", .box = Box::Pixels},
-                                  {.type = Type::Option, .name = "Height", .key = "height", .box = Box::Pixels}};
+                                  {.type = Type::Option, .name = "X", .key = "x", .box = Box::Pixels, .hint = "0", .label = "From the left (pixels)"},
+                                  {.type = Type::Option, .name = "Y", .key = "y", .box = Box::Pixels, .hint = "0", .label = "From the top (pixels)"},
+                                  {.type = Type::Option, .name = "Width", .key = "width", .box = Box::Pixels, .label = "Width (pixels)"},
+                                  {.type = Type::Option, .name = "Height", .key = "height", .box = Box::Pixels, .label = "Height (pixels)"}};
 
 inline const Slot kAnimationSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}}; // (how often it plays: StoryEditor::fields; what it does: the timeline)
 
@@ -128,25 +174,26 @@ struct TimelineRow {
     std::string_view start;
 };
 inline const TimelineRow kTimelineRows[]{
-    {"x left right", "X", Box::Across, "home:its own place|-2:just off the left|2:just off the right|5% left:a little to the left|5% right:a little to the right", "home"},
-    {"y up down", "Y", Box::Down, "home:its own place|-2:just off the bottom|2:just off the top|5% up:a little up|5% down:a little down", "home"},
+    {"x left right", "Across", Box::Across, "home:its own place|-2:just off the left|2:just off the right|5% left:a little to the left|5% right:a little to the right", "home"},
+    {"y up down", "Up and down", Box::Down, "home:its own place|-2:just off the bottom|2:just off the top|5% up:a little up|5% down:a little down", "home"},
     {"opacity", "Opacity", Box::Opacity, "", "100%"},
     {"zoom", "Zoom", Box::Zoom, "", "100%"},
-    {"rotation", "Rotation", Box::Rotation, "", "0"},
+    {"rotation", "Rotation (degrees)", Box::Rotation, "", "0"},
     {"colour", "Colour", Box::Colour, "", "white"},
     {"fade", "Fade to colour", Box::Colour, "none:back from it", "black"}, // (covered with it, the whole screen for a screen)
-    {"wipe", "Wipe", Box::Wipe, "", "100%"}, // (how much of it shows: from the left, or as its shape has it)
+    {"wipe", "Revealed", Box::Wipe, "", "100%"}, // (how much of it shows: from the left, or as its shape has it)
 };
 static_assert(std::size(kTimelineRows) == StoryEditor::kTimelineRowCount);
 
-inline const Slot kGallerySlots[]{{.type = Type::Word, .name = "Image", .box = Box::Image}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text}};
+inline const Slot kGallerySlots[]{{.type = Type::Word, .name = "Image", .box = Box::Image, .label = "Visual"}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text}};
 
 inline const Slot kEndingSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text},
-                              {.type = Type::Option, .name = "Hint", .key = "hint", .box = Box::Text, .hint = "None"}};
+                              {.type = Type::Option, .name = "Hint", .key = "hint", .box = Box::Text, .hint = "None"},
+                              {.type = Type::Option, .name = "Scene", .key = "scene", .box = Box::Scene, .hint = "None", .label = "Reached as this scene ends"}};
 
 inline const Slot kSongSlots[]{{.type = Type::Word, .name = "Song", .box = Box::Sound}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text}};
 
-inline const Slot kCaptionSlots[]{{.type = Type::Word, .name = "Sound", .box = Box::Sound}, {.type = Type::Word, .name = "Caption", .key = "quoted", .box = Box::Text}};
+inline const Slot kCaptionSlots[]{{.type = Type::Word, .name = "Sound", .box = Box::Sound}, {.type = Type::Word, .name = "Caption", .key = "quoted", .box = Box::Text, .rich = true}};
 
 inline const Slot kAchievementSlots[]{{.type = Type::Word, .name = "Name", .box = Box::Name}, {.type = Type::Word, .name = "Title", .key = "quoted", .box = Box::Text},
                                    {.type = Type::Word, .name = "Description", .key = "quoted", .box = Box::Text, .hint = "None"},
@@ -172,10 +219,14 @@ inline const DefinitionKind kDefinitionKinds[]{
     {.kind = "style", .label = "Styles", .one = "Style", .slots = kStyleSlots},
     {.kind = "font", .label = "Font", .one = "Font", .slots = kFontSlots},
     {.kind = "place", .label = "Places", .one = "Place", .slots = kPlaceSlots},
+    {.kind = "type", .label = "Visual types", .one = "Visual type", .slots = kTypeSlots},
+    {.kind = "visual", .label = "Named visuals", .one = "Visual", .slots = kVisualSlots},
+    {.kind = "sound type", .label = "Sound types", .one = "Sound type", .slots = kSoundTypeSlots},
+    {.kind = "sound", .label = "Named sounds", .one = "Sound", .slots = kNamedSoundSlots},
     {.kind = "atlas", .label = "Atlases", .one = "Atlas", .slots = kAtlasSlots},
     {.kind = "sub-image", .label = "Sub-images", .one = "Sub-image", .slots = kSubImageSlots},
     {.kind = "animation", .label = "Animations", .one = "Animation", .slots = kAnimationSlots},
-    {.kind = "gallery", .label = "Gallery", .one = "Gallery image", .slots = kGallerySlots},
+    {.kind = "gallery", .label = "Gallery", .one = "Gallery visual", .slots = kGallerySlots},
     {.kind = "ending", .label = "Endings", .one = "Ending", .slots = kEndingSlots},
     {.kind = "song", .label = "Songs", .one = "Song", .slots = kSongSlots},
     {.kind = "caption", .label = "Captions", .one = "Caption", .slots = kCaptionSlots},
@@ -188,7 +239,7 @@ const CommandForm* formOf(StoryEditor::Kind kind);
 
 // Words of a list, split by `by`.
 std::vector<std::string_view> wordsOf(std::string_view list, char by = ' ');
-std::string spaced(std::string_view word); // "stop_music" -> "stop music"
+std::string spaced(std::string_view word); // "stop_weather" -> "stop weather"
 
 // An expression's parts at its top level (outside brackets and quotes), split at `ops`: words ("and",
 // whole words, in any case) or signs ("+"; a "-" only after a value, not a minus sign).
@@ -217,7 +268,7 @@ std::string conditionFrom(const std::vector<StoryEditor::Field>& fields, const s
 // empty, to add another), its kind ("How": the group's kinds) and what that asks for, when it does. The
 // kind it was read as is kept (a hidden field), so another kind picked starts without the last one's words.
 void addActionFields(std::vector<StoryEditor::Field>& out, const std::string& name, std::string_view label, std::string_view hint,
-                     std::string_view actions, const std::vector<std::string>& variables);
+                     std::string_view actions, const StoryEditor& editor);
 std::string actionsFrom(const std::vector<StoryEditor::Field>& fields, const std::string& name, const std::vector<std::string>& variables);
 
 using Kind = StoryEditor::Kind;
@@ -234,8 +285,9 @@ struct Setting {
     ToolsChoices choices;
     bool quoted = false;      // written in quotes
     Box box = Box::None;      // its box's kind: what it lists, what its buttons say and how it's written, as the same box everywhere
-    ToolsSuggestions suggest; // values it often has besides its kind's
+    ToolsSuggestions suggest; // values it always can be besides its kind's (never examples of one)
     ToolsHint hint;           // what its empty box means, when it has no value then (else None)
+    int part = 0;             // a part of its value in a row of its own (1, 2: a size's width and height, a start's day and time of day); 0: all of it
 };
 
 inline const std::array kSettings{
@@ -243,31 +295,33 @@ inline const std::array kSettings{
     Setting{.name = "title", .label = "Title", .standard = "VNext", .quoted = true, .box = Box::Text},
     Setting{.name = "version", .label = "Version", .standard = "1.0", .quoted = true, .box = Box::Text},
     Setting{.name = "save_folder", .label = "Save folder name", .quoted = true, .box = Box::Name}, // (empty: the title's, saveFolderNameOf)
-    Setting{.name = "language", .label = "Language", .standard = "English", .quoted = true, .box = Box::Language},
-    Setting{.name = "game_size", .label = "Game size", .standard = "1280 720", .box = Box::WidthHeight},
-    Setting{.name = "icon", .label = "Icon", .quoted = true, .box = Box::ImageFile, .hint = "Default"},
+    Setting{.name = "language", .label = "Written in", .standard = "English", .quoted = true, .box = Box::Language},
+    Setting{.name = "game_size", .label = "Game width (pixels)", .standard = "1280", .box = Box::Pixels, .part = 1},
+    Setting{.name = "game_size", .label = "Game height (pixels)", .standard = "720", .box = Box::Pixels, .part = 2},
+    Setting{.name = "icon", .label = "App icon", .quoted = true, .box = Box::ImageFile, .hint = "Default"},
     Setting{.name = "letterbox_colour", .label = "Letterbox colour", .standard = "black", .box = Box::Colour},
     Setting{.name = "resizable", .label = "Resizable window", .standard = "yes", .box = Box::YesNo},
     Setting{.name = "default.fullscreen", .label = "Fullscreen", .standard = "no", .box = Box::YesNo},
-    Setting{.name = "default.scaling", .label = "Scaling", .standard = "fit", .choices = "fit integer stretch fill", .box = Box::WindowFill},
+    Setting{.name = "default.scaling", .label = "Window scaling", .standard = "fit", .choices = "fit integer stretch fill", .box = Box::WindowFill},
     Setting{.name = "default.vsync", .label = "VSync", .standard = "yes", .box = Box::YesNo},
-    Setting{.name = "default.frame_limit", .label = "Frame limit", .standard = "0", .box = Box::Count, .suggest = "0|30|60|120|144"},
+    Setting{.name = "default.frame_limit", .label = "Frames a second at most", .box = Box::Count, .hint = "No limit"}, // (0, as none written: no limit)
     Setting{.name = "mouse_pointer", .label = "Mouse pointer", .quoted = true, .box = Box::Image, .hint = "Default"},
-    Setting{.name = "pointer_tip", .label = "Pointer's tip", .standard = "0 0", .box = Box::Point},
+    Setting{.name = "pointer_tip", .label = "Pointer's tip from the left (pixels)", .standard = "0", .box = Box::Pixels, .part = 1},
+    Setting{.name = "pointer_tip", .label = "Pointer's tip from the top (pixels)", .standard = "0", .box = Box::Pixels, .part = 2},
     Setting{.label = "Saves"},
     Setting{.name = "autosave", .label = "Autosave", .standard = "yes", .box = Box::YesNo},
     Setting{.name = "save_pages", .label = "Save pages", .standard = "9", .box = Box::Count},
     Setting{.name = "page_slots", .label = "Slots on a page", .standard = "6", .box = Box::Count},
     Setting{.label = "Text"},
     Setting{.name = "text_appears", .label = "Text appears", .standard = "letter", .choices = "letter word line", .box = Box::TextAppears},
-    Setting{.name = "default.text_speed", .label = "Text speed", .standard = "45", .box = Box::TextSpeed},
-    Setting{.name = "default.auto_delay", .label = "Auto delay (seconds)", .standard = "0.5", .box = Box::Seconds},
-    Setting{.name = "auto_letter_delay", .label = "Auto delay per letter (seconds)", .standard = "0.01", .box = Box::Seconds},
+    Setting{.name = "default.text_speed", .label = "Text speed (letters a second)", .standard = "45", .box = Box::TextSpeed},
+    Setting{.name = "default.auto_delay", .label = "Auto waits after a line (seconds)", .standard = "0.5", .box = Box::Seconds},
+    Setting{.name = "auto_letter_delay", .label = "Auto waits per letter (seconds)", .standard = "0.01", .box = Box::Seconds},
     Setting{.name = "default.textbox_opacity", .label = "Textbox opacity", .standard = "85%", .box = Box::Opacity},
     Setting{.name = "narration_colour", .label = "Narration colour", .standard = "#96aaff", .box = Box::Colour},
-    Setting{.name = "history_length", .label = "History length", .standard = "25", .box = Box::Count},
+    Setting{.name = "history_length", .label = "History length (lines)", .standard = "25", .box = Box::Count},
     Setting{.name = "default.rollback", .label = "Rollback", .standard = "yes", .box = Box::YesNo},
-    Setting{.name = "rollback_lines", .label = "Rollback lines", .standard = "100", .box = Box::Count},
+    Setting{.name = "rollback_lines", .label = "Lines rolled back at most", .standard = "100", .box = Box::Count},
     Setting{.name = "default.skip_unread", .label = "Skip unread text", .standard = "no", .box = Box::YesNo},
     Setting{.name = "default.skip_after_choices", .label = "Skip after choices", .standard = "no", .box = Box::YesNo},
     Setting{.name = "default.skip_movies", .label = "Skip movies", .standard = "yes", .box = Box::YesNo},
@@ -281,28 +335,27 @@ inline const std::array kSettings{
     Setting{.name = "default.animations", .label = "Animations", .standard = "yes", .box = Box::YesNo},
     Setting{.name = "default.time_limits", .label = "Time limits", .standard = "yes", .box = Box::YesNo},
     Setting{.name = "default.vibration", .label = "Vibration", .standard = "yes", .box = Box::YesNo},
-    Setting{.label = "Images"},
-    Setting{.name = "image_scaling", .label = "Image scaling", .standard = "smooth", .choices = "smooth pixel", .box = Box::ImageScaling},
+    Setting{.label = "Visuals"},
+    Setting{.name = "image_scaling", .label = "Visual scaling", .standard = "smooth", .choices = "smooth pixel", .box = Box::ImageScaling},
     Setting{.name = "character_height", .label = "Character height", .standard = "95%", .box = Box::Percent},
-    Setting{.name = "animation_on_show", .label = "Animation on show", .box = Box::Animation, .hint = "At once"},
-    Setting{.name = "animation_on_hide", .label = "Animation on hide", .box = Box::Animation, .hint = "At once"},
-    Setting{.name = "move_time", .label = "Move time (seconds)", .standard = "0.4", .box = Box::Seconds},
+    Setting{.name = "animation_on_show", .label = "Visuals' animation on show", .box = Box::Animation, .hint = "At once"},
+    Setting{.name = "animation_on_hide", .label = "Visuals' animation on hide", .box = Box::Animation, .hint = "At once"},
+    Setting{.name = "move_time", .label = "Visuals' move time (seconds)", .standard = "0.4", .box = Box::Seconds},
     Setting{.name = "load_ahead", .label = "Lines to load ahead", .standard = "30", .box = Box::Count},
-    Setting{.name = "image_memory", .label = "Image memory", .standard = "512", .box = Box::Count, .suggest = "0|256|512|1024"},
+    Setting{.name = "image_memory", .label = "Visual memory (MB)", .standard = "512", .box = Box::Count},
     Setting{.label = "Screens"},
     Setting{.name = "glide", .label = "Lists glide after a drag", .standard = "yes", .box = Box::YesNo},
     Setting{.name = "glide_speed", .label = "Glide speed", .standard = "100%", .box = Box::Percent},
     Setting{.name = "glide_distance", .label = "Glide distance", .standard = "100%", .box = Box::Percent},
-    Setting{.name = "scrollbar_thickness", .label = "Scrollbar thickness", .standard = "6", .box = Box::Pixels},
-    Setting{.name = "fading_edges", .label = "Fading edges", .standard = "0", .box = Box::Pixels,
-            .suggest = "0:a fifth of the box, at most 64|32|64|96"},
+    Setting{.name = "scrollbar_thickness", .label = "Scrollbar thickness (pixels)", .standard = "6", .box = Box::Pixels},
+    Setting{.name = "fading_edges", .label = "Fading edges' width (pixels)", .box = Box::Pixels, .hint = "A fifth of the box, at most 64"},
     Setting{.label = "Sound"},
     Setting{.name = "default.master_volume", .label = "Master volume", .standard = "100%", .box = Box::Volume},
     Setting{.name = "default.music_volume", .label = "Music volume", .standard = "80%", .box = Box::Volume},
     Setting{.name = "default.sound_volume", .label = "Sound volume", .standard = "100%", .box = Box::Volume},
     Setting{.name = "default.voice_volume", .label = "Voice volume", .standard = "100%", .box = Box::Volume},
     Setting{.name = "music_crossfade", .label = "Music crossfade (seconds)", .standard = "0.5", .box = Box::Seconds},
-    Setting{.name = "music_under_voices", .label = "Music under voices", .standard = "70%", .box = Box::Volume},
+    Setting{.name = "music_under_voices", .label = "Music's volume under voices", .standard = "70%", .box = Box::Volume},
     Setting{.name = "text_follows_voices", .label = "Text follows voices", .standard = "no", .box = Box::YesNo},
     Setting{.name = "default.made_up_voices", .label = "Made-up voices", .standard = "yes", .box = Box::YesNo},
     Setting{.name = "made_up_voice_speed", .label = "Made-up voice speed", .standard = "1", .box = Box::Speed},
@@ -311,30 +364,31 @@ inline const std::array kSettings{
     Setting{.name = "typing_sound_volume", .label = "Typing sound volume", .standard = "60%", .box = Box::Volume},
     Setting{.label = "Characters"},
     Setting{.name = "mouths_move", .label = "Mouths move", .standard = "yes", .choices = "yes voice no", .box = Box::MouthMoves},
-    Setting{.name = "default.mouths", .label = "Players' mouths move", .standard = "yes", .choices = "yes voice no", .box = Box::Mouths},
-    Setting{.name = "mouth_speed", .label = "Mouth speed", .standard = "4", .box = Box::PerSecond},
+    Setting{.name = "default.mouths", .label = "Mouths move for players", .standard = "yes", .choices = "yes voice no", .box = Box::Mouths},
+    Setting{.name = "mouth_speed", .label = "Mouth speed (moves a second)", .standard = "4", .box = Box::PerSecond},
     Setting{.name = "blink", .label = "Blinks", .standard = "yes", .box = Box::YesNo},
     Setting{.name = "seconds_between_blinks", .label = "Blinks every (seconds)", .standard = "4", .box = Box::Seconds},
     Setting{.label = "Time"},
-    Setting{.name = "time", .label = "Time", .standard = "none", .choices = "none story real days", .box = Box::TimeKind},
-    Setting{.name = "time_start", .label = "Starts at", .box = Box::TimeStart, .hint = "8:00"},
+    Setting{.name = "time", .label = "Kind of time", .standard = "none", .choices = "none story real days", .box = Box::TimeKind},
+    Setting{.name = "time_start", .label = "Start day", .box = Box::Weekday, .part = 1},
+    Setting{.name = "time_start", .label = "Start time", .box = Box::TimeWhen, .hint = "8:00", .part = 2},
     Setting{.name = "time_parts", .label = "Parts of the day", .standard = "morning 6:00, afternoon 12:00, evening 18:00, night 22:00", .quoted = true, .box = Box::DayParts},
     Setting{.name = "clock", .label = "Clock", .standard = "24", .choices = "24 12", .box = Box::Clock},
-    Setting{.name = "phone_follows_time", .label = "The phone follows it", .standard = "yes", .box = Box::YesNo},
-    Setting{.name = "backgrounds_follow_time", .label = "Backgrounds follow it", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "phone_follows_time", .label = "The phone follows the time", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "backgrounds_follow_time", .label = "Backgrounds follow the time", .standard = "yes", .box = Box::YesNo},
     Setting{.label = "Phone"},
     Setting{.name = "has_phone", .label = "Has a phone when", .box = Box::Variable, .hint = "Always"},
-    Setting{.name = "phone_owner", .label = "Owner", .quoted = true, .box = Box::Text},
+    Setting{.name = "phone_owner", .label = "Owner's name", .quoted = true, .box = Box::Text},
     Setting{.name = "phone_wallpaper", .label = "Home screen wallpaper", .box = Box::Image},
     Setting{.name = "phone_lock_wallpaper", .label = "Lock screen wallpaper", .box = Box::Image},
     Setting{.name = "phone_passcode", .label = "Passcode", .quoted = true, .box = Box::Text},
-    Setting{.name = "phone_clock", .label = "Clock", .quoted = true, .box = Box::Text, .hint = "The computer's"},
-    Setting{.name = "phone_date", .label = "Date", .quoted = true, .box = Box::Text},
-    Setting{.name = "phone_signal", .label = "Signal", .standard = "yes", .box = Box::YesNo},
-    Setting{.name = "phone_battery", .label = "Battery", .standard = "100", .box = Box::Count},
-    Setting{.name = "new_messages", .label = "New messages", .standard = "button", .choices = "button open", .box = Box::NewMessages},
+    Setting{.name = "phone_clock", .label = "Clock shows", .quoted = true, .box = Box::Text, .hint = "The computer's"},
+    Setting{.name = "phone_date", .label = "Date shows", .quoted = true, .box = Box::Text},
+    Setting{.name = "phone_signal", .label = "Shows signal", .standard = "yes", .box = Box::YesNo},
+    Setting{.name = "phone_battery", .label = "Battery (%)", .standard = "100", .box = Box::Count},
+    Setting{.name = "new_messages", .label = "On a new message", .standard = "button", .choices = "button open", .box = Box::NewMessages},
     Setting{.name = "chat_messages", .label = "Chat messages come", .standard = "typed", .choices = "typed click", .box = Box::ChatMessages},
-    Setting{.name = "phone_typing", .label = "Phone typing speed", .standard = "6", .box = Box::TextSpeed},
+    Setting{.name = "phone_typing", .label = "Phone typing speed (letters a second)", .standard = "6", .box = Box::TextSpeed},
     Setting{.name = "phone_history", .label = "Messages in the history", .standard = "no", .box = Box::YesNo},
     Setting{.name = "phone_message_sound", .label = "Message sound", .box = Box::Sound},
     Setting{.name = "phone_send_sound", .label = "Sending sound", .box = Box::Sound},
@@ -345,7 +399,7 @@ inline const std::array kSettings{
 
 // A screen's settings, and its parts', as their forms have them: the setting, what the form calls it,
 // and what it lists or is one of (the first of `choices`: not written). `is`: 'a', what it does (its
-// actions); 'c', a condition.
+// actions); 'c', a condition; 's', sound types (the game's, several, with commas between them).
 struct PartOption {
     std::string_view key;
     ToolsText label;
@@ -364,72 +418,78 @@ inline const PartOption kScreenOptions[]{
     {.key = "action_on_close", .label = "Action on close", .box = Box::Action, .hint = "None", .is = 'a'},
     {.key = "animation_on_open", .label = "Animation on open", .box = Box::Animation, .hint = "None"},
     {.key = "animation_on_close", .label = "Animation on close", .box = Box::Animation, .hint = "None"},
-    {.key = "stop_music_on_open", .label = "Stops music on open", .box = Box::YesNo, .choices = "no yes"},
-    {.key = "stop_music_on_close", .label = "Stops music on close", .box = Box::YesNo, .choices = "no yes"},
-    {.key = "stop_voice_on_open", .label = "Stops voice on open", .box = Box::YesNo, .choices = "no yes"},
-    {.key = "stop_voice_on_close", .label = "Stops voice on close", .box = Box::YesNo, .choices = "no yes"},
-    {.key = "close_after", .label = "Closes after (seconds)", .box = Box::Seconds, .hint = "None"},
+    {.key = "stop_on_open", .label = "On open, stops", .box = Box::SoundType, .hint = "None", .is = 's'}, // (sound types: several, as buttons)
+    {.key = "stop_on_close", .label = "On close, stops", .box = Box::SoundType, .hint = "None", .is = 's'},
+    {.key = "close_after", .label = "Open for (seconds)", .box = Box::Seconds, .hint = "Until closed"},
 };
 
 inline const PartOption kPartOptions[]{
     {.key = "action", .label = "Action on click", .box = Box::Action, .hint = "None", .is = 'a'},
     {.key = "confirm", .label = "Confirmation question", .box = Box::Text},
-    {.key = "waiting", .label = "While waiting for a key", .box = Box::Text},
-    {.key = "keys", .label = "Keys", .box = Box::Key, .hint = "None"},
+    {.key = "waiting", .label = "Text while waiting", .box = Box::Text},
+    {.key = "keys", .label = "Keys that click it", .box = Box::Key, .hint = "None"},
     {.key = "clickable", .label = "Clickable when", .box = Box::Condition, .hint = "Always", .is = 'c'},
-    {.key = "chosen", .label = "Chosen when", .box = Box::Condition, .hint = "Never", .is = 'c'},
-    {.key = "drag", .label = "Drag name", .box = Box::Name},
+    {.key = "chosen", .label = "Looks chosen when", .box = Box::Condition, .hint = "Never", .is = 'c'},
+    {.key = "drag", .label = "Dragged as", .box = Box::Name},
     {.key = "drop", .label = "Action on drop", .box = Box::Action, .hint = "None", .is = 'a'},
     {.key = "click_animation", .label = "Animation on click", .box = Box::Animation, .hint = "None"},
-    {.key = "fit", .label = "Fit", .box = Box::Fit, .choices = "contain cover stretch"},
-    {.key = "flip", .label = "Flipped", .box = Box::YesNo, .choices = "no yes"},
-    {.key = "position", .label = "Position", .box = Box::Position, .choices = "centre top bottom"},
-    {.key = "close_at_end", .label = "Closes when scrolled to the end", .box = Box::YesNo, .choices = "no yes"},
-    {.key = "mode", .label = "Its saves are", .box = Box::SaveMode, .hint = "By the screen's name"},
+    {.key = "fit", .label = "How it fits", .box = Box::Fit, .choices = "contain cover stretch"},
+    {.key = "type", .label = "Type", .box = Box::VisualType, .hint = "image"}, // (a visual's, as the Visual line has them)
+    {.key = "expression", .label = "Expression", .box = Box::Expression, .hint = "As it is"},
+    {.key = "zoom", .label = "Zoom", .box = Box::Zoom, .hint = "100%"},
+    {.key = "opacity", .label = "Opacity", .box = Box::Opacity, .hint = "100%"},
+    {.key = "rotation", .label = "Rotation (degrees)", .box = Box::Rotation, .hint = "0"},
+    {.key = "flip", .label = "Mirrored", .box = Box::YesNo, .choices = "no yes"},
+    {.key = "tint", .label = "Tint colour", .box = Box::Colour, .hint = "None"},
+    {.key = "animation_on_show", .label = "Animation on show", .box = Box::Animation, .hint = "None", .suggest = "none"},
+    {.key = "position", .label = "Its parts at", .box = Box::Position, .choices = "top centre bottom"},
+    {.key = "close_at_end", .label = "Closes the screen at the end", .box = Box::YesNo, .choices = "no yes"},
+    {.key = "mode", .label = "Saves or loads", .box = Box::SaveMode, .choices = "usual save load"},
     {.key = "track", .label = "Track colour", .box = Box::Colour, .hint = "Default"},
     {.key = "fill", .label = "Fill colour", .box = Box::Colour, .hint = "Default"},
     {.key = "knob", .label = "Knob colour", .box = Box::Colour, .hint = "Default"},
-    {.key = "repeat", .label = "Repeat", .box = Box::Repeat, .choices = "no across down both"},
-    {.key = "scroll", .label = "Scroll", .box = Box::Scroll, .choices = "no left right up down"},
-    {.key = "scroll_round", .label = "Scroll round (seconds)", .box = Box::Seconds, .hint = "10"},
-    {.key = "edges", .label = "Its edges", .box = Box::Edges, .choices = "show cut fade"},
-    {.key = "scrollbar", .label = "Scrollbar", .box = Box::YesNo, .choices = "no yes"},
-    {.key = "scrollbar_thickness", .label = "Scrollbar thickness", .box = Box::Pixels, .hint = "From Settings"},
-    {.key = "fading_edges", .label = "Fading edges", .box = Box::Pixels, .hint = "From Settings", .suggest = "0:a fifth of the box, at most 64|32|64|96"},
+    {.key = "repeat", .label = "Repeated", .box = Box::Repeat, .choices = "no across down both"},
+    {.key = "scroll", .label = "Scrolls", .box = Box::Scroll, .choices = "no left right up down"},
+    {.key = "scroll_round", .label = "One round takes (seconds)", .box = Box::Seconds, .hint = "10"},
+    {.key = "edges", .label = "What's past its edges", .box = Box::Edges, .choices = "show cut fade"},
+    {.key = "scrollbar", .label = "Has a scrollbar", .box = Box::YesNo, .choices = "no yes"},
+    {.key = "scrollbar_thickness", .label = "Scrollbar thickness (pixels)", .box = Box::Pixels, .hint = "From Settings"},
+    {.key = "fading_edges", .label = "Fading edges' width (pixels)", .box = Box::Pixels, .hint = "From Settings"},
     {.key = "glide", .label = "Glides on after a drag", .box = Box::YesNo, .choices = "yes no"},
     {.key = "glide_speed", .label = "Glide speed", .box = Box::Percent, .hint = "100%"},
     {.key = "glide_distance", .label = "Glide distance", .box = Box::Percent, .hint = "100%"},
-    {.key = "slot", .label = "Key slot", .box = Box::KeySlot, .hint = "1"},
+    {.key = "slot", .label = "Which of its keys", .box = Box::KeySlot, .hint = "1"},
     {.key = "variable", .label = "Variable", .box = Box::Variable},
     {.key = "setting", .label = "Player setting", .box = Box::Setting, .hint = "None"},
     {.key = "value", .label = "Value shown", .box = Box::Variable, .hint = "None"},
     {.key = "minimum", .label = "Minimum", .box = Box::Variable, .hint = "0"},
     {.key = "maximum", .label = "Maximum", .box = Box::Variable, .hint = "100"},
-    {.key = "most_letters", .label = "Most letters", .box = Box::Variable, .hint = "64"},
-    {.key = "step", .label = "Step", .box = Box::Number, .hint = "1"},
-    {.key = "placeholder", .label = "Placeholder text", .box = Box::Text, .hint = "None"},
+    {.key = "most_letters", .label = "Letters at most", .box = Box::Variable, .hint = "64"},
+    {.key = "step", .label = "Steps of", .box = Box::Number, .hint = "1"},
+    {.key = "placeholder", .label = "Shown while empty", .box = Box::Text, .hint = "None"},
     {.key = "vertical", .label = "Vertical", .box = Box::YesNo, .choices = "no yes"},
-    {.key = "loop", .label = "Loop", .box = Box::YesNo, .choices = "yes no"},
+    {.key = "loop", .label = "Loops", .box = Box::YesNo, .choices = "yes no"},
     {.key = "volume", .label = "Volume", .box = Box::Volume, .hint = "100%"},
     {.key = "line", .label = "Line colour", .box = Box::Colour, .hint = "Default"},
-    {.key = "choice_style", .label = "Choice style", .box = Box::Style, .hint = "Default"},
-    {.key = "ending_style", .label = "Ending style", .box = Box::Style, .hint = "Default"},
-    {.key = "unreached_style", .label = "Unreached style", .box = Box::Style, .hint = "Default"},
+    {.key = "choice_style", .label = "Choices' style", .box = Box::Style, .hint = "Default"},
+    {.key = "ending_style", .label = "Endings' style", .box = Box::Style, .hint = "Default"},
+    {.key = "unreached_style", .label = "Unreached points' style", .box = Box::Style, .hint = "Default"},
     {.key = "stack", .label = "Its parts go", .box = Box::Stack, .choices = "no down across"},
     {.key = "list", .label = "Once for each of", .box = Box::List, .hint = "None"},
     {.key = "item_animation", .label = "Animation on a new item", .box = Box::Animation, .hint = "None"},
-    {.key = "app", .label = "The phone's app", .box = Box::Name, .hint = "None"},
-    {.key = "title", .label = "Title", .box = Box::Text, .hint = "None"},
-    {.key = "icon", .label = "Icon", .box = Box::Image, .hint = "None"},
+    {.key = "app", .label = "App's name", .box = Box::Name, .hint = "None"},
+    {.key = "title", .label = "App's title", .box = Box::Text, .hint = "None"},
+    {.key = "icon", .label = "App's icon", .box = Box::Image, .hint = "None"},
     {.key = "width_at_most", .label = "Width at most", .box = Box::Number, .hint = "None"},
     {.key = "lines", .label = "Lines at most", .box = Box::Count, .hint = "None"},
     {.key = "count", .label = "Count on its icon", .box = Box::Variable, .hint = "New items"},
+    {.key = "screen", .label = "Shows the screen", .box = Box::Screen, .hint = "None"}, // (its parts in it, laid out in its box)
     {.key = "columns", .label = "Columns", .box = Box::Count, .hint = "1"},
-    {.key = "item_width", .label = "Item width", .box = Box::Pixels, .hint = "Default"},
-    {.key = "item_height", .label = "Item height", .box = Box::Pixels, .hint = "Default"},
-    {.key = "spacing", .label = "Spacing", .box = Box::Pixels, .hint = "Default"},
-    {.key = "spacing_across", .label = "Spacing across", .box = Box::Pixels, .hint = "Default"},
-    {.key = "spacing_down", .label = "Spacing down", .box = Box::Pixels, .hint = "Default"},
+    {.key = "item_width", .label = "Each item's width", .box = Box::Pixels, .hint = "Default"},
+    {.key = "item_height", .label = "Each item's height", .box = Box::Pixels, .hint = "Default"},
+    {.key = "spacing", .label = "Gap between items", .box = Box::Pixels, .hint = "Default"},
+    {.key = "spacing_across", .label = "Gap between columns", .box = Box::Pixels, .hint = "Default"},
+    {.key = "spacing_down", .label = "Gap between rows", .box = Box::Pixels, .hint = "Default"},
 };
 
 constexpr std::string_view kImageBy = "?";
@@ -460,9 +520,9 @@ struct FileKind {
     std::span<const std::string_view> extensions;
 };
 
-inline const FileKind kFileKinds[]{{"images", "Images", "Image", "images/", kImageTypes},
+inline const FileKind kFileKinds[]{{"images", "Visuals", "Visual", "images/", kImageTypes}, // (images and movies: visuals, one list)
                                 {"sounds", "Sounds", "Sound", "sounds/", kSoundTypes},
-                                {"movies", "Movies", "Movie", "movies/", kMovieTypes},
+                                {"movies", "Visuals", "Visual", "movies/", kMovieTypes},
                                 {"fontfiles", "Fonts", "Font file", "fonts/", kFontTypes}};
 
 // The world's language codes (ISO 639-1: what computers say, ja for Japanese), each with its name in

@@ -112,8 +112,10 @@ std::optional<Value> Game::timeValue(std::string_view name) const {
     if (name == "time_day") return now.day;
     if (name == "time_hour") return now.minutes / 60;
     if (name == "time_minute") return now.minutes % 60;
-    if (name == "time_part") return partAt(now.minutes); // (as the scripts name it: for if lines)
-    if (name == "time_weekday") return weekday >= 0 ? std::string(kWeekdays[static_cast<std::size_t>(weekday)]) : std::string{}; // (in English: for if lines)
+    // (the part of the day as the game names it, the weekday and the month in English, as the editor writes them: for if
+    // lines, if time_weekday is "Friday"; shown to players: time_date's, in their language)
+    if (name == "time_part") return partAt(now.minutes);
+    if (name == "time_weekday") return weekday >= 0 ? std::string(kWeekdays[static_cast<std::size_t>(weekday)]) : std::string{};
     if (name == "time_month") return date >= 0 ? std::string(kMonths[static_cast<std::size_t>(dateFromDays(date)[1] - 1)]) : std::string{};
     if (name == "time_year") return date >= 0 ? dateFromDays(date)[0] : 0;
     if (name == "time_clock") return clockText(now.minutes); // (as it shows: in the player's language)
@@ -141,7 +143,7 @@ std::string Game::backgroundFor(std::string_view image) const {
 
 void Game::timeMoved(When from, When to, bool fast) {
     if (!stage_.background().empty()) // (the background as it is in the new part of the day)
-        if (const std::string shown = backgroundFor(stage_.background()); shown != stage_.background()) stage_.setBackground(shown, nullptr, true);
+        if (const std::string shown = backgroundFor(stage_.background()); shown != stage_.background()) stage_.setBackground(shown, nullptr, true, stage_.backgroundLoops(), stage_.backgroundVolume(), stage_.backgroundPart());
     if (to.day != from.day && !fast && script_.screen("calendar")) waitForScreen({.name = "calendar"}, pc_); // (a new day: the calendar, when the screens have one)
 }
 

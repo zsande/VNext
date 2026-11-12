@@ -1,5 +1,5 @@
 // The licences of the software built into the player: engine/licences.txt, built into it by CMakeLists.
-// About in the developer tools shows them, Pack writes them next to game.vnext, and the
+// About VNext in the developer tools shows them, Export the game and --pack write them next to game.vnext, and the
 // player's zip on GitHub has the file itself.
 #include "Engine.hpp"
 
