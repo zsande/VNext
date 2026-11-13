@@ -1,0 +1,4 @@
+# Files the build reads byte for byte keep the same line endings on every system (Windows' checkouts would turn
+# them into CRLF): licences.txt is built into the player for About and Export, and zipped beside it, so every
+# system's player and zip carry the same bytes.
+engine/licences.txt text eol=lf
