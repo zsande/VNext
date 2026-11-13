@@ -4,7 +4,7 @@
 
 **[Download VNext](https://github.com/zsande/VNext/releases/latest)**: one app, nothing else to install. It's free, also for games you sell.
 
-<p align="center"><img src=".github/make-a-scene.gif" width="100%" alt="The VNext editor: a new line is added with a click, its words are typed in, Mika is picked as the speaker and “surprised” from pictures of her expressions, and Play from here shows her saying it in the park"></p>
+<p align="center"><img src=".github/make-a-scene.gif" width="100%" alt="The VNext editor: a new line is added with a click, its words are typed in, Mika is picked as the speaker, and Play from here shows her (a stand-in silhouette) saying it in the park"></p>
 
 ## Why it's easy
 
@@ -20,7 +20,7 @@ Most visual novel engines start with a scripting language to learn or a game eng
 
 ## The phone
 
-<p align="center"><img src=".github/phone.gif" width="560" alt="A chat in a VNext game: next to a flustered Kaede, her phone shows her sending Haru a message and deleting it, then “hey”, Haru reading it and typing, his “k” and his invitation to the summer festival, her “...fine. if you insist.” and his heart"></p>
+<p align="center"><img src=".github/phone.gif" width="560" alt="A chat in a VNext game: next to Kaede (a stand-in silhouette), her phone shows her sending Haru a message and deleting it, then “hey”, Haru reading it and typing, his “k” and his invitation to the summer festival, her “...fine. if you insist.” and his heart"></p>
 
 Your characters text the player. Their messages type out as they write them, and they send images, stickers and voice messages, react, read what the player sends, and edit or delete what they just said. A choice in a chat shows its options on the phone, and the one picked goes out as the player's message. Calls ring until they're answered or declined, and when nobody picks up, the missed call has a story of its own. Players can text and call characters themselves, a badge on the textbox counts new messages, and controllers buzz when one comes. The phone has a lock screen with a passcode, wallpapers, apps (the game's gallery, music room, saves and settings among them), a clock, a date, signal and battery, all of which the story can change, and it's made of ordinary screen parts, so every bit of it can be restyled.
 
@@ -39,8 +39,8 @@ Your characters text the player. Their messages type out as they write them, and
 - **Every language**: translations, with a spreadsheet for translators, right-to-left scripts, Japanese and Chinese line breaking, and the developer tools themselves can be translated too.
 
 <p align="center">
-  <img src=".github/game.png" width="48%" alt="A VNext game: Haru smiling in a park with falling petals, asking “So. Lanterns first, or food?”, with Phone, Skip, Auto, Q.Save and Q.Load buttons on the textbox">
-  <img src=".github/call.png" width="48%" alt="A VNext game: Mika calling the player, her incoming call on the phone with Decline and Answer, while Haru waits in the park">
+  <img src=".github/game.png" width="48%" alt="A VNext game: Haru (a stand-in silhouette) in a park with falling petals, asking “So. Lanterns first, or food?”, with Phone, Skip, Auto, Q.Save and Q.Load buttons on the textbox">
+  <img src=".github/call.png" width="48%" alt="A VNext game: Mika calling the player, her incoming call on the phone with Decline and Answer, while Haru (a stand-in silhouette) waits in the park">
 </p>
 
 ## The editor
