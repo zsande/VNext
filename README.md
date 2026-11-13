@@ -2,7 +2,7 @@
 
 **Make a visual novel without writing a single line of code.** VNext is one free app for Windows, macOS and Linux: you write the story, design the menus and play the game in the same window, and your characters can even text and call the player.
 
-**[Download VNext](https://github.com/zsande/VNext/releases/latest)**: one app, nothing else to install. It's free, also for games you sell.
+**[Download VNext](https://github.com/zsande/VNext/releases/latest)**: one app, nothing else to install. It's free, also for games you sell. The **[manual](MANUAL.md)** shows everything it does, and how.
 
 <p align="center"><img src=".github/make-a-scene.gif" width="100%" alt="The VNext editor: a new line is added with a click, its words are typed in, Mika is picked as the speaker, and Play from here shows her (a stand-in silhouette) saying it in the park"></p>
 
