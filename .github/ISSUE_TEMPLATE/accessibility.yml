@@ -41,7 +41,7 @@ body:
     id: version
     attributes:
       label: VNext version
-      description: The first line of About (a button at the foot of the developer tools) names it, for example 1.0.2. In a game, say which game.
+      description: The first line of About (a button at the foot of the developer tools) names it, for example 1.0.3. In a game, say which game.
   - type: dropdown
     id: computer
     attributes:
