@@ -1,5 +1,6 @@
 // The developer tools' own part: the buttons at the window's foot, and what each does.
 #include "DeveloperUi.hpp"
+#include "Sample.hpp"
 
 #include <cmath>
 
@@ -16,6 +17,40 @@ scene start
 )vnext";
 
 } // namespace
+
+// New game: a game folder next to VNext, empty (its first scene, its menus ready-made) or with the samples, opened in
+// developer mode in the Story page.
+void Developer::newGame(bool sample) {
+    DeveloperTools& d = tools;
+    const std::string folder = engine.gamePlaces().front() + "game/";
+    if (sample) {
+        if (const auto written = writeSample(folder); !written) {
+            d.failed = true;
+            d.status = written.error();
+            return;
+        }
+        logInfo("{}", "Made a new game with the samples: '{}'."_tr(folder));
+    } else {
+        const std::string scripts = folder + "scripts/";
+        if (!SDL_CreateDirectory(scripts.c_str()) || !SDL_SaveFile((scripts + "main.vnscript").c_str(), kNewGameScript.data(), kNewGameScript.size())) {
+            d.failed = true;
+            d.status = "Can't make a game folder there: {}."_tr(SDL_GetError());
+            return;
+        }
+        logInfo("{}", "Made a new game: '{}main.vnscript'."_tr(scripts));
+    }
+    if (!engine.lookForGame()) { // (in developer mode, so it opens in the Story page)
+        d.failed = true;
+        d.status = "There's still no game folder next to VNext."_tr;
+        return;
+    }
+    // An empty one's menus, ready-made: saving, loading, Settings, the history and its question, then the pause menu and
+    // the title screen with a button for each; as the game starts, so nothing to undo. (The samples bring their own.)
+    if (!sample && d.editor.loaded()) {
+        for (const std::string_view screen : {"save", "load", "settings", "history", "confirm", "pause", "title"}) addReadyMadeScreen(screen);
+        d.editor.load(engine.gameRoot());
+    }
+}
 
 void Developer::runCommand(int command) {
     DeveloperTools& d = tools;
@@ -124,28 +159,13 @@ void Developer::runCommand(int command) {
         }
         break;
     }
-    case kNewGame: {
-        const std::string scripts = engine.gamePlaces().front() + "game/scripts/";
-        if (!SDL_CreateDirectory(scripts.c_str()) ||
-            !SDL_SaveFile((scripts + "main.vnscript").c_str(), kNewGameScript.data(), kNewGameScript.size())) {
-            d.failed = true;
-            d.status = "Can't make a game folder there: {}."_tr(SDL_GetError());
-            break;
-        }
-        logInfo("{}", "Made a new game: '{}main.vnscript'."_tr(scripts));
-        if (!engine.lookForGame()) { // (in developer mode, so it opens in the Story page)
-            d.failed = true;
-            d.status = "There's still no game folder next to VNext."_tr;
-            break;
-        }
-        // Its menus, ready-made: saving, loading, Settings, the history and its question, then the pause menu and the
-        // title screen with a button for each; as the game starts, so nothing to undo.
-        if (d.editor.loaded()) {
-            for (const std::string_view screen : {"save", "load", "settings", "history", "confirm", "pause", "title"}) addReadyMadeScreen(screen);
-            d.editor.load(engine.gameRoot());
-        }
+    case kNewGame: // (an empty one, or one with the samples when this VNext has them)
+        if (!hasSample()) return newGame(false);
+        ask("New game"_tr(), "Start from an empty game, or from one with VNext's samples: a cast, places, music and menus to use?"_tr(), {"Empty game"_tr(), "With samples"_tr(), "Cancel"_tr()}, 2,
+            SDL_MESSAGEBOX_INFORMATION, [this](std::size_t answer) {
+                if (answer < 2) newGame(answer == 1);
+            });
         break;
-    }
     case kLookAgain:
         if (!engine.lookForGame()) {
             d.failed = true;

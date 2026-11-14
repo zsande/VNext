@@ -1,0 +1,38 @@
+# A new game with VNext's samples: a cast of three (Mika, Kaede and Haru, each with nine expressions and two close-ups),
+# six places, five songs, sounds, the phone, and every menu ready-made with pictures of its own. Use them, change them,
+# or swap in your own. Lanterns, the short game on VNext's release page, is made of these same samples.
+#
+# Music: TERNOX (CC0, ternox.itch.io/vn-music). Pictures: drawn for VNext.
+
+include characters
+include extras
+include screens
+
+setting title "My game"
+setting developer yes
+setting game_size 1920 1080
+setting character_height 1
+setting default.text_speed 45
+
+setting time story
+setting time_start Monday 8:00
+
+setting has_phone yes
+setting phone_message_sound ping
+setting phone_send_sound pop
+setting phone_ringtone ring
+setting phone_wallpaper phone_wallpaper
+setting phone_lock_wallpaper phone_lock
+
+variable name "Sam" "the player's name, as they type it on the Input screen"
+
+scene start
+    open title
+    show classroom as background with fade_in
+    play music/after_school as music fade=2
+    show kaede smile with slide_in
+    Kaede smile: This is where your story starts.
+    Kaede happy: The places, the music, the menus and the three of us are VNext's samples. Use us, change us, or swap in your own.
+    show kaede at left
+    show mika happy at right with slide_in_right
+    Mika happy: Click a line in the Story page to change what we say ♡

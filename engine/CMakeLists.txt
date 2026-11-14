@@ -234,6 +234,7 @@ add_executable(vnext
     src/Basics.cpp              # helpers for words, numbers and names
     src/Colours.cpp             # colours read and said
     src/Files.cpp               # the game's files (its folder or its pack), packing, the Trash
+    src/Sample.cpp              # the samples built in: New game and --sample make a game folder with them
     src/Platform.cpp            # what the player does without the system's help (Apple.mm, Windows.cpp, Linux.cpp: with it)
     src/Licences.cpp            # the licences of what's built in (licences.txt), for About and next to packs
     ${CMAKE_CURRENT_BINARY_DIR}/pl_mpeg.c
@@ -363,7 +364,7 @@ if(APPLE)
         add_custom_target(vnext_signed ALL
             COMMAND ${VN_CODESIGN} --force --sign - $<TARGET_BUNDLE_DIR:vnext>
             COMMENT "Signing the app bundle (ad hoc)" VERBATIM)
-        add_dependencies(vnext_signed vnext)
+        add_dependencies(vnext_signed vnext vnext_sample)
     endif()
 elseif(WIN32)
     # The .exe's own icon, for Explorer and the taskbar: icon.ico in the build folder, made from icon.png.
@@ -405,6 +406,36 @@ END
     target_sources(vnext PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/icon.rc)
 endif()
 
+# The samples built into VNext (Sample.hpp): sample/, packed by the player just built (which checks its scripts) as
+# sample.vnext, in the app (a Mac's Resources) or next to the player. A release puts it at the end of the .exe or the
+# AppImage instead (the build workflow's Package step), so the player is all there is. And Lanterns, the demo: the samples
+# with lanterns/ over them (its story, its main and extras, its gallery), packed as lanterns.vnext for the release page.
+file(GLOB_RECURSE vn_sample_files CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/sample/*)
+set(vn_sample ${CMAKE_CURRENT_BINARY_DIR}/sample.vnext)
+if(APPLE)
+    set(vn_sample_in $<TARGET_BUNDLE_CONTENT_DIR:vnext>/Resources/sample.vnext)
+else()
+    set(vn_sample_in $<TARGET_FILE_DIR:vnext>/sample.vnext)
+endif()
+add_custom_command(OUTPUT ${vn_sample}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${vn_sample}
+    COMMAND $<TARGET_FILE:vnext> --game ${CMAKE_CURRENT_SOURCE_DIR}/sample --data ${CMAKE_CURRENT_BINARY_DIR}/sample-data --pack ${vn_sample}
+    COMMAND ${CMAKE_COMMAND} -E copy ${vn_sample} ${vn_sample_in}
+    DEPENDS vnext ${vn_sample_files} COMMENT "Packing the samples" VERBATIM)
+add_custom_target(vnext_sample ALL DEPENDS ${vn_sample})
+file(GLOB_RECURSE vn_lanterns_files CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/lanterns/*)
+set(vn_lanterns ${CMAKE_CURRENT_BINARY_DIR}/lanterns.vnext)
+add_custom_command(OUTPUT ${vn_lanterns}
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_CURRENT_BINARY_DIR}/lanterns ${vn_lanterns}
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/sample ${CMAKE_CURRENT_BINARY_DIR}/lanterns
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/lanterns ${CMAKE_CURRENT_BINARY_DIR}/lanterns
+    COMMAND $<TARGET_FILE:vnext> --game ${CMAKE_CURRENT_BINARY_DIR}/lanterns --data ${CMAKE_CURRENT_BINARY_DIR}/lanterns-data --pack ${vn_lanterns}
+    DEPENDS vnext ${vn_sample_files} ${vn_lanterns_files} COMMENT "Packing Lanterns, the demo" VERBATIM)
+add_custom_target(vnext_lanterns ALL DEPENDS ${vn_lanterns})
+
 # "cmake --install build --prefix DIR" puts the player in DIR: with --prefix .. (from
-# this folder) next to the game folder, where it plays the game being made.
+# this folder) next to the game folder, where it plays the game being made. (Not on a Mac, the sample next to it.)
 install(TARGETS vnext BUNDLE DESTINATION . COMPONENT player RUNTIME DESTINATION . COMPONENT player)
+if(NOT APPLE)
+    install(FILES ${vn_sample} DESTINATION . COMPONENT player)
+endif()

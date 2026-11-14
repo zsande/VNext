@@ -1,0 +1,84 @@
+# Lanterns: a short game made with VNext's samples (engine/sample: the cast, the places, the music, the menus), with a
+# story of its own: three classmates, one night of lanterns under the cherry trees, and four endings. The build puts the
+# samples and these files together and packs them as Lanterns' game.vnext, the demo on VNext's release page.
+#
+# Music: TERNOX (CC0, ternox.itch.io/vn-music). Pictures: drawn for VNext.
+
+include characters
+include story
+include extras
+include screens
+
+setting title "Lanterns"
+setting version "1.0"
+setting developer yes
+setting game_size 1920 1080
+setting character_height 1
+setting default.text_speed 45
+
+setting time story
+setting time_start Thursday 15:40
+
+setting has_phone yes
+setting phone_message_sound ping
+setting phone_send_sound pop
+setting phone_ringtone ring
+setting phone_wallpaper phone_wallpaper
+setting phone_lock_wallpaper phone_lock
+
+variable name "Sam" "your name, as you type it on the Input screen"
+
+# Thursday, after the last lesson.
+scene start
+    open title
+    time Thursday 15:40
+    show classroom as background with fade_in
+    play music/after_school as music fade=2
+    "Spring. Tomorrow night, the whole town walks under the cherry trees for the {tip lantern_festival}Lantern Festival{/tip}."
+    "Everyone's going with someone. Everyone but me."
+    "The last bell had rung. I was still at my desk, pretending to pack, when three people decided my evening for me."
+    set name to ""
+    open input
+    if name is ""
+        set name to "Sam"
+    show kaede annoyed with slide_in
+    Kaede annoyed: {name}! You still haven't signed up to help with the festival.
+    Kaede calm: Someone has to hang the lanterns. Not that I care who you go with.
+    choice
+        "I'll help with the lanterns."
+            set kaede.love to kaede.love + 1
+            Kaede surprised: Oh. Good. That's... {italic}good{/italic}.
+        "Are you asking me to go with you?"
+            set kaede.love to kaede.love + 2
+            camera with shake
+            Kaede flustered: W-what?! {bold}As if!{/bold} I'm the class president, asking is my {italic}job{/italic}!
+        "I'm busy tomorrow."
+            Kaede cold: ...Fine. Do what you want.
+    show kaede at left
+    show haru calm at right with slide_in_right
+    Haru: Is {name} here?
+    Kaede surprised: S-senpai?
+    Haru: The roof needs lanterns before tomorrow. You looked free.
+    choice for 6 seconds
+        "Help Haru on the roof"
+            set helping to "haru"
+            set haru.love to haru.love + 1
+            Haru smile: ...Thanks. Tonight, then. I'll text you.
+        "Stay and help Kaede"
+            set helping to "kaede"
+            set kaede.love to kaede.love + 1
+            Kaede happy: Sorry, senpai! {name} is mine.{pause 0.6} For the cleanup!{pause 0.4} The {italic}cleanup{/italic}.
+    if helping is ""
+        "They both looked at me. I didn't say anything, and the moment passed."
+        Haru: ...Another time, then.
+    hide haru
+    hide kaede
+    show mika smile with fade_in
+    Mika happy: {name}~! Walk home with me?
+    Mika smile: I'll wait at the gate. However long it takes ♡
+    Mika: Don't worry, I know the way to your house. We can't get lost.
+    "...How does she know the way to my house?"
+    hide mika
+    if helping is "kaede"
+        jump cleanup
+    jump gate

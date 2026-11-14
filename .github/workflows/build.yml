@@ -69,6 +69,10 @@ jobs:
         run: |
           cmake --install engine/build --prefix dist
           cp engine/licences.txt dist/
+          # The samples (engine/sample, packed by the build as sample.vnext: engine/src/Sample.hpp) go at the end of the
+          # player, so it's all there is: VNext.exe now, the AppImage once it's made. A Mac's app has them in it already.
+          case "$RUNNER_OS" in Windows) py=python ;; *) py=python3 ;; esac
+          if [ "$RUNNER_OS" = Windows ]; then "$py" .github/sample.py add dist/VNext.exe dist/sample.vnext && rm dist/sample.vnext; fi
           if [ "$RUNNER_OS" = Linux ]; then
             echo "The Linux player needs glibc $(objdump -T dist/VNext | grep -o 'GLIBC_[0-9.]*' | cut -d_ -f2 | sort -uV | tail -1) or newer."
             # The AppImage: the player, its icon and licences.txt in one file that runs as it is, zipped with
@@ -87,6 +91,7 @@ jobs:
             chmod +x appimagetool
             APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 ./appimagetool --runtime-file runtime AppDir VNext-Linux.AppImage
             rm dist/VNext && mv VNext-Linux.AppImage dist/
+            "$py" .github/sample.py add dist/VNext-Linux.AppImage dist/sample.vnext && rm dist/sample.vnext
           fi
           ls -la dist
 
@@ -107,6 +112,8 @@ jobs:
           printf '%s\n' 'setting title "Try it"' 'setting save_folder "vnext_try_it"' '' 'scene start' \
             '    This is the first line of the story.' '    And this is the second.' > try/game/scripts/main.vnscript
           player dist --help
+          player dist --sample try/sample && [ -f try/sample/scripts/main.vnscript ] || { echo "::error::The samples didn't come out of the player."; exit 1; }
+          player dist --game try/sample --data try/sample-data --screenshot try/5-sample.png && shot 5-sample.png
           player dist --game try/game --data try/data --screenshot try/1-story.png && shot 1-story.png
           player dist --data try/developer --screenshot try/2-developer.png && shot 2-developer.png
           player dist --game try/game --data try/data --pack
@@ -198,6 +205,12 @@ jobs:
           name: Player-${{ matrix.system }}
           path: ${{ env.ZIP }}
 
+      - uses: actions/upload-artifact@v6 # (Lanterns, the demo made of the samples, for the release: game.vnext)
+        if: runner.os == 'Linux'
+        with:
+          name: Demo
+          path: engine/build/lanterns.vnext
+
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -229,7 +242,20 @@ jobs:
             *) v=$(sed -n 's/^ *VERSION \([0-9][0-9.]*\)$/\1/p' engine/CMakeLists.txt | head -1) ;;
           esac
           mkdir players
-          for s in Windows macOS Linux; do cp "VNext-$v-$s.zip" "players/$s.zip"; done
+          # Each system's player as it goes with the others, without the samples (VNext's, not a game's): unzipped, the
+          # samples taken off the end of the .exe and the AppImage or out of the app (signed again), zipped again.
+          for s in Windows macOS Linux; do
+            mkdir "p-$s"
+            if [ "$s" = macOS ]; then
+              ditto -x -k "VNext-$v-$s.zip" "p-$s" && rm -f "p-$s/VNext.app/Contents/Resources/sample.vnext"
+              codesign --force --sign - "p-$s/VNext.app" && ditto -c -k --norsrc --noextattr "p-$s" "players/$s.zip"
+            else
+              (cd "p-$s" && unzip -q "../VNext-$v-$s.zip")
+              for f in "p-$s/VNext.exe" "p-$s/VNext-Linux.AppImage"; do if [ -f "$f" ]; then python3 .github/sample.py strip "$f"; fi; done
+              (cd "p-$s" && zip -q -r -X "../players/$s.zip" .)
+            fi
+          done
+          ls -la players
           for s in Windows Linux; do # (next to the player)
             for o in Windows macOS Linux; do
               if [ "$o" != "$s" ]; then zip -q -X "VNext-$v-$s.zip" "players/$o.zip"; fi
@@ -280,6 +306,10 @@ jobs:
           pattern: VNext-*
           merge-multiple: true
 
+      - uses: actions/download-artifact@v7 # (lanterns.vnext: the demo)
+        with:
+          name: Demo
+
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -305,6 +335,8 @@ jobs:
           cat > download.md <<'EOF'
           Download the zip for your computer, unzip it and open VNext. With no game next to it, it opens in developer mode, where you make one. Export the game (the Game menu) makes your game a zip for Windows, macOS and Linux, each with the game's own player: every VNext carries the other two systems' players (in the players folder next to it; on a Mac, inside the app), so nothing is downloaded. A game.vnext put next to VNext plays too, and keeps its players' saves and progress in that file.
 
+          `game.vnext`, below, is Lanterns: a short game made with the samples New game offers (a cast, places, music and menus). Put it next to VNext and open VNext to play it.
+
           - **Windows** (10 or newer): `VNext-@V@-Windows.zip`. The first time, Windows may say it protected your PC: click **More info**, then **Run anyway**.
           - **macOS** (13.3 or newer, Apple silicon and Intel): `VNext-@V@-macOS.zip`. The first time, macOS won't open it because Apple hasn't checked it: open **System Settings → Privacy & Security** and click **Open Anyway**.
           - **Linux** (64-bit, as new as Ubuntu 22.04 or Debian 12, or newer): `VNext-@V@-Linux.zip`. VNext in it is an AppImage, `VNext-Linux.AppImage`, one file that runs as it is.
@@ -312,7 +344,9 @@ jobs:
           `licences.txt`, in each zip, lists the software built into VNext and its licences; About shows it too. VNext itself is under the zlib licence. The source of the libfuse built into the Linux AppImage's runtime, and the runtime's own, are attached below: `fuse-@FUSE@.tar.xz` and `type2-runtime-@RUNTIME@.tar.gz`. How the players are signed: [code signing policy](https://github.com/zsande/VNext/blob/main/CODE_SIGNING.md).
           EOF
           sed "s/@V@/$v/g; s/@FUSE@/$fuse/g; s/@RUNTIME@/$runtime/g" download.md >> notes.md # (the zips' and sources' names, with this version)
+          mv lanterns.vnext game.vnext
           gh release create "$GITHUB_REF_NAME" "VNext-$v-Windows.zip" "VNext-$v-macOS.zip" "VNext-$v-Linux.zip" \
+            "game.vnext#Lanterns, a short game made with VNext's samples: put it next to VNext to play it" \
             "fuse-$fuse.tar.xz#Source: libfuse $fuse (LGPL 2.1, in the Linux AppImage's runtime)" \
             "type2-runtime-$runtime.tar.gz#Source: AppImage runtime $runtime (with its libfuse patch)" \
             --repo "$GITHUB_REPOSITORY" --title "VNext ${GITHUB_REF_NAME#v}" --notes-file notes.md

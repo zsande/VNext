@@ -1,6 +1,7 @@
 // The player (Engine): starting (the window, the game found and read, the player's data), the title screen, a new
 // game and the story's end, packing the game, and reading the scripts again.
 #include "Engine.hpp"
+#include "Sample.hpp"
 
 #include <SDL3_image/SDL_image.h>
 #include <algorithm>
@@ -154,7 +155,7 @@ Engine::Log::~Log() {
 
 SDL_AppResult Engine::init(int argc, char** argv) {
     log_.start();
-    std::string gameArg, dataArg, translateId;
+    std::string gameArg, dataArg, translateId, sampleArg;
     std::optional<std::string> packArg;
     bool listVoices = false;
     for (int i = 1; i < argc; ++i) {
@@ -166,10 +167,11 @@ SDL_AppResult Engine::init(int argc, char** argv) {
         else if (arg == "--screenshot" && hasValue) screenshotPath_ = argv[++i];
         else if (arg == "--voices") listVoices = true;
         else if (arg == "--translate" && hasValue) translateId = lower(argv[++i]);
+        else if (arg == "--sample" && hasValue) sampleArg = argv[++i];
         else if (arg == "--pack") packArg = hasValue && !std::string_view(argv[i + 1]).starts_with('-') ? argv[++i] : packArg.value_or("");
         else if (arg == "--help" || arg == "-h") {
             SDL_Log("usage: VNext [--game FOLDER or PACK] [--data FOLDER] [--scene NAME] [--screenshot FILE.png] [--voices] "
-                    "[--translate LANGUAGE] [--pack [FILE]]");
+                    "[--translate LANGUAGE] [--pack [FILE]] [--sample FOLDER]");
             return SDL_APP_SUCCESS;
         }
     }
@@ -180,6 +182,13 @@ SDL_AppResult Engine::init(int argc, char** argv) {
         dataFolder_ = true;
     }
     developer_.startToolsLanguage(); // (before the scripts are read: what's said about their mistakes is in it)
+    // --sample FOLDER: a game folder with the samples built into VNext written there (as New game makes it), then quit.
+    if (!sampleArg.empty()) {
+        const auto written = writeSample(withSlash(sampleArg));
+        const std::string said = written ? "Made a game folder with the samples in '{}'."_tr(sampleArg) : written.error();
+        SDL_Log("%s", said.c_str());
+        return written ? SDL_APP_SUCCESS : SDL_APP_FAILURE;
+    }
 
     // The script comes first: it decides the save folder, the game size and default settings.
     gameRoot_ = findGame(gameArg);

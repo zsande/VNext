@@ -360,6 +360,10 @@ std::vector<std::string> GameFiles::list(const std::string& folder, std::string_
     return names;
 }
 
+std::vector<std::string> GameFiles::packed() const {
+    return pack_ ? pack_->paths : std::vector<std::string>{};
+}
+
 bool GameFiles::writable() const {
     return pack_ && IOStreamPtr{SDL_IOFromFile(pack_->file.c_str(), "r+b")} != nullptr;
 }
@@ -434,6 +438,23 @@ std::expected<void, std::string> GameFiles::openPack(const std::string& file) {
 bool fileExists(const std::string& path) {
     SDL_PathInfo info{};
     return SDL_GetPathInfo(path.c_str(), &info) && info.type == SDL_PATHTYPE_FILE;
+}
+
+void removeAll(const std::string& path) {
+    SDL_PathInfo info;
+    if (!SDL_GetPathInfo(path.c_str(), &info)) return;
+    if (info.type == SDL_PATHTYPE_DIRECTORY) {
+        std::vector<std::string> inside;
+        SDL_EnumerateDirectory(
+            path.c_str(),
+            [](void* data, const char*, const char* name) {
+                static_cast<std::vector<std::string>*>(data)->emplace_back(name);
+                return SDL_ENUM_CONTINUE;
+            },
+            &inside);
+        for (const std::string& name : inside) removeAll(withSlash(path) + name);
+    }
+    SDL_RemovePath(path.c_str());
 }
 
 std::string withSlash(std::string path) {

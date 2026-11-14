@@ -58,6 +58,8 @@ public:
     [[nodiscard]] IOStreamPtr open(const std::string& path) const;
     // The names of the files in `folder` that end with `extension` (in any case), in order.
     [[nodiscard]] std::vector<std::string> list(const std::string& folder, std::string_view extension) const;
+    // Every file in the pack open (none open: none), its path in it as written ("images/aiko.png"), in the pack's order.
+    [[nodiscard]] std::vector<std::string> packed() const;
     // The pack keeps its players' saves too: whether its file can be written to, and a file written into
     // it (added or replaced) or taken out of it, after its own files, which stay as they are. Only with a
     // pack open, for a path in it: whether it went well.
@@ -76,6 +78,8 @@ private:
 [[nodiscard]] std::optional<std::string> readTextFile(const std::string& path);
 [[nodiscard]] IOStreamPtr openFile(const std::string& path);
 [[nodiscard]] std::vector<std::string> listFiles(const std::string& folder, std::string_view extension);
+// A folder and everything in it, gone for good (a file: it alone): what VNext made itself and doesn't keep.
+void removeAll(const std::string& path);
 // What scripts call a file (its name without the ending): one word, so "19. YOMI.flac" is 19_YOMI
 // (spaces, dots and the like are _; letters of any language stay).
 [[nodiscard]] std::string scriptName(std::string_view stem);

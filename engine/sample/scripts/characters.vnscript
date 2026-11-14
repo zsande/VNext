@@ -1,0 +1,37 @@
+# The cast: each an atlas of nine expressions (a bust, 608 x 1080 frames) and two close-ups of their head (720 x 1080), with
+# the eyes and mouth VNext moves as they blink and talk. "show kaede flustered", or a line "Kaede flustered: ...".
+# love= makes them a love interest: the choices raise it, and the Relationships screen shows it in hearts.
+
+character Mika name_colour=#b48ad6 made_up_voice=high love=0 contact=yes avatar=mika_avatar about="The girl who always knows where you are."
+character Kaede name_colour=#e0606a made_up_voice=medium love=0 contact=yes avatar=kaede_avatar about="Class president. Definitely not interested in you."
+character Haru name_colour=#d9874a made_up_voice=low love=0 contact=yes avatar=haru_avatar about="Third-year. Says very little."
+
+atlas mika frames_in_a_row=3
+    expressions calm smile happy surprised flustered annoyed sad shocked cold
+    eyes open half closed image=mika_eyes x=187 y=300
+    mouth closed half open image=mika_mouth x=275 y=422
+
+atlas mika_close frames_in_a_row=2
+    expressions flustered smile
+    eyes open half closed image=mika_close_eyes x=176 y=402
+    mouth closed half open image=mika_close_mouth x=315 y=596
+
+atlas kaede frames_in_a_row=3
+    expressions calm smile happy surprised flustered annoyed sad shocked cold
+    eyes open half closed image=kaede_eyes x=187 y=298
+    mouth closed half open image=kaede_mouth x=275 y=422
+
+atlas kaede_close frames_in_a_row=2
+    expressions flustered smile
+    eyes open half closed image=kaede_close_eyes x=176 y=400
+    mouth closed half open image=kaede_close_mouth x=315 y=596
+
+atlas haru frames_in_a_row=3
+    expressions calm smile happy surprised flustered annoyed sad shocked cold
+    eyes open half closed image=haru_eyes x=202 y=295
+    mouth closed half open image=haru_mouth x=273 y=426
+
+atlas haru_close frames_in_a_row=2
+    expressions flustered smile
+    eyes open half closed image=haru_close_eyes x=200 y=413
+    mouth closed half open image=haru_close_mouth x=312 y=621

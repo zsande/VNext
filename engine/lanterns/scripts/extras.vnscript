@@ -1,0 +1,51 @@
+# What the story keeps track of, how things move, and what there is to collect: the gallery's pictures (images/gallery:
+# their titles here), the music room's songs (sounds/music: titled as their files are named), the endings, achievements
+# and a tip. The Extras screen shows them all.
+
+variable helping "" "who you stayed after school for: haru, kaede, or nobody"
+variable answered_mika no "whether you picked up when Mika called"
+variable promised_kaede no "whether you promised Kaede the bridge"
+variable mika_jealous no "whether Mika heard you'd go with Kaede"
+
+animation fade_in
+    opacity=0
+    opacity=100% over 0.6 seconds
+
+animation slide_in
+    x=-2 opacity=0
+    x=home opacity=100% over 0.45 seconds ease=out
+
+animation slide_in_right
+    x=2 opacity=0
+    x=home opacity=100% over 0.45 seconds ease=out
+
+animation hop
+    up=3% over 0.1 seconds ease=out
+    y=home over 0.15 seconds ease=in
+
+animation shake
+    x=0.02 zoom=104%
+    x=-0.02 over 0.05 seconds
+    x=0.015 over 0.05 seconds
+    x=0 zoom=100% over 0.2 seconds ease=out
+
+animation heartbeat loop=yes
+    zoom=103% from 0 to 0.12 seconds ease=out
+    zoom=100% from 0.12 to 0.5 seconds ease=in
+
+gallery gallery/kaede_lanterns "Kaede's lantern"
+gallery gallery/haru_rooftop "Above the lanterns"
+gallery gallery/mika_promise "Wherever you are"
+gallery gallery/mika_only_you "Only you"
+
+ending kaede "Kaede's lantern" hint="Meet Kaede at the bridge" scene=kaede_ending
+ending haru "Above the lanterns" hint="Go up to the roof" scene=haru_ending
+ending mika "Wherever you are" hint="Pick up when Mika calls" scene=mika_ending
+ending only_you "Only you" hint="Don't pick up" scene=only_you
+
+achievement first_lantern "First lantern" "Reach an ending"
+achievement every_lantern "Every lantern" "Reach all four endings"
+achievement picked_up "Picked up" "Answer Mika's call"
+achievement late "Two minutes late" "Keep Kaede waiting" secret=yes
+
+tip lantern_festival "The Lantern Festival" "Once a year the town hangs paper lanterns under its cherry trees, and everyone walks beneath them until the last one goes out."

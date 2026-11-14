@@ -1,0 +1,262 @@
+# The story: Thursday after school (the classroom, or the roof), Thursday night on the phone, and Friday night at the
+# festival, where it ends one of four ways. Each choice raises someone's love (or doesn't); the festival's choice opens
+# what love has earned.
+
+# Thursday after school: cleaning up with Kaede, if you stayed.
+scene cleanup
+    time Thursday 16:20
+    show classroom as background
+    "Everyone else left. Kaede handed me a broom like it was a sword."
+    show kaede annoyed with fade_in
+    Kaede annoyed: Desks first. Then the floor. Then the windows. Then we talk about the lanterns.
+    Kaede calm: Do you know how many lanterns this class is hanging tomorrow? Forty.
+    Kaede: Forty lanterns, and I wrote every name on every one.
+    choice
+        "Is mine on one?"
+            set kaede.love to kaede.love + 1
+            Kaede surprised: W-why would yours be on one?!
+            Kaede flustered: ...It's on the one by the bridge. For no reason.
+        "Forty? You didn't have to do that alone."
+            set kaede.love to kaede.love + 1
+            Kaede sad: Nobody else offered.
+            Kaede smile: ...You're offering now, though. Late, but fine.
+        "Can we hurry this up?"
+            Kaede cold: Sure. Leave. I'll finish.
+            Kaede annoyed: ...I always do.
+    "We finished as the sun started going gold. She didn't say thank you. She did walk me to the door."
+    hide kaede
+    jump gate
+
+# Thursday, the path home under the cherry trees, where Mika waited.
+scene gate
+    time Thursday 17:10
+    show gate as background with fade_in
+    weather petals
+    show mika smile with fade_in
+    if helping is "kaede"
+        Mika happy: There you are! I waited right here the whole time ♡
+        Mika smile: Kaede kept you for an hour and seven minutes. I counted.
+    else if helping is "haru"
+        Mika happy: You're walking home with me first, right? Haru-senpai can have you after ♡
+    else
+        Mika happy: You came! I knew you would ♡
+    Mika: The petals are so pretty this year... they fall on everyone the same.
+    Mika: Hey, hey. Who are you going to the festival with?
+    choice
+        "With you, Mika."
+            set mika.love to mika.love + 2
+            show mika close_flustered with hop
+            Mika close_flustered: R-really?! I'll wear my best yukata! Don't you {bold}dare{/bold} change your mind ♡
+        "I haven't decided yet."
+            set mika.love to mika.love + 1
+            Mika cold: ...Haven't decided?
+            Mika smile: That's okay. I'll help you decide ♡
+        "Probably with Kaede."
+            set mika_jealous to yes
+            Mika shocked: ...Kaede?
+            effect glitch for 0.2 seconds
+            play glitch_rewind
+            Mika smile: Haha. You're so funny, {name}.
+    "Kaede walked past us without a word. Her ears were red."
+    Mika: Bye bye, Kaede~ ♡
+    hide mika
+    stop weather fade=2
+    if helping is "haru"
+        jump roof_work
+    jump night
+
+# Thursday evening: hanging lanterns on the roof with Haru, if you said you would.
+scene roof_work
+    time Thursday 19:00
+    show rooftop as background with fade_in
+    "Haru's message just said: roof. now. bring gloves."
+    "I didn't bring gloves. The roof was strung with wire and stacks of paper lanterns, and the town below was starting to glow."
+    show haru calm with fade_in
+    Haru: Hook it through the top. Gently. They tear.
+    "Mine tore."
+    Haru: ...It's fine. The first one always tears.
+    Haru smile: Mine did too. Three years ago.
+    choice
+        "Is that why you asked me? So I'd tear one too?"
+            set haru.love to haru.love + 1
+            Haru smile: ...Maybe I just wanted company.
+        "You've done this for three years? Alone?"
+            set haru.love to haru.love + 1
+            Haru sad: Nobody else volunteers.
+            Haru calm: Tomorrow they'll all look up and think the lanterns grew there.
+        "Can I go home now?"
+            Haru cold: ...Sure. Mind the stairs.
+    "We hung forty-one. He counted the torn one."
+    Haru: From up here you can see the whole festival. Tomorrow, I mean.
+    Haru: ...Just so you know.
+    hide haru
+    jump night
+
+# Thursday night: the phone.
+scene night
+    time Thursday 21:30
+    show bedroom as background with fade_in
+    play music/moonlight as music fade=2
+    "Home. My phone hasn't stopped buzzing."
+    chat Haru
+        Haru: {name}.
+        Haru is typing for 2 seconds
+        Haru: tomorrow. lanterns first, or food?
+        choice
+            "lanterns first"
+                set haru.love to haru.love + 1
+                Haru: good answer.
+                Haru reacts ♡
+            "food, obviously"
+                Haru: ...fine. i'm buying.
+    "Then Kaede, who never texts anyone."
+    chat Kaede
+        Kaede is typing for 3 seconds
+        Kaede: it's not like i want to go with you or anything
+        Kaede deletes it
+        Kaede is typing for 2 seconds
+        Kaede: the bridge. 7pm. if you're late i'm leaving.
+        choice
+            "i'll be there ♡"
+                set kaede.love to kaede.love + 2
+                set promised_kaede to yes
+                Kaede: idiot.
+                Kaede edits it: ...ok.
+            "is that a date?"
+                set kaede.love to kaede.love + 1
+                Kaede: NO
+                Kaede: ...maybe
+    "And then Mika called."
+    phone call Mika for 8 seconds
+        set answered_mika to yes
+        set mika.love to mika.love + 1
+        set persistent.achievement.picked_up to yes
+        Mika: You picked up! I knew you would ♡
+        Mika: I just wanted to hear your voice before I sleep.
+        Mika: Did you know your street has eleven lanterns already? I counted them on my way past.
+        Mika: Goodnight, {name}. See you tomorrow. I'll find you, wherever you are ♡
+        missed:
+            chat Mika
+                Mika: why didn't you answer?
+                Mika: you're still awake. your light is on ♡
+                Mika: it's okay. i'll see you tomorrow ♡
+    "I fell asleep thinking about lanterns."
+    stop music fade=2
+    jump festival
+
+# Friday night: the festival.
+scene festival
+    time Friday 19:00 day=2
+    show festival as background with fade_in
+    play music/festival as music fade=2
+    weather petals amount=60%
+    "Friday night. The lanterns came on all at once, and the whole street turned gold."
+    "There were stalls the whole way to the shrine: candy apples, goldfish in paper bowls, a man selling wishes on strips of paper."
+    "I wrote one. I didn't let anyone see it."
+    "Somewhere ahead, a red ribbon in a ponytail. Somewhere above, a light on the school roof. And somewhere behind me, footsteps that matched mine exactly."
+    "Kaede said the bridge. Haru said the roof. Mika said she'd find me."
+    choice for 8 seconds
+        "Find Kaede at the bridge" (needs kaede.love is at least 3: Kaede didn't ask)
+            jump kaede_ending
+        "Go up to the roof, to Haru" (needs haru.love is at least 2: Haru didn't ask)
+            jump haru_ending
+        "Wait for Mika"
+            jump mika_ending
+    "I didn't move. I didn't have to."
+    jump mika_ending
+
+# Kaede's ending.
+scene kaede_ending
+    show festival as background
+    "The bridge was the brightest place in town. Forty lanterns, one name on each."
+    show kaede annoyed with fade_in
+    if not promised_kaede
+        set persistent.achievement.late to yes
+        Kaede annoyed: You're late. Two minutes late.
+        Kaede: I was about to leave. I really was.
+    else
+        Kaede surprised: You came. You actually came.
+        Kaede annoyed: I mean. Obviously you came. You said you would.
+    Kaede calm: That one's yours. By the bridge. I told you, for no reason.
+    Kaede calm: The lanterns are pretty. That's all I wanted to say.
+    show kaede close_flustered with hop
+    Kaede close_flustered: ...No, it isn't.
+    camera with shake
+    Kaede close_flustered: {bold}I like you,{/bold} okay?! Don't make that face!
+    Kaede close_flustered: I've liked you since you forgot your homework in April and copied mine and got it all wrong anyway!
+    hide kaede
+    show gallery/kaede_lanterns as background with fade_in
+    "Under the lanterns, the class president held my hand all the way home. So I wouldn't get lost, she said."
+    set persistent.ending.kaede to yes
+    jump the_end
+
+# Haru's ending.
+scene haru_ending
+    time Friday 19:20
+    show rooftop as background with fade_in
+    stop weather fade=1
+    "The stairs to the roof were dark. The door at the top was propped open with a torn paper lantern."
+    show haru calm with fade_in
+    Haru: You came.
+    Haru: From up here, the whole festival looks like one lantern.
+    Haru smile: Forty-one of them are ours.
+    show haru close_flustered with hop
+    Haru close_flustered: ...I didn't need help with the lanterns.
+    Haru close_flustered: I just wanted you up here. With me.
+    Haru close_flustered: Three years I watched it alone. This year I wanted to watch it with someone I— with you.
+    hide haru
+    show gallery/haru_rooftop as background with fade_in
+    "We watched the lanterns until the last one went out. He didn't let go of my hand once."
+    set persistent.ending.haru to yes
+    jump the_end
+
+# Mika's ending, or the other one.
+scene mika_ending
+    if not answered_mika or mika_jealous
+        jump only_you
+    show festival as background
+    "A hand slipped into mine. I knew whose before I turned."
+    show mika happy with fade_in
+    Mika happy: Found you ♡
+    Mika smile: I told you I'd find you, wherever you were.
+    Mika smile: I counted every lantern on the way here. Two thousand and twelve. But I only wanted to see this one.
+    show mika close_smile with hop
+    Mika close_smile: Can I hold your hand? Just for tonight.
+    Mika close_smile: ...And tomorrow night. And every night after that ♡
+    hide mika
+    show gallery/mika_promise as background with fade_in
+    "Mika laughed and pulled me into the crowd, under a thousand lanterns."
+    set persistent.ending.mika to yes
+    jump the_end
+
+scene only_you
+    stop music fade=0.5
+    stop weather
+    effect glitch for 0.4 seconds
+    play glitch_crush
+    show rooftop_red as background
+    play music/only_you as music fade=2
+    "The lanterns went out. All of them, at once."
+    show mika cold with fade_in
+    Mika cold: You didn't answer, {name}.
+    Mika: I called and called. Eight seconds is a long time, when you're waiting.
+    play heartbeat loop=yes
+    show mika cold animation=heartbeat
+    Mika: So I came to you instead ♡
+    Mika: Kaede's waiting at the bridge. Haru's waiting on the roof. They'll wait a long time.
+    camera with shake
+    Mika cold: The festival's over. It's just you and me now.
+    stop heartbeat
+    hide mika
+    show gallery/mika_only_you as background with fade_in
+    "{colour #ff3a4a}{bold}BAD END{/bold}{/colour}: Only you"
+    set persistent.ending.only_you to yes
+    jump the_end
+
+# Every ending: what it earned, then the credits; the story ends, and it's back to the title.
+scene the_end
+    set persistent.achievement.first_lantern to yes
+    if endings_reached is 4
+        set persistent.achievement.every_lantern to yes
+    stop music fade=3
+    open credits

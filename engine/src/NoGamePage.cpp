@@ -40,7 +40,7 @@ float Developer::noGamePage(DeveloperUi& ui, const SDL_FRect& box, bool draw) {
         std::string label, what;
     };
     const Action actions[]{{kNewGame, "New game"_tr,
-                            "Makes a game folder next to VNext, with its first scene and its menus (a title screen, the pause menu, saving and loading, Settings and the history), and opens it in the Story page."_tr},
+                            "Makes a game folder next to VNext and opens it in the Story page: an empty game, with its first scene and its menus (a title screen, the pause menu, saving and loading, Settings and the history), or one with VNext's samples: a cast of three, places, music, sounds and every menu, to use or change."_tr},
                            {kLookAgain, "Look again"_tr, "Opens a game folder or game.vnext put next to VNext since."_tr}};
     float buttonW = 0.0f;
     for (const Action& a : actions) buttonW = std::max(buttonW, ui.buttonWidth(a.label, layout::buttonText, layout::widerButtonW));

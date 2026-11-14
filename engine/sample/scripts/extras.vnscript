@@ -1,0 +1,28 @@
+# How things move: animations to show and hide visuals with (show NAME with fade_in) and to play on the camera
+# (camera with shake).
+
+animation fade_in
+    opacity=0
+    opacity=100% over 0.6 seconds
+
+animation slide_in
+    x=-2 opacity=0
+    x=home opacity=100% over 0.45 seconds ease=out
+
+animation slide_in_right
+    x=2 opacity=0
+    x=home opacity=100% over 0.45 seconds ease=out
+
+animation hop
+    up=3% over 0.1 seconds ease=out
+    y=home over 0.15 seconds ease=in
+
+animation shake
+    x=0.02 zoom=104%
+    x=-0.02 over 0.05 seconds
+    x=0.015 over 0.05 seconds
+    x=0 zoom=100% over 0.2 seconds ease=out
+
+animation heartbeat loop=yes
+    zoom=103% from 0 to 0.12 seconds ease=out
+    zoom=100% from 0.12 to 0.5 seconds ease=in

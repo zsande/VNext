@@ -6,6 +6,7 @@
 #include "Developer.hpp"
 #include "Engine.hpp"
 #include "Platform.hpp"
+#include "Sample.hpp"
 #include "ScriptEdits.hpp"
 
 #include <SDL3/SDL_process.h>
@@ -214,24 +215,6 @@ bool run(const std::vector<std::string>& words) {
     return waited && code == 0;
 }
 
-// A folder and everything in it, gone (a file: it alone).
-void removeAll(const std::string& path) {
-    SDL_PathInfo info;
-    if (!SDL_GetPathInfo(path.c_str(), &info)) return;
-    if (info.type == SDL_PATHTYPE_DIRECTORY) {
-        std::vector<std::string> inside;
-        SDL_EnumerateDirectory(
-            path.c_str(),
-            [](void* data, const char*, const char* name) {
-                static_cast<std::vector<std::string>*>(data)->emplace_back(name);
-                return SDL_ENUM_CONTINUE;
-            },
-            &inside);
-        for (const std::string& name : inside) removeAll(withSlash(path) + name);
-    }
-    SDL_RemovePath(path.c_str());
-}
-
 std::string escapedXml(std::string_view text) {
     std::string out;
     for (const char c : text) out += c == '&' ? std::string("&amp;") : c == '<' ? std::string("&lt;") : c == '>' ? std::string("&gt;") : std::string(1, c);
@@ -348,7 +331,8 @@ std::string Developer::exportGame(const ExportPlan& plan) {
             SDL_CreateDirectory(folder.c_str());
             if (own) done = run({"ditto", plan.ownPlayer, app});
             else done = run({"ditto", "-x", "-k", kept, plan.work + "mac/release"}) && run({"ditto", plan.work + "mac/release/VNext.app", app});
-            removeAll(app + "/Contents/Resources/players"); // (the other systems' players: VNext's, not the game's)
+            removeAll(app + "/Contents/Resources/players"); // (the other systems' players and the samples: VNext's, not the game's)
+            SDL_RemovePath((app + "/Contents/Resources/sample.vnext").c_str());
             if (done) {
                 const std::string plist = app + "/Contents/Info.plist";
                 std::string text = readTextFile(plist).value_or("");
@@ -367,7 +351,7 @@ std::string Developer::exportGame(const ExportPlan& plan) {
             ZipWriter z(zip);
             if (player && game) {
                 z.folder(name + "/");
-                z.add(name + "/" + name + std::string(system.as), *player, 0755);
+                z.add(name + "/" + name + std::string(system.as), withoutSample(*player), 0755); // (the samples at its end: VNext's)
                 z.add(name + "/licences.txt", licences(), 0644);
                 z.add(name + "/" + std::string(kPackName), *game, 0644);
             }

@@ -1,0 +1,845 @@
+# The game's screens: its menus, and its own textboxes and images. Made with + New screen in the Screens page, then
+# coloured as a spring night lit by lanterns (the colours below), the title screen laid out over the festival, and its
+# boxes given pictures drawn to their sizes (images/ui_*: each also lit, on and locked; the phone's body; backdrop.jpg).
+
+colour field #120a1a
+colour button #2c1a2eeb
+colour line #e8875a
+colour pointed #4e2a3c
+colour chosen #8a3a3a
+colour dim #a08a98
+colour text #fff3e8
+colour accent #ffb27a
+style screen_title based_on=heading size=48
+style button align=centre align_vertically=centre background=button border=line pointed_background=pointed chosen_background=chosen unclickable_colour=dim shadow=no
+style tab size=27 colour=dim align=centre align_vertically=centre background=button border=line pointed_background=pointed chosen_background=chosen chosen_colour=text shadow=no
+style slot image=ui_slot pointed_image=ui_slot_lit padding=6 shadow=no
+style slot_title size=27 colour=accent shadow=no
+style slot_empty size=27 colour=dim background=field shadow=no
+style slot_text size=27 shadow=no
+style small_button based_on=button size=27 image=ui_small pointed_image=ui_small_lit chosen_image=ui_small_on unclickable_image=ui_small_locked
+style menu_item based_on=button size=33 image=ui_menu pointed_image=ui_menu_lit chosen_image=ui_menu_on unclickable_image=ui_menu_locked
+style heading colour=accent shadow=no
+
+screen save
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        container width=1 fit=parts stack=across spacing_across=24px spacing_down=12px
+            text "Save" style=screen_title
+            container list=pages width=666px fit=parts item_width=66px item_height=51px spacing=9px
+                text "{page.name}" x=0 y=0 width=1 height=1 style=tab action="page {page.name}" chosen=page.open
+        container list=saves item_width=540px item_height=393px spacing_across=60px spacing_down=24px scroll=yes
+            text x=0 y=0 width=1 height=1 style=slot action="save {save.number}" confirm="Overwrite this save?"
+            image "{save.image}" x=0 y=0.875 width=0.9778 height=0.7557 when=save.image
+            image field x=0 y=0.875 width=0.9778 height=0.7557 when="not save.image"
+            container x=0 y=-0.95 width=0.9444 fit=parts stack=down
+                text "{save.number}  ·  {save.time}" width=1 style=slot_title when=save.used
+                text "{save.number}" width=1 style=slot_empty when="not save.used"
+                text "{save.text}" width=1 style=slot_text lines=1 when=save.used
+            text "Delete" x=0.9291 y=0.9145 width=117px height=42px style=small_button action="delete save {save.number}" confirm="Delete this save?" when=save.used
+        text "Back" x=1 width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+screen load
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        container width=1 fit=parts stack=across spacing_across=24px spacing_down=12px
+            text "Load" style=screen_title
+            text "Auto" width=114px height=51px style=tab action="page auto" chosen="page is 'auto'"
+            text "Quick" width=114px height=51px style=tab action="page quick" chosen="page is 'quick'"
+            container list=pages width=666px fit=parts item_width=66px item_height=51px spacing=9px
+                text "{page.name}" x=0 y=0 width=1 height=1 style=tab action="page {page.name}" chosen=page.open
+        container list=saves item_width=540px item_height=393px spacing_across=60px spacing_down=24px scroll=yes
+            text x=0 y=0 width=1 height=1 style=slot action="load {save.number}" confirm="Load this save? Progress since your last save will be lost." clickable=save.used
+            image "{save.image}" x=0 y=0.875 width=0.9778 height=0.7557 when=save.image
+            image field x=0 y=0.875 width=0.9778 height=0.7557 when="not save.image"
+            container x=0 y=-0.95 width=0.9444 fit=parts stack=down
+                text "{save.number}  ·  {save.time}" width=1 style=slot_title when=save.used
+                text "{save.number}" width=1 style=slot_empty when="not save.used"
+                text "{save.text}" width=1 style=slot_text lines=1 when=save.used
+            text "Delete" x=0.9291 y=0.9145 width=117px height=42px style=small_button action="delete save {save.number}" confirm="Delete this save?" when=save.used
+        text "Back" x=1 width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+style label size=27 colour=dim align_vertically=centre shadow=no
+style setting size=27 align=centre align_vertically=centre background=button border=line pointed_background=pointed chosen_background=chosen unclickable_colour=dim shadow=no
+style setting_choice based_on=setting_value align=centre
+style setting_value size=27 align_vertically=centre shadow=no
+
+screen settings
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "Settings" width=1 style=screen_title
+        container scroll=yes scrollbar=yes
+            container width=1 fit=parts stack=across spacing_across=132px spacing_down=18px
+                container width=780px fit=parts stack=down spacing=18px
+                    container width=1 fit=parts stack=down spacing=6px
+                        text "Display" width=1 style=heading
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Window" width=270px height=48px style=label
+                            container width=495px height=48px
+                                text "Windowed" x=-1 y=0 width=0.4909 height=1 style=setting action="setting fullscreen no"
+                                text "Fullscreen" x=1 y=0 width=0.4909 height=1 style=setting action="setting fullscreen yes"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Window size" width=270px height=48px style=label
+                            container width=495px height=48px
+                                text "<" x=-1 y=0 width=60px height=1 style=setting action="setting window_size smaller" clickable="not fullscreen"
+                                text "{window_size}" x=0 y=0 width=0.7212 height=1 style=setting_choice
+                                text ">" x=1 y=0 width=60px height=1 style=setting action="setting window_size bigger" clickable="not fullscreen"
+                    container width=1 fit=parts stack=down spacing=6px
+                        text "Text" width=1 style=heading
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Text speed" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input setting=text_speed x=-1 y=0 width=0.7212 height=1
+                                text "{text_speed}" x=1 y=0 width=0.2424 height=1 style=setting_value when="text_speed is not 0"
+                                text "At once" x=1 y=0 width=0.2424 height=1 style=setting_value when="text_speed is 0"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Auto delay" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input setting=auto_delay x=-1 y=0 width=0.7212 height=1
+                                text "{auto_delay}" x=1 y=0 width=0.2424 height=1 style=setting_value
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Textbox opacity" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input setting=textbox_opacity x=-1 y=0 width=0.7212 height=1
+                                text "{textbox_opacity}%" x=1 y=0 width=0.2424 height=1 style=setting_value
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px when="languages is more than 1"
+                            text "Language" width=270px height=48px style=label
+                            container width=495px height=48px
+                                text "<" x=-1 y=0 width=60px height=1 style=setting action="setting language previous"
+                                text "{language}" x=0 y=0 width=0.7212 height=1 style=setting_choice
+                                text ">" x=1 y=0 width=60px height=1 style=setting action="setting language next"
+                    container width=1 fit=parts stack=down spacing=6px
+                        text "Accessibility" width=1 style=heading
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Text size" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input setting=text_size x=-1 y=0 width=0.7212 height=1
+                                text "{text_size}%" x=1 y=0 width=0.2424 height=1 style=setting_value
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "High contrast" width=270px height=48px style=label
+                            container width=495px height=48px
+                                text "On" x=-1 y=0 width=0.4909 height=1 style=setting action="setting high_contrast yes"
+                                text "Off" x=1 y=0 width=0.4909 height=1 style=setting action="setting high_contrast no"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Read aloud" width=270px height=48px style=label
+                            container width=495px height=48px
+                                text "On" x=-1 y=0 width=0.4909 height=1 style=setting action="setting read_aloud yes"
+                                text "Off" x=1 y=0 width=0.4909 height=1 style=setting action="setting read_aloud no"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Animations" width=270px height=48px style=label
+                            container width=495px height=48px
+                                text "On" x=-1 y=0 width=0.4909 height=1 style=setting action="setting animations yes"
+                                text "Off" x=1 y=0 width=0.4909 height=1 style=setting action="setting animations no"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Time limits" width=270px height=48px style=label
+                            container width=495px height=48px
+                                text "On" x=-1 y=0 width=0.4909 height=1 style=setting action="setting time_limits yes"
+                                text "Off" x=1 y=0 width=0.4909 height=1 style=setting action="setting time_limits no"
+                container width=780px fit=parts stack=down spacing=18px
+                    container width=1 fit=parts stack=down spacing=6px
+                        text "Sound" width=1 style=heading
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Master volume" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input setting=master_volume x=-1 y=0 width=0.7212 height=1
+                                text "{master_volume}%" x=1 y=0 width=0.2424 height=1 style=setting_value
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Music volume" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input setting=music_volume x=-1 y=0 width=0.7212 height=1
+                                text "{music_volume}%" x=1 y=0 width=0.2424 height=1 style=setting_value
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Sound volume" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input setting=sound_volume x=-1 y=0 width=0.7212 height=1
+                                text "{sound_volume}%" x=1 y=0 width=0.2424 height=1 style=setting_value
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Voice volume" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input setting=voice_volume x=-1 y=0 width=0.7212 height=1
+                                text "{voice_volume}%" x=1 y=0 width=0.2424 height=1 style=setting_value
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Made-up voices" width=270px height=48px style=label
+                            container width=495px height=48px
+                                text "On" x=-1 y=0 width=0.4909 height=1 style=setting action="setting made_up_voices yes"
+                                text "Off" x=1 y=0 width=0.4909 height=1 style=setting action="setting made_up_voices no"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Mouths move" width=270px height=48px style=label
+                            container width=495px height=48px
+                                text "Always" x=-1 y=0 width=0.3212 height=1 style=setting action="setting mouths yes"
+                                text "With a voice" x=0 y=0 width=0.3212 height=1 style=setting action="setting mouths voice"
+                                text "Never" x=1 y=0 width=0.3212 height=1 style=setting action="setting mouths no"
+                    container width=1 fit=parts stack=down spacing=6px
+                        text "Skip" width=1 style=heading
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Skip" width=270px height=48px style=label
+                            container width=495px height=48px
+                                text "Read text" x=-1 y=0 width=0.4909 height=1 style=setting action="setting skip_unread no"
+                                text "All text" x=1 y=0 width=0.4909 height=1 style=setting action="setting skip_unread yes"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "After choices" width=270px height=48px style=label
+                            container width=495px height=48px
+                                text "Stop skipping" x=-1 y=0 width=0.4909 height=1 style=setting action="setting skip_after_choices no"
+                                text "Keep skipping" x=1 y=0 width=0.4909 height=1 style=setting action="setting skip_after_choices yes"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Rollback" width=270px height=48px style=label
+                            container width=495px height=48px
+                                text "On" x=-1 y=0 width=0.4909 height=1 style=setting action="setting rollback yes"
+                                text "Off" x=1 y=0 width=0.4909 height=1 style=setting action="setting rollback no"
+                    container width=1 fit=parts stack=down spacing=6px
+                        text "Keys" width=1 style=heading
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Next line" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input control=next_line x=-1 y=0 width=0.4909 height=1 waiting="Press a key"
+                                input control=next_line slot=pad x=1 y=0 width=0.4909 height=1 waiting="Press a button"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Skip" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input control=skip x=-1 y=0 width=0.4909 height=1 waiting="Press a key"
+                                input control=skip slot=pad x=1 y=0 width=0.4909 height=1 waiting="Press a button"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Auto" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input control=auto x=-1 y=0 width=0.4909 height=1 waiting="Press a key"
+                                input control=auto slot=pad x=1 y=0 width=0.4909 height=1 waiting="Press a button"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Quick save" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input control=quick_save x=-1 y=0 width=0.4909 height=1 waiting="Press a key"
+                                input control=quick_save slot=pad x=1 y=0 width=0.4909 height=1 waiting="Press a button"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Quick load" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input control=quick_load x=-1 y=0 width=0.4909 height=1 waiting="Press a key"
+                                input control=quick_load slot=pad x=1 y=0 width=0.4909 height=1 waiting="Press a button"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Move up" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input control=move_up x=-1 y=0 width=0.4909 height=1 waiting="Press a key"
+                                input control=move_up slot=pad x=1 y=0 width=0.4909 height=1 waiting="Press a button"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Move down" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input control=move_down x=-1 y=0 width=0.4909 height=1 waiting="Press a key"
+                                input control=move_down slot=pad x=1 y=0 width=0.4909 height=1 waiting="Press a button"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Move left" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input control=move_left x=-1 y=0 width=0.4909 height=1 waiting="Press a key"
+                                input control=move_left slot=pad x=1 y=0 width=0.4909 height=1 waiting="Press a button"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Move right" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input control=move_right x=-1 y=0 width=0.4909 height=1 waiting="Press a key"
+                                input control=move_right slot=pad x=1 y=0 width=0.4909 height=1 waiting="Press a button"
+                        container width=1 fit=parts stack=across spacing_across=15px spacing_down=6px
+                            text "Press" width=270px height=48px style=label
+                            container width=495px height=48px
+                                input control=press x=-1 y=0 width=0.4909 height=1 waiting="Press a key"
+                                input control=press slot=pad x=1 y=0 width=0.4909 height=1 waiting="Press a button"
+        container x=1 fit=parts stack=across spacing=30px
+            text "Reset to defaults" width=300px height=60px style=small_button action="reset settings" confirm="Reset all settings to their defaults?"
+            text "Back" width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+style history_name based_on=history align=right
+style history size=36 text_size_follows=yes shadow=no
+style history_choice based_on=history colour=dim
+style history_button based_on=small_button
+control history keys="l pad_x swipe_up" action="open history"
+
+screen history
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "History" width=1 style=screen_title
+        container list=history spacing_down=27px position=bottom scroll=yes scrollbar=yes close_at_end=yes
+            container width=0.9828 fit=parts stack=across spacing_across=15px spacing_down=6px
+                text "{colour line.colour}{line.name}{/colour}" width=330px style=history_name
+                text "{line.text}" width=1080px style=history when="not line.choice"
+                text "{line.text}" width=1080px style=history_choice when=line.choice
+                text "Replay" width=126px height=45px style=history_button action="replay {line.number}" when=line.voiced
+                text "Go back" width=126px height=45px style=history_button action="rollback {line.number}" when=line.back
+        text "Back" x=1 width=210px height=60px style=small_button action=close keys="escape l pad_b pad_x"
+
+colour shade #0a0410b0
+colour panel #1a1024f5
+style framed border=line shadow=no
+style centred align=centre align_vertically=centre shadow=no
+
+screen confirm
+    image shade x=0 y=0 width=1 height=1
+    container x=0 y=0 width=990px height=450px
+        image ui_panel x=0 y=0 width=1 height=1
+        text "{question}" x=0 y=0.6364 width=0.9394 height=0.7067 style=centred
+        container x=0.8919 y=-0.877 fit=parts stack=across spacing=15px
+            text "Yes" width=210px height=60px style=small_button action=yes
+            text "No" width=210px height=60px style=small_button action=no keys="escape pad_b"
+
+style phone_status size=21 shadow=no padding=6
+style phone_status_right based_on=phone_status align=right
+style phone_icon size=36 align=centre align_vertically=centre background=button border=line pointed_background=pointed shadow=no
+style phone_label_centre based_on=phone_label align=centre
+style phone_unread size=20 colour=field align=centre align_vertically=centre background=accent shadow=no
+style phone_title size=30 shadow=no
+style phone_preview_centre based_on=phone_preview align=centre
+style phone_card based_on=record padding=15
+style phone_initial size=24 colour=field align=centre align_vertically=centre shadow=no
+style phone_name size=24 shadow=no
+style phone_time_right based_on=phone_time align=right
+style phone_preview size=23 colour=dim shadow=no
+style phone_time_centre based_on=phone_time align=centre
+colour bubble #3c2440
+colour bubble_low #24142c
+colour mine #b4503e
+colour mine_low #7a2a3e
+style phone_text size=26 background=bubble-bubble_low border=#e8875a99 padding=14 shadow=no
+style phone_photo pointed_border=accent shadow=no
+style phone_small_button size=24 align=centre align_vertically=centre background=button border=line pointed_background=pointed chosen_background=chosen unclickable_colour=dim shadow=no
+style phone_mine based_on=phone_text background=mine-mine_low border=#ffc89099
+style phone_reaction size=20 background=chosen border=line padding=5 shadow=no
+style phone_time size=20 colour=dim shadow=no
+style phone_missed based_on=phone_name colour=#ff8c96
+style phone_preview_right based_on=phone_preview align=right
+style phone_label size=21 colour=dim shadow=no
+style phone_input size=26 background=field border=line pointed_border=accent padding=14 shadow=no
+style phone_caller_initial based_on=phone_initial size=72
+style phone_caller size=36 align=centre shadow=no
+style phone_decline based_on=phone_small_button background=#963240 pointed_background=#b03c4c
+style phone_answer based_on=phone_small_button background=#2f7a50 pointed_background=#3a9562
+style phone_clock size=72 align=centre shadow=no
+style phone_notice size=23 align_vertically=centre background=button border=line padding=12 pointed_background=pointed shadow=no
+style phone_title_centre based_on=phone_title align=centre
+style phone_viewer background=field shadow=no
+style record size=36 align_vertically=centre background=button border=line padding=24 pointed_background=pointed chosen_background=chosen unclickable_colour=dim shadow=no
+control phone keys="p pad_back" action="open phone" when=has_phone
+
+screen phone story=goes_on
+    container x=0.9388 y=0.9032 width=450px height=708px
+        image phone_body x=0 y=0 width=1 height=1
+        text "{phone_clock}" x=-0.88 y=0.9644 width=0.3333 height=0.0466 style=phone_status
+        text "No signal" x=0.3333 y=0.9644 width=0.42 height=0.0466 style=phone_status_right when="not phone_signal"
+        image text x=0.5084 y=0.9103 width=0.01 height=0.0085 when=phone_signal
+        image text x=0.5421 y=0.9185 width=0.01 height=0.0127 when=phone_signal
+        image text x=0.5758 y=0.9267 width=0.01 height=0.0169 when=phone_signal
+        image text x=0.6094 y=0.9351 width=0.01 height=0.0212 when=phone_signal
+        input x=0.8116 y=0.9394 width=0.08 height=0.0212 value=phone_battery track=#ffffff30 fill=#f0f0f5 when="phone_battery is more than 20"
+        input x=0.8116 y=0.9394 width=0.08 height=0.0212 value=phone_battery track=#ffffff30 fill=#ff8c96 when="phone_battery is at most 20"
+        image text x=0.8389 y=0.9274 width=0.0067 height=0.0085
+        image "{phone_wallpaper}" x=0 y=0.1282 width=0.92 height=0.8347 fit=cover when="phone_wallpaper and phone_app is 'home'"
+        image "{phone_lock_wallpaper}" x=0 y=0.1282 width=0.92 height=0.8347 fit=cover when="phone_lock_wallpaper and phone_app is 'lock'"
+        container app=home x=0 y=0.1282 width=0.92 height=0.8347
+            container list=apps x=0 y=-0.1111 width=0.942 height=0.9543 columns=3 item_height=0.2437 scroll=yes spacing_across=0.0362 spacing_down=0.0254
+                text "{app.initial}" x=0 y=0.7895 width=0.725 height=0.6042 style=phone_icon action="open app {app.name}"
+                image "{app.icon}" x=0 y=0.7895 width=0.725 height=0.6042 fit=cover when=app.icon
+                text "{app.title}" x=0 y=-0.9241 width=1 style=phone_label_centre lines=1
+                container x=0.931 y=1 width=0.275 height=0.1875 style=phone_unread when=app.count
+                    text "{app.count}" x=0 y=0 width=1 height=1 style=phone_unread
+        container app=chats title="Chats" x=0 y=0.1282 width=0.92 height=0.8347
+            text "Chats" x=0 y=1 width=0.971 style=phone_title when="not open_chat"
+            text "{open_chat}" x=0 y=1 width=0.971 style=phone_title when=open_chat
+            text "No chats" x=0 y=-0.0106 width=1 style=phone_preview_centre when="not open_chat and chats_total is 0"
+            text "No messages" x=0 y=-0.0106 width=1 style=phone_preview_centre when="open_chat and open_chat_messages is 0"
+            container list=chats x=0 y=-1 width=1 height=0.9137 item_height=0.1472 scroll=yes when="not open_chat" spacing_across=0.0217 spacing_down=0.0152
+                text x=0 y=0 width=1 height=1 style=phone_card action="open chat {chat.name}" chosen=chat.open
+                image "{chat.avatar}" x=-0.9174 y=0 width=0.1232 height=0.5862 fit=cover when=chat.avatar
+                image "{chat.colour}" x=-0.9174 y=0 width=0.1232 height=0.5862 when="not chat.avatar"
+                text "{chat.initial}" x=-0.9174 y=0 width=0.1232 height=0.5862 style=phone_initial when="not chat.avatar"
+                text "{colour chat.colour}{chat.name}{/colour}" x=-0.1429 y=0.5385 width=0.5435 style=phone_name lines=1
+                text "{chat.time}" x=0.9065 y=0.4762 width=0.2246 style=phone_time_right
+                text "{chat.text}" x=0.125 y=-0.55 width=0.6522 style=phone_preview lines=1
+                container x=0.92 y=-0.6 width=0.0942 height=0.3103 style=phone_unread when=chat.unread
+                    text "{chat.unread}" x=0 y=0 width=1 height=1 style=phone_unread
+            container x=0 y=-1 width=1 height=0.9137 stack=down position=bottom scroll=yes when=open_chat spacing_across=0.029 spacing_down=0.0203
+                container list=messages x=0 width=1 fit=parts stack=down spacing_across=0.029 spacing_down=0.0222
+                    text "{message.day}" x=0 width=1 style=phone_time_centre when=message.day
+                    text "Chat ended" x=0 width=1 style=phone_time_centre when=message.ended
+                    container x=-1 fit=parts stack=across when="not message.mine and not message.ended" spacing_across=0.0217 spacing_down=0.0079
+                        container width=0.1014 height=0.0778
+                            image "{message.avatar}" x=0 y=0 width=1 height=1 fit=cover when=message.avatar
+                            image "{message.colour}" x=0 y=0 width=1 height=1 when="not message.avatar"
+                            text "{message.initial}" x=0 y=0 width=1 height=1 style=phone_initial when="not message.avatar"
+                        container fit=parts stack=down style=phone_text when="not message.sticker"
+                            text "{message.text}" width_at_most=0.7101 style=phone_text when=message.text
+                            text "{italic}Message deleted{/italic}" style=phone_text when=message.deleted
+                            container width=0.5797 height=0.3333 when=message.image
+                                image "{message.image}" x=0 y=0 width=1 height=1 fit=cover
+                                text x=0 y=0 width=1 height=1 style=phone_photo action="open image {message.image}"
+                            text "Play the voice message" width=0.7101 height=0.0944 style=phone_small_button action="play {message.sound} as voice" when=message.sound
+                        image "{message.image}" width=0.3478 height=0.2667 fit=contain when=message.sticker
+                    container x=1 fit=parts stack=down style=phone_mine when="message.mine and not message.sticker"
+                        text "{message.text}" width_at_most=0.7101 style=phone_mine when=message.text
+                        text "{italic}Message deleted{/italic}" style=phone_mine when=message.deleted
+                        container width=0.5797 height=0.3333 when=message.image
+                            image "{message.image}" x=0 y=0 width=1 height=1 fit=cover
+                            text x=0 y=0 width=1 height=1 style=phone_photo action="open image {message.image}"
+                        text "Play the voice message" width=0.7101 height=0.0944 style=phone_small_button action="play {message.sound} as voice" when=message.sound
+                    image "{message.image}" x=1 width=0.3478 height=0.2667 fit=contain when="message.mine and message.sticker"
+                    container x=-0.7305 fit=parts style=phone_reaction when="message.reaction and not message.mine"
+                        text "{message.reaction}" style=phone_reaction
+                    container x=1 fit=parts style=phone_reaction when="message.reaction and message.mine"
+                        text "{message.reaction}" style=phone_reaction
+                    text "Edited" x=-0.7155 style=phone_time when="message.edited and not message.mine"
+                    text "Edited" x=1 style=phone_time when="message.edited and message.mine"
+                    text "Seen" x=1 style=phone_time when=message.seen
+                input x=1 width=0.7101 height=0.0111 value=time_left track=#ffffff28 fill=accent when=time_left
+                container list=options x=1 width=0.7101 fit=parts spacing_across=0.0217 spacing_down=0.0167
+                    text "{option.text}" x=0 y=0 width=1 height=0.0944 style=phone_small_button action=choose clickable=option.on
+        container app=calls title="Calls" x=0 y=0.1282 width=0.92 height=0.8347
+            text "Calls" x=0 y=1 width=0.971 style=phone_title
+            text "No calls" x=0 y=-0.0106 width=1 style=phone_preview_centre when="calls_total is 0"
+            container list=calls x=0 y=-1 width=1 height=0.9137 item_height=0.132 scroll=yes spacing_across=0.0217 spacing_down=0.0152
+                text x=0 y=0 width=1 height=1 style=phone_card action="phone call {call.who}"
+                image "{call.avatar}" x=-0.9187 y=0 width=0.1087 height=0.5769 fit=cover when=call.avatar
+                image "{call.colour}" x=-0.9187 y=0 width=0.1087 height=0.5769 when="not call.avatar"
+                text "{call.initial}" x=-0.9187 y=0 width=0.1087 height=0.5769 style=phone_initial when="not call.avatar"
+                text "{colour call.colour}{call.who}{/colour}" x=-0.2063 y=0.6364 width=0.5435 style=phone_name lines=1 when="not call.missed"
+                text "{call.who}" x=-0.2063 y=0.6364 width=0.5435 style=phone_missed lines=1 when=call.missed
+                text "Incoming {call.time}" x=-0.2063 y=-0.5882 width=0.5435 style=phone_preview lines=1 when=call.incoming
+                text "Outgoing {call.time}" x=-0.2063 y=-0.5882 width=0.5435 style=phone_preview lines=1 when=call.outgoing
+                text "Missed {call.time}" x=-0.2063 y=-0.5882 width=0.5435 style=phone_preview lines=1 when=call.missed
+                text "Busy {call.time}" x=-0.2063 y=-0.5882 width=0.5435 style=phone_preview lines=1 when=call.busy
+                text "{call.length}" x=0.9048 y=0.0588 width=0.2391 style=phone_preview_right
+        container app=people title="People" x=0 y=0.1282 width=0.92 height=0.8347
+            text "People" x=0 y=1 width=0.971 style=phone_title
+            text "No people" x=0 y=-0.0106 width=1 style=phone_preview_centre when="people_total is 0"
+            container list=people x=0 y=-1 width=1 height=0.9137 item_height=0.1675 scroll=yes spacing_across=0.0217 spacing_down=0.0152
+                container x=0 y=0 width=1 height=1 style=phone_card
+                image "{person.avatar}" x=-0.916 y=0 width=0.1377 height=0.5758 fit=cover when=person.avatar
+                image "{person.colour}" x=-0.916 y=0 width=0.1377 height=0.5758 when="not person.avatar"
+                text "{person.initial}" x=-0.916 y=0 width=0.1377 height=0.5758 style=phone_initial when="not person.avatar"
+                container x=-0.2162 y=0 width=0.4638 fit=parts stack=down
+                    text "{colour person.colour}{person.name}{/colour}" width=1 style=phone_name lines=1
+                    text "{person.about}" width=1 style=phone_preview lines=1 when=person.about
+                text "Chat" x=0.901 y=0.7 width=0.2681 height=0.3939 style=phone_small_button action="open chat {person.name}"
+                text "Call" x=0.901 y=-0.7 width=0.2681 height=0.3939 style=phone_small_button action="phone call {person.name}"
+        container app=gallery title="Gallery" screen=gallery x=0 y=0.1282 width=0.92 height=0.8347
+        container app=music title="Music" screen=music_room x=0 y=0.1282 width=0.92 height=0.8347
+        container app=journal title="Journal" x=0 y=0.1282 width=0.92 height=0.8347 stack=down spacing_across=0.02 spacing_down=0.0127
+            container x=0 width=1 fit=parts stack=across spacing_across=0.0217 spacing_down=0.0152
+                text "Save" width=0.4891 height=0.0761 style=phone_small_button action="set phone_journal to 'save'" chosen="phone_journal is not 'load'"
+                text "Load" width=0.4891 height=0.0761 style=phone_small_button action="set phone_journal to 'load'" chosen="phone_journal is 'load'"
+            container screen=save when="phone_journal is not 'load'"
+            container screen=load when="phone_journal is 'load'"
+        container app=settings title="Settings" x=0 y=0.1282 width=0.92 height=0.8347 stack=down spacing_across=0.02 spacing_down=0.0127
+            container x=0 width=1 fit=parts stack=across spacing_across=0.0217 spacing_down=0.0152
+                text "Game" width=0.4891 height=0.0761 style=phone_small_button action="set phone_settings to 'game'" chosen="phone_settings is not 'phone'"
+                text "Phone" width=0.4891 height=0.0761 style=phone_small_button action="set phone_settings to 'phone'" chosen="phone_settings is 'phone'"
+            container screen=settings when="phone_settings is not 'phone'"
+            container x=0 width=1 height=0.9086 when="phone_settings is 'phone'"
+                text "Owner" x=0 y=0.9531 width=0.9275 style=phone_label
+                input variable=phone_owner x=0 y=0.825 width=0.9275 height=0.1061 most_letters=20 style=phone_input
+                text "Passcode" x=0 y=0.5425 width=0.9275 style=phone_label
+                input variable=phone_passcode x=0 y=0.3875 width=0.9275 height=0.1061 most_letters=6 style=phone_input
+                text "Home screen wallpaper" x=0 y=0.132 width=0.9275 style=phone_label
+                text "None" x=-0.9074 y=-0.037 width=0.2174 height=0.095 style=phone_small_button action="set phone_wallpaper to ''" chosen="not phone_wallpaper"
+                text "Night" x=-0.3056 y=-0.037 width=0.2174 height=0.095 style=phone_small_button action="set phone_wallpaper to '#1b2140'" chosen="phone_wallpaper is '#1b2140'"
+                text "Dusk" x=0.2963 y=-0.037 width=0.2174 height=0.095 style=phone_small_button action="set phone_wallpaper to '#4a2c4f'" chosen="phone_wallpaper is '#4a2c4f'"
+                text "Sea" x=0.907 y=-0.037 width=0.221 height=0.095 style=phone_small_button action="set phone_wallpaper to '#1f4f5f'" chosen="phone_wallpaper is '#1f4f5f'"
+                text "Lock screen wallpaper" x=0 y=-0.2551 width=0.9275 style=phone_label
+                text "None" x=-0.9074 y=-0.4444 width=0.2174 height=0.095 style=phone_small_button action="set phone_lock_wallpaper to ''" chosen="not phone_lock_wallpaper"
+                text "Night" x=-0.3056 y=-0.4444 width=0.2174 height=0.095 style=phone_small_button action="set phone_lock_wallpaper to '#1b2140'" chosen="phone_lock_wallpaper is '#1b2140'"
+                text "Dusk" x=0.2963 y=-0.4444 width=0.2174 height=0.095 style=phone_small_button action="set phone_lock_wallpaper to '#4a2c4f'" chosen="phone_lock_wallpaper is '#4a2c4f'"
+                text "Sea" x=0.907 y=-0.4444 width=0.221 height=0.095 style=phone_small_button action="set phone_lock_wallpaper to '#1f4f5f'" chosen="phone_lock_wallpaper is '#1f4f5f'"
+        container app=call x=0 y=0.1282 width=0.92 height=0.8347
+            image "{caller_avatar}" x=0 y=0.7183 width=0.3986 height=0.2792 fit=cover when=caller_avatar
+            image "{caller_colour}" x=0 y=0.7183 width=0.3986 height=0.2792 when="not caller_avatar"
+            text "{caller_initial}" x=0 y=0.7183 width=0.3986 height=0.2792 style=phone_caller_initial when="not caller_avatar"
+            text "{caller}" x=0 y=0.1038 width=1 style=phone_caller
+            text "Incoming call" x=0 y=-0.0532 width=1 style=phone_preview_centre when=call_incoming
+            text "Calling..." x=0 y=-0.0532 width=1 style=phone_preview_centre when=call_outgoing
+            text "Busy" x=0 y=-0.0532 width=1 style=phone_preview_centre when=call_busy
+            text "{call_time}" x=0 y=-0.0532 width=1 style=phone_preview_centre when=call_time
+            text "Decline" x=-0.7927 y=-0.84 width=0.4058 height=0.1117 style=phone_decline action="decline call" when=call_incoming
+            text "Answer" x=0.7927 y=-0.84 width=0.4058 height=0.1117 style=phone_answer action="answer call" when=call_incoming
+            container list=options x=0 y=-0.4771 width=0.8768 height=0.2234 item_height=0.0863 scroll=yes when=call_choice spacing_across=0.0217 spacing_down=0.0152
+                text "{option.text}" x=0 y=0 width=1 height=1 style=phone_small_button action=choose clickable=option.on
+            text "Hang up" x=0 y=-0.84 width=0.4058 height=0.1117 style=phone_decline action="hang up" when=call_choice
+        container app=lock x=0 y=0.1282 width=0.92 height=0.8347
+            text x=0 y=0 width=1 height=1 style=phone_photo action=unlock when="not phone_needs_code"
+            text "{phone_owner}" x=0 y=0.9788 width=1 style=phone_label_centre lines=1 when=phone_owner
+            text "{phone_clock}" x=0 y=0.858 width=1 style=phone_clock
+            text "{phone_date}" x=0 y=0.5438 width=1 style=phone_label_centre when=phone_date
+            container list=notices x=0 y=-0.2826 width=0.9275 height=0.533 when="not phone_needs_code" spacing_across=0.0217 spacing_down=0.0152
+                text "{notice.who}: {notice.text}" x=0 y=1 width=1 height=0.1619 style=phone_notice action="unlock; open chat {notice.chat}" when="not notice.call"
+                text "Missed call from {notice.who}" x=0 y=1 width=1 height=0.1619 style=phone_notice action="unlock; open app calls" when=notice.call
+            text "Click to unlock" x=0 y=-0.8886 width=1 style=phone_label_centre when="not phone_needs_code"
+            text "{phone_code}" x=0 y=0.3639 width=1 style=phone_title_centre when=phone_needs_code
+            text "Wrong code" x=0 y=0.2042 width=1 style=phone_label_centre when="phone_needs_code and phone_wrong"
+            text "1" x=-0.6981 y=-0.0171 width=0.2319 height=0.1117 style=phone_small_button action="keypad 1" when=phone_needs_code
+            text "2" x=0 y=-0.0171 width=0.2319 height=0.1117 style=phone_small_button action="keypad 2" when=phone_needs_code
+            text "3" x=0.6981 y=-0.0171 width=0.2319 height=0.1117 style=phone_small_button action="keypad 3" when=phone_needs_code
+            text "4" x=-0.6981 y=-0.3143 width=0.2319 height=0.1117 style=phone_small_button action="keypad 4" when=phone_needs_code
+            text "5" x=0 y=-0.3143 width=0.2319 height=0.1117 style=phone_small_button action="keypad 5" when=phone_needs_code
+            text "6" x=0.6981 y=-0.3143 width=0.2319 height=0.1117 style=phone_small_button action="keypad 6" when=phone_needs_code
+            text "7" x=-0.6981 y=-0.6114 width=0.2319 height=0.1117 style=phone_small_button action="keypad 7" when=phone_needs_code
+            text "8" x=0 y=-0.6114 width=0.2319 height=0.1117 style=phone_small_button action="keypad 8" when=phone_needs_code
+            text "9" x=0.6981 y=-0.6114 width=0.2319 height=0.1117 style=phone_small_button action="keypad 9" when=phone_needs_code
+            text "0" x=0 y=-0.9086 width=0.2319 height=0.1117 style=phone_small_button action="keypad 0" when=phone_needs_code
+            text "<" x=0.6981 y=-0.9086 width=0.2319 height=0.1117 style=phone_small_button action="keypad back" when=phone_needs_code
+        container x=0 y=0.1282 width=0.92 height=0.8347 style=phone_viewer when=open_image
+            image "{open_image}" x=0 y=0.8519 width=0.971 height=0.8629 fit=contain
+            text "{open_image_text}" x=0 y=-0.8617 width=0.971 style=phone_preview_centre lines=2
+            text x=0 y=0 width=1 height=1 style=phone_photo action=back
+        text "Back" x=0.8554 y=-0.9638 width=0.4467 height=0.0636 style=small_button action=back keys="escape pad_b" when="not in_call and not in_chat"
+
+screen credits
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "Credits" width=1 style=screen_title
+        container stack=down spacing=18px position=centre
+            text "{title}" x=0 width=1 style=credits_title
+            text "Made with VNext" x=0 width=1 style=centred
+            container height=30px
+            text "Music" x=0 width=1 style=credits_role
+            text "TERNOX (CC0)" x=0 width=1 style=centred
+            text "Pictures" x=0 width=1 style=credits_role
+            text "Drawn for VNext" x=0 width=1 style=centred
+        text "Back" x=1 width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+style shaded background=shade shadow=no
+style credits_title size=66 colour=accent align=centre shadow=no
+style credits_role size=27 colour=dim align=centre shadow=no
+style card background=panel border=line padding=24 shadow=no
+style calendar size=66 align=centre align_vertically=centre shadow=no
+style calendar_time based_on=heading align=centre
+
+screen calendar close_after=2.5
+    text x=0 y=0 width=1 height=1 style=shaded action=close keys="space return escape pad_a pad_b"
+    container x=0 y=0 width=900px height=300px style=card
+        text "{time_date}" x=0 y=0.5 width=1 height=120px style=calendar
+        text "{time_clock}" x=0 y=-0.4 width=1 style=calendar_time
+
+colour heart #ff7eb6
+style record_title size=36 align_vertically=centre shadow=no
+style hearts_empty based_on=hearts colour=line
+style hearts size=45 colour=heart shadow=no
+
+screen relationships
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "Relationships" width=1 style=screen_title
+        container list=loves item_height=144px spacing_down=15px scroll=yes scrollbar=yes
+            container x=-1 y=0 width=0.9828 height=1 style=record stack=across
+                container width=24px
+                container stack=down position=centre
+                    text "{love.name}" width=1 style=record_title lines=1
+                    container width=1 height=54px
+                        text "♥♥♥♥♥" style=hearts_empty
+                        text "{love.hearts}" style=hearts
+                image "{love.avatar}" y=0 width=108px height=108px fit=contain when=love.avatar
+                container width=18px
+        text "Back" x=1 width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+style input size=36 align=centre align_vertically=centre background=field border=line pointed_border=accent padding=18 shadow=no
+
+screen input
+    image shade x=0 y=0 width=1 height=1
+    container x=0 y=0 width=900px height=420px
+        image ui_panel x=0 y=0 width=1 height=1
+        text "What's your name?" x=0 y=0.762 width=0.9333 style=centred
+        input x=0 y=0.1 width=600px height=84px variable=name most_letters=24 style=input action=close
+        text "OK" x=0 y=-0.695 width=210px height=66px style=small_button action=close
+
+style gallery background=field border=line pointed_border=accent unclickable_colour=dim shadow=no
+style gallery_title size=27 align_vertically=centre padding=12 shadow=no
+style locked size=36 colour=dim align=centre align_vertically=centre shadow=no
+
+screen gallery_viewer
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "{open_image_text}" width=1 style=screen_title lines=1
+        container
+            image "{open_image}" x=0 y=0 width=1 height=1 fit=contain
+        container x=1 fit=parts stack=across spacing=15px
+            text "Previous" width=210px height=60px style=small_button action="previous image" keys="left pad_left"
+            text "Next" width=210px height=60px style=small_button action="next image" keys="right pad_right"
+            text "Back" width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+screen gallery
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "Gallery" width=1 style=screen_title
+        container list=gallery item_width=555px item_height=312px spacing_across=38px spacing_down=36px scroll=yes scrollbar=yes
+            text x=0 y=0 width=1 height=1 style=gallery action="open image {image.name}; open gallery_viewer" clickable="not image.locked"
+            image "{image.name}" x=0 y=0 width=0.9892 height=0.9808 fit=cover volume=0% when="not image.locked"
+            image panel x=0 y=-0.9767 width=0.9892 height=54px when="not image.locked"
+            text "{image.title}" x=0 y=-0.9767 width=0.9892 height=54px style=gallery_title lines=1 when="not image.locked"
+            text "???" x=0 y=0 width=1 height=1 style=locked when=image.locked
+        text "Back" x=1 width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+style record_locked based_on=record colour=dim background=field
+
+screen music_room
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "Music room" width=1 style=screen_title
+        container list=songs item_height=90px spacing_down=15px scroll=yes scrollbar=yes
+            text "{song.title}" x=-1 y=0 width=0.9828 height=1 style=record action="play song {song.name}" chosen=song.playing when="not song.locked"
+            text "???" x=-1 y=0 width=0.9828 height=1 style=record_locked clickable=no when=song.locked
+        text "Back" x=1 width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+style record_text size=27 colour=dim shadow=no
+
+screen endings
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "Endings" width=1 style=screen_title
+        container list=endings item_height=120px spacing_down=15px scroll=yes scrollbar=yes
+            container x=-1 y=0 width=0.9828 height=1 style=record stack=across when="not ending.locked"
+                container width=24px
+                container stack=down position=centre
+                    text "{ending.number}. {ending.title}" width=1 style=record_title lines=1
+                container width=24px
+            container x=-1 y=0 width=0.9828 height=1 style=record_locked stack=across when=ending.locked
+                container width=24px
+                container stack=down position=centre
+                    text "{ending.number}. ???" width=1 style=record_title lines=1
+                    text "{ending.text}" width=1 style=record_text lines=1
+                container width=24px
+        text "Back" x=1 width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+screen achievements
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "Achievements" width=1 style=screen_title
+        container list=achievements item_height=120px spacing_down=15px scroll=yes scrollbar=yes
+            container x=-1 y=0 width=0.9828 height=1 style=record stack=across when="not achievement.locked"
+                container width=24px
+                container stack=down position=centre
+                    text "{achievement.title}" width=1 style=record_title lines=1
+                    text "{achievement.text}" width=1 style=record_text lines=1
+                container width=24px
+            container x=-1 y=0 width=0.9828 height=1 style=record_locked stack=across when="achievement.locked and not achievement.secret"
+                container width=24px
+                container stack=down position=centre
+                    text "{achievement.title}" width=1 style=record_title lines=1
+                    text "{achievement.text}" width=1 style=record_text lines=1
+                container width=24px
+            container x=-1 y=0 width=0.9828 height=1 style=record_locked stack=across when="achievement.locked and achievement.secret"
+                container width=24px
+                container stack=down position=centre
+                    text "???" width=1 style=record_title
+                    text "???" width=1 style=record_text
+                container width=24px
+        text "Back" x=1 width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+screen tips
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "Tips" width=1 style=screen_title
+        container stack=across spacing_across=60px spacing_down=24px
+            container list=tips width=660px height=1 item_height=90px spacing_down=15px scroll=yes scrollbar=yes
+                text "{tip.title}" x=-1 y=0 width=0.9545 height=1 style=record action="open tip {tip.name}" chosen=tip.open when="not tip.locked"
+                text "???" x=-1 y=0 width=0.9545 height=1 style=record_locked clickable=no when=tip.locked
+            container width=1020px fit=parts stack=down spacing=33px
+                text "{tip_title}" width=1 style=heading
+                text "{tip_text}" width=1 style=record_title
+        text "Back" x=1 width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+style flowchart size=24 align=centre align_vertically=centre background=button border=line padding=12 pointed_background=pointed chosen_background=chosen shadow=no
+style flowchart_unreached based_on=flowchart colour=dim background=field
+style flowchart_ending based_on=flowchart colour=accent
+style flowchart_choice size=21 colour=dim shadow=no
+
+screen flowchart
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "Flowchart" width=1 style=screen_title
+        container
+            flowchart x=0 y=0 width=1 height=1 unreached_style=flowchart_unreached ending_style=flowchart_ending choice_style=flowchart_choice scrollbar=yes confirm="Go back to this point? Progress since your last save will be lost."
+        text "Back" x=1 width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+screen extras
+    image backdrop x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "Extras" width=1 style=screen_title
+        container height=60px
+        container x=0 width=540px fit=parts stack=down spacing=15px
+            text "Gallery" x=0 width=1 height=78px style=menu_item action="open gallery"
+            text "Music room" x=0 width=1 height=78px style=menu_item action="open music_room"
+            text "Endings" x=0 width=1 height=78px style=menu_item action="open endings"
+            text "Achievements" x=0 width=1 height=78px style=menu_item action="open achievements"
+            text "Tips" x=0 width=1 height=78px style=menu_item action="open tips"
+            text "Flowchart" x=0 width=1 height=78px style=menu_item action="open flowchart"
+        container
+        text "Back" x=1 width=210px height=60px style=small_button action=close keys="escape pad_b"
+
+style title size=124 colour=#ffe6c0 shadow=yes shadow_colour=#ff6a2a shadow_offset=5
+style subtitle size=30 colour=accent shadow=yes shadow_colour=#000000aa shadow_offset=2
+colour title_shade #0a041080
+
+animation petal0 loop=yes
+    x=0.220 y=0.060 rotation=0 at 0 seconds
+    y=-1.3 from 0 to 4.061 seconds ease=linear
+    y=1.3 at 4.061 seconds
+    y=0.060 from 4.061 to 7.766 seconds ease=linear
+    x=0.248 from 0 to 3.883 seconds ease=inout
+    x=0.220 from 3.883 to 7.766 seconds ease=inout
+    rotation=192 from 0 to 7.766 seconds ease=linear
+
+animation petal1 loop=yes
+    x=0.301 y=0.405 rotation=0 at 0 seconds
+    y=-1.3 from 0 to 4.204 seconds ease=linear
+    y=1.3 at 4.204 seconds
+    y=0.405 from 4.204 to 6.409 seconds ease=linear
+    x=0.333 from 0 to 3.204 seconds ease=inout
+    x=0.301 from 3.204 to 6.409 seconds ease=inout
+    rotation=-187 from 0 to 6.409 seconds ease=linear
+
+animation petal2 loop=yes
+    x=-0.270 y=0.669 rotation=0 at 0 seconds
+    y=-1.3 from 0 to 4.758 seconds ease=linear
+    y=1.3 at 4.758 seconds
+    y=0.669 from 4.758 to 6.281 seconds ease=linear
+    x=-0.231 from 0 to 3.141 seconds ease=inout
+    x=-0.270 from 3.141 to 6.281 seconds ease=inout
+    rotation=-169 from 0 to 6.281 seconds ease=linear
+
+animation petal3 loop=yes
+    x=0.312 y=0.334 rotation=0 at 0 seconds
+    y=-1.3 from 0 to 3.767 seconds ease=linear
+    y=1.3 at 3.767 seconds
+    y=0.334 from 3.767 to 5.995 seconds ease=linear
+    x=0.335 from 0 to 2.997 seconds ease=inout
+    x=0.312 from 2.997 to 5.995 seconds ease=inout
+    rotation=145 from 0 to 5.995 seconds ease=linear
+
+animation petal4 loop=yes
+    x=-0.562 y=-0.212 rotation=0 at 0 seconds
+    y=-1.3 from 0 to 3.530 seconds ease=linear
+    y=1.3 at 3.530 seconds
+    y=-0.212 from 3.530 to 8.434 seconds ease=linear
+    x=-0.512 from 0 to 4.217 seconds ease=inout
+    x=-0.562 from 4.217 to 8.434 seconds ease=inout
+    rotation=301 from 0 to 8.434 seconds ease=linear
+
+animation petal5 loop=yes
+    x=0.708 y=-0.855 rotation=0 at 0 seconds
+    y=-1.3 from 0 to 1.295 seconds ease=linear
+    y=1.3 at 1.295 seconds
+    y=-0.855 from 1.295 to 7.561 seconds ease=linear
+    x=0.746 from 0 to 3.780 seconds ease=inout
+    x=0.708 from 3.780 to 7.561 seconds ease=inout
+    rotation=173 from 0 to 7.561 seconds ease=linear
+
+animation petal6 loop=yes
+    x=0.469 y=0.379 rotation=0 at 0 seconds
+    y=-1.3 from 0 to 4.494 seconds ease=linear
+    y=1.3 at 4.494 seconds
+    y=0.379 from 4.494 to 6.960 seconds ease=linear
+    x=0.497 from 0 to 3.480 seconds ease=inout
+    x=0.469 from 3.480 to 6.960 seconds ease=inout
+    rotation=-227 from 0 to 6.960 seconds ease=linear
+
+animation petal7 loop=yes
+    x=0.001 y=0.700 rotation=0 at 0 seconds
+    y=-1.3 from 0 to 4.467 seconds ease=linear
+    y=1.3 at 4.467 seconds
+    y=0.700 from 4.467 to 5.807 seconds ease=linear
+    x=0.024 from 0 to 2.904 seconds ease=inout
+    x=0.001 from 2.904 to 5.807 seconds ease=inout
+    rotation=161 from 0 to 5.807 seconds ease=linear
+
+animation petal8 loop=yes
+    x=0.457 y=0.057 rotation=0 at 0 seconds
+    y=-1.3 from 0 to 3.048 seconds ease=linear
+    y=1.3 at 3.048 seconds
+    y=0.057 from 3.048 to 5.842 seconds ease=linear
+    x=0.479 from 0 to 2.921 seconds ease=inout
+    x=0.457 from 2.921 to 5.842 seconds ease=inout
+    rotation=315 from 0 to 5.842 seconds ease=linear
+
+animation petal9 loop=yes
+    x=0.066 y=-0.033 rotation=0 at 0 seconds
+    y=-1.3 from 0 to 3.345 seconds ease=linear
+    y=1.3 at 3.345 seconds
+    y=-0.033 from 3.345 to 6.866 seconds ease=linear
+    x=0.099 from 0 to 3.433 seconds ease=inout
+    x=0.066 from 3.433 to 6.866 seconds ease=inout
+    rotation=-186 from 0 to 6.866 seconds ease=linear
+
+screen title animation_on_open=fade_in
+    image festival x=0 y=0 width=1 height=1 fit=cover
+    image title_shade x=-1 y=0 width=0.42 height=1
+    image mika x=0.134 y=-1 width=571px height=1015px expression=smile
+    image haru x=1 y=-1 width=571px height=1015px expression=calm
+    image kaede x=0.5945 y=-1 width=608px height=1080px expression=smile
+    image petal x=0 y=0 width=33px height=36px animation=petal0
+    image petal x=0 y=0 width=32px height=35px animation=petal1
+    image petal x=0 y=0 width=40px height=44px animation=petal2
+    image petal x=0 y=0 width=51px height=56px animation=petal3
+    image petal x=0 y=0 width=38px height=42px animation=petal4
+    image petal x=0 y=0 width=33px height=36px animation=petal5
+    image petal x=0 y=0 width=33px height=36px animation=petal6
+    image petal x=0 y=0 width=39px height=43px animation=petal7
+    image petal x=0 y=0 width=35px height=38px animation=petal8
+    image petal x=0 y=0 width=35px height=38px animation=petal9
+    container x=-0.86 y=0 width=600px fit=parts stack=down spacing=15px
+        text "{title}" width=1 style=title
+        text "made with VNext" width=1 style=subtitle
+        container height=50px
+        container x=0 width=540px fit=parts stack=down spacing=15px
+            text "New game" x=0 width=1 height=78px style=menu_item action=start
+            text "Continue" x=0 width=1 height=78px style=menu_item action=continue clickable=has_save
+            text "Load" x=0 width=1 height=78px style=menu_item action="open load" clickable=has_save
+            text "Settings" x=0 width=1 height=78px style=menu_item action="open settings"
+            text "Extras" x=0 width=1 height=78px style=menu_item action="open extras"
+            text "Credits" x=0 width=1 height=78px style=menu_item action="open credits"
+            text "Quit" x=0 width=1 height=78px style=menu_item action=quit
+
+control menu keys="escape mouse_right pad_start two_finger_tap" action="open pause"
+
+screen pause
+    image shade x=0 y=0 width=1 height=1
+    container x=0 y=0 width=0.9063 height=0.9111 stack=down spacing=24px
+        text "Paused" width=1 style=screen_title
+        container height=60px
+        container x=0 width=540px fit=parts stack=down spacing=15px
+            text "Resume" x=0 width=1 height=78px style=menu_item action=close keys="escape mouse_right pad_b pad_start"
+            text "Save" x=0 width=1 height=78px style=menu_item action="open save" clickable=can_save
+            text "Load" x=0 width=1 height=78px style=menu_item action="open load" clickable=has_save
+            text "History" x=0 width=1 height=78px style=menu_item action="open history"
+            text "Relationships" x=0 width=1 height=78px style=menu_item action="open relationships"
+            text "Settings" x=0 width=1 height=78px style=menu_item action="open settings"
+            text "Main menu" x=0 width=1 height=78px style=menu_item action="open title"
+            text "Quit" x=0 width=1 height=78px style=menu_item action=quit
+
+style choice size=36 align=centre align_vertically=centre unclickable_colour=dim image=ui_choice pointed_image=ui_choice_lit chosen_image=ui_choice_on unclickable_image=ui_choice_locked shadow=no
+
+screen choice story=goes_on
+    container x=0 y=0 width=0.9 height=1 stack=down
+        container height=60px
+        container list=options x=0 width=1080px item_height=81px spacing_down=21px position=bottom
+            text "{option.text}" width=1 height=1 style=choice action=choose when="not option.locked"
+            text "{option.text}  ({option.note})" width=1 height=1 style=choice clickable=no when=option.locked
+        container height=24px
+        input x=0 width=1080px height=12px value=time_left track=field fill=accent when="time_left is more than 0"
+        container height=354px
+
+style textbox_panel opacity_follows=yes shadow=no
+style dialogue size=42 text_size_follows=yes shadow=no
+style indicator size=24 colour=accent shadow=no
+style namebox size=42 align=centre align_vertically=centre colour=speaker shadow=no
+style namebox_tag image=ui_namebox opacity_follows=yes shadow=no
+style textbox_button size=30 align=centre align_vertically=centre unclickable_colour=dim image=ui_quick pointed_image=ui_quick_lit chosen_image=ui_quick_on unclickable_image=ui_quick_locked shadow=no
+style textbox_unread size=23 colour=field align=centre align_vertically=centre shadow=no
+
+screen textbox story=goes_on
+    container x=0 y=-1 width=0.9375 height=339px
+        container x=0 y=1 width=1 height=285px
+            image ui_textbox x=0 y=0 width=1 height=1 style=textbox_panel
+            text "{dialogue}" x=0 y=0.6421 width=0.9467
+            text "▼" x=0.9541 y=-0.726 style=indicator animation=go_on when=text_complete
+            container x=0 y=1.5 width=0.96 height=69px
+                container x=-1 y=0 width=300px height=1 style=namebox_tag when=speaker
+                    text "{speaker}" x=0 y=0 width=1 height=1 style=namebox
+                container x=1 y=0 height=1 fit=parts stack=across spacing_across=0.0069
+                    container width=0.1111 height=1 when=phone_button
+                        text "Phone" x=0 y=0 width=1 height=1 style=textbox_button action="open phone"
+                        image accent x=1.358 y=1.4302 width=42px height=42px when="phone_unread is more than 0"
+                        text "{phone_unread}" x=1.358 y=1.4302 width=42px height=42px style=textbox_unread when="phone_unread is more than 0"
+                    text "Menu" width=0.1111 height=1 style=textbox_button action="open pause" when=menu_button
+                    text "Skip" width=0.1111 height=1 style=textbox_button action=skip chosen=skip
+                    text "Auto" width=0.1111 height=1 style=textbox_button action=auto chosen=auto
+                    text "Q.Save" width=0.1111 height=1 style=textbox_button action="quick save; open saved" clickable=can_save
+                    text "Q.Load" width=0.1111 height=1 style=textbox_button action="quick load" clickable=has_quick_save
