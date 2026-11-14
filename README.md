@@ -12,6 +12,7 @@ Most visual novel engines start with a scripting language to learn or a game eng
 
 - **No code, ever.** A scene is a list of lines you add with a click: pick who speaks and their expression from pictures, then type what they say. Menus are pictures of the game you drag things around on. Everything is also saved as plain, readable script files, if you'd rather type.
 - **One app, nothing to set up.** The editor and the game are the same program: no game engine, plugins, Python or command line. Click any line and Play from here shows it in the game; F10 takes you back to the editor.
+- **Samples to start with.** New game can start you off with VNext's samples: a cast of three (nine expressions and two close-ups each), six places, five songs, sounds and every menu dressed in pictures of its own, ready to use, change or swap for yours.
 - **Menus come ready-made.** A title screen, a pause menu, saving and loading, settings, a history, a confirm question, a phone and more are a click each, already working and all yours to restyle. A line that needs one brings it: a chat brings the phone.
 - **Export, and it's a game.** Export the game makes a zip for Windows, macOS and Linux, named after your game, each with its player, every picture, sound and line in one file, and the licences. Exported on a Mac, the Mac one is an app with your game's name and icon.
 - **Everywhere.** Make your game on Windows, macOS or Linux and export it for all three: it plays with a mouse, a keyboard, a controller or a touch screen.
@@ -69,6 +70,8 @@ The idea, the design and the direction of VNext are mine. Every line of its code
 ## Download
 
 Get VNext from GitHub's [Releases page](https://github.com/zsande/VNext/releases): a zip for Windows, macOS or Linux, with the player (on Linux, an AppImage), licences.txt, and the other two systems' players, so Export the game makes all three without downloading anything. VNext isn't signed by Apple or Microsoft yet, so the first time, macOS asks you to allow it in System Settings → Privacy & Security (Open Anyway), and Windows says it protected your PC (More info, then Run anyway). The [code signing policy](CODE_SIGNING.md) says how the players are signed.
+
+On the same page, **Lanterns** (`game.vnext`) is a short game made with the samples: three classmates, one night of lanterns and four endings. Put it next to VNext and open VNext to play it.
 
 ## Status
 

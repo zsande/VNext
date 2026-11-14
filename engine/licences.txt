@@ -1,13 +1,25 @@
 Third-party software in the VNext player
 ========================================
 
-The player (VNext.app, VNext.exe or VNext-Linux.AppImage) has the software below built into it.
+The player (VNext.app, VNext.exe or VNext-Linux.AppImage) has the software below built into it, and
+the samples New game offers.
 Its licences let anyone use it in games, free or sold, and some of them ask for their notices to
 come with the program: here they all are. This file comes with the player (in its zip on GitHub,
 and inside the AppImage), the developer tools' Export the game puts it in each zip it makes, next
 to game.vnext, and their About shows it too.
 
 If a game uses fonts, images or sounds made by others, check their licences as well.
+
+
+The samples (New game's "With samples")
+---------------------------------------
+Music, pictures and sounds that come with the player, for New game to put into a game.
+The five songs are from "Big music pack for visual novel" by TERNOX
+(https://ternox.itch.io/vn-music), given to the public domain under CC0 1.0
+(https://creativecommons.org/publicdomain/zero/1.0/): free to use, change and sell, with no
+credit needed (the samples' credits name TERNOX all the same).
+The cast, the places, the menus' and the phone's pictures, and the sounds were made for VNext
+and are VNext's own: the zlib licence, as VNext is. Use them in any game, free or sold.
 
 
 SDL 3.4.18, SDL_image 3.4.8, SDL_ttf 3.2.2 and SDL_mixer 3.2.4

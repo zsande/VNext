@@ -1024,7 +1024,7 @@ private:
     [[nodiscard]] std::string ownPlayer() const;
     [[nodiscard]] static std::string exportGame(const ExportPlan& plan);
     void startExport();
-    void newGame(bool sample); // New game: an empty game folder next to VNext, or the sample (Sample.hpp), opened
+    void newGame(bool sample); // New game: a game folder next to VNext, empty or with the samples (Sample.hpp), opened
     // ...its app on the phone, as the ready-made phone has one (the gallery's...), when the game has the phone
     void addToPhone(std::string_view name, const std::function<bool(std::string_view)>& uses, bool timed, std::span<const std::string> controls);
     // The sizes of the texts without one in screen lines written in pixels, for placesFromPixels (ReadyMadeScreens.cpp).
